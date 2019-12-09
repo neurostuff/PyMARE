@@ -18,12 +18,8 @@ def meta_regression(y, v, X=None, method='ML', beta=None, tau2=None,
 
     method = method.lower()
 
-    # Analytical estimation methods
-    if method in ['dl']:
-        pass
-
     # Optimization-based estimation methods
-    else:
+    if method in ['ml', 'reml']:
 
         # use D-L estimate for initial values
         if tau2 is None or beta is None:
@@ -45,5 +41,12 @@ def meta_regression(y, v, X=None, method='ML', beta=None, tau2=None,
         res = sp.optimize.minimize(ll_func, theta_init, args, **optim_kwargs).x
         beta, tau = res[:-1], float(res[-1])
         tau = np.max([tau, 0])
+
+    # Analytical estimation methods
+    else:
+        estimator = {
+            'dl': dersimonian_laird
+        }[method]
+        beta, tau = estimator(y, v, X)
 
     return beta, tau
