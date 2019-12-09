@@ -19,8 +19,13 @@ class Dataset:
 
     def _get_X(self, X):
         if self.add_intercept:
-            intercept = np.ones((len(y), 1))
-            X = intercept if X is None else np.c_[intercept, X]
+            intercept = np.ones((len(self.y), 1))
+            if X is None:
+                X = intercept
+            else:
+                if len(X.shape) == 1:
+                    X = X[:, np.newaxis]
+                X = np.c_[intercept, X]
         if X is None:
             raise ValueError("No fixed predictors found. If no X matrix is "
                             "provided, add_intercept must be True!")
