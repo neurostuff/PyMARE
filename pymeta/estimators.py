@@ -1,20 +1,32 @@
 import numpy as np
 
 
-def fixed_effects(y, v):
+def fixed_effects_meta_analysis(y, v):
     """ Standard inverse variance-weighted fixed-effects meta-analysis. """
     w = 1./v
-    return y.dot(w) / w.sum()  
+    return y.dot(w) / w.sum()
 
 
-def dersimonian_laird(y, v):
+def weighted_least_squares(y, v, X, tau2=0):
+    """ Weighted least-squares estimation of fixed effects. """
+    w = 1. / (v + tau2)
+    return (np.linalg.pinv((X.T * w).dot(X)).dot(X.T) * w).dot(y)
+
+
+def dersimonian_laird(y, v, X):
     """ DerSimonian-Laird random effects estimator. """
     k = len(y)
-    # fixed-effects estimate of mu
+    p = X.shape[1]
+    # WLS estimate of beta with tau^2 = 0
+    beta_wls = weighted_least_squares(y, v, X)
+    # Cochrane's Q
     w = 1. / v
     w_sum = w.sum()
-    mu_fe = y.dot(w) / w_sum
-    # Cochrane's Q
-    Q = (w * (y - mu_fe)**2).sum()
-    tau_dl = np.max([0., (Q - k + 1) / (w_sum - ((w**2).sum() / w_sum))])
-    return mu_fe, tau_dl
+    Q = (w * (y - X.dot(beta_wls))**2).sum()
+    # D-L estimate of tau^2
+    precision = np.linalg.pinv((X.T * w).dot(X))
+    A = w_sum - np.trace((precision.dot(X.T) * w**2).dot(X))
+    tau_dl = np.max([0., (Q - k + p) / A])
+    # Re-estimate beta with tau^2 estimate
+    beta_dl = weighted_least_squares(y, v, X, tau2=tau_dl)
+    return beta_dl, tau_dl
