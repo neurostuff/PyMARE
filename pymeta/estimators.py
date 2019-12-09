@@ -36,17 +36,17 @@ class DerSimonianLaird(Estimator):
     def fit(self, dataset):
         y, X, v, k, p = dataset.y, dataset.X, dataset.v, dataset.k, dataset.p
         # WLS estimate of beta with tau^2 = 0
-        beta_wls = WeightedLeastSquares(0).fit(dataset)
+        beta_wls, _ = WeightedLeastSquares(0).fit(dataset)
         # Cochrane's Q
         w = 1. / v
         w_sum = w.sum()
-        Q = (w * (y - X.dot(beta_wls))**2).sum()
+        Q = (w * (y - X.dot(beta_wls)) ** 2).sum()
         # D-L estimate of tau^2
         precision = np.linalg.pinv((X.T * w).dot(X))
         A = w_sum - np.trace((precision.dot(X.T) * w**2).dot(X))
         tau_dl = np.max([0., (Q - k + p) / A])
         # Re-estimate beta with tau^2 estimate
-        beta_dl = WeightedLeastSquares(tau_dl).fit(dataset)
+        beta_dl, _ = WeightedLeastSquares(tau_dl).fit(dataset)
         return beta_dl, tau_dl
 
 
@@ -71,6 +71,7 @@ class LikelihoodEstimator(Estimator):
 
         theta_init = np.r_[beta, tau2]
 
-        res = minimize(self.ll_func, theta_init, dataset, self.kwargs).x
+        res = minimize(self.ll_func, theta_init, dataset, **self.kwargs).x
         beta, tau = res[:-1], float(res[-1])
         tau = np.max([tau, 0])
+        return beta, tau
