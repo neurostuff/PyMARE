@@ -2,7 +2,7 @@ import numpy as np
 import scipy as sp
 
 from .estimators import (WeightedLeastSquares, DerSimonianLaird,
-                         LikelihoodEstimator)
+                         MLMetaRegression, REMLMetaRegression)
 
 
 class Dataset:
@@ -41,7 +41,11 @@ def meta_regression(y, v, X=None, method='ML', beta=None, tau2=None,
 
     # Optimization-based estimation methods
     if method in ['ml', 'reml']:
-        est = LikelihoodEstimator(method, beta, tau2, **optim_kwargs)
+        EstimatorClass = {
+            'ml': MLMetaRegression,
+            'reml': REMLMetaRegression
+        }[method]
+        est = EstimatorClass(beta, tau2, **optim_kwargs)
     # Analytical estimation methods
     else:
         EstimatorClass = {

@@ -3,8 +3,6 @@ from abc import ABCMeta, abstractmethod
 import numpy as np
 from scipy.optimize import minimize
 
-from .likelihoods import meta_regression_ml_nll, meta_regression_reml_nll
-
 
 class Estimator(metaclass=ABCMeta):
 
@@ -52,15 +50,15 @@ class DerSimonianLaird(Estimator):
 
 class LikelihoodEstimator(Estimator):
 
-    def __init__(self, method='DL', beta=None, tau2=None, **kwargs):
-        self.method = method
+    def __init__(self, beta=None, tau2=None, **kwargs):
         self.beta = beta
         self.tau2 = tau2
         self.kwargs = kwargs
-        self.ll_func = {
-            'ml': meta_regression_ml_nll,
-            'reml': meta_regression_reml_nll
-        }[self.method]
+
+    @abstractmethod
+    def nll(theta, dataset):
+        """Negative log-likelihood function."""
+        pass
 
     def fit(self, dataset):
         # use D-L estimate for initial values
@@ -71,7 +69,36 @@ class LikelihoodEstimator(Estimator):
 
         theta_init = np.r_[beta, tau2]
 
-        res = minimize(self.ll_func, theta_init, dataset, **self.kwargs).x
+        res = minimize(self.nll, theta_init, dataset, **self.kwargs).x
         beta, tau = res[:-1], float(res[-1])
         tau = np.max([tau, 0])
         return beta, tau
+
+
+class MLMetaRegression(LikelihoodEstimator):
+
+    @staticmethod
+    def nll(theta, dataset):
+        """ ML negative log-likelihood for meta-regression model. """
+        y, v, X, k = dataset.y, dataset.v, dataset.X, dataset.k
+        sigma = np.diag(v)
+        beta, tau = theta[:-1], theta[-1]
+        if tau < 0:
+            tau = 0
+        W = np.linalg.inv(sigma + tau * np.eye(k))
+        R = y - X.dot(beta)
+        ll = 0.5 * np.log(np.linalg.det(W)) - 0.5 * R.T.dot(W).dot(R)
+        return -ll
+
+
+class REMLMetaRegression(LikelihoodEstimator):
+
+    @staticmethod
+    def nll(theta, dataset):
+        """ REML negative log-likelihood for meta-regression model. """
+        v, X, k = dataset.v, dataset.X, dataset.k
+        sigma = np.diag(v)
+        ll_ = MLMetaRegression.nll(theta, dataset)
+        W = np.linalg.inv(sigma + theta[-1] * np.eye(k))
+        F = X.T.dot(W).dot(X)
+        return ll_ + 0.5 * np.log(np.linalg.det(F))
