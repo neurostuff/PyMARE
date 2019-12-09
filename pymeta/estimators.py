@@ -3,11 +3,17 @@ from abc import ABCMeta, abstractmethod
 import numpy as np
 from scipy.optimize import minimize
 
+from .results import MetaRegressionResults
+
 
 class Estimator(metaclass=ABCMeta):
 
-    @abstractmethod
     def fit(self, dataset):
+        beta, tau2 = self._fit(dataset)
+        return MetaRegressionResults(self, dataset, beta, tau2)
+
+    @abstractmethod
+    def _fit(self, dataset):
         pass
 
     def set_params(self, **params):
@@ -21,7 +27,7 @@ class WeightedLeastSquares(Estimator):
     def __init__(self, tau2=0):
         self.tau2 = tau2
 
-    def fit(self, dataset):
+    def _fit(self, dataset):
         v, tau2, X, y = dataset.v, self.tau2, dataset.X, dataset.y
         w = 1. / (v + tau2)
         beta = (np.linalg.pinv((X.T * w).dot(X)).dot(X.T) * w).dot(y)
@@ -31,10 +37,10 @@ class WeightedLeastSquares(Estimator):
 class DerSimonianLaird(Estimator):
     """ DerSimonian-Laird meta-regression estimator. """
 
-    def fit(self, dataset):
+    def _fit(self, dataset):
         y, X, v, k, p = dataset.y, dataset.X, dataset.v, dataset.k, dataset.p
         # WLS estimate of beta with tau^2 = 0
-        beta_wls, _ = WeightedLeastSquares(0).fit(dataset)
+        beta_wls = WeightedLeastSquares(0).fit(dataset).beta
         # Cochrane's Q
         w = 1. / v
         w_sum = w.sum()
@@ -44,7 +50,7 @@ class DerSimonianLaird(Estimator):
         A = w_sum - np.trace((precision.dot(X.T) * w**2).dot(X))
         tau_dl = np.max([0., (Q - k + p) / A])
         # Re-estimate beta with tau^2 estimate
-        beta_dl, _ = WeightedLeastSquares(tau_dl).fit(dataset)
+        beta_dl = WeightedLeastSquares(tau_dl).fit(dataset).beta
         return beta_dl, tau_dl
 
 
@@ -60,12 +66,12 @@ class LikelihoodEstimator(Estimator):
         """Negative log-likelihood function."""
         pass
 
-    def fit(self, dataset):
+    def _fit(self, dataset):
         # use D-L estimate for initial values
         if self.tau2 is None or self.beta is None:
-            _beta_dl, _tau2_dl = DerSimonianLaird().fit(dataset)
-            beta = _beta_dl if self.beta is None else self.beta
-            tau2 = _tau2_dl if self.beta is None else self.tau2
+            results = DerSimonianLaird().fit(dataset)
+            beta = results.beta if self.beta is None else self.beta
+            tau2 = results.tau2 if self.beta is None else self.tau2
 
         theta_init = np.r_[beta, tau2]
 

@@ -54,18 +54,3 @@ def meta_regression(y, v, X=None, method='ML', beta=None, tau2=None,
         est = EstimatorClass()
 
     return est.fit(dataset)
-
-
-class MetaRegressionResults:
-
-    def __init__(self, estimator, dataset, beta, tau):
-        self.estimator = estimator
-        self.dataset = dataset
-        self.beta = beta
-        self.tau = tau
-
-    def summary(self):
-        pass
-
-    def plot(self):
-        pass

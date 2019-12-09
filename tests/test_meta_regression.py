@@ -19,16 +19,19 @@ def test_meta_regression_smoke_test():
     X = np.array([1, 1, 2, 2, 4, 4, 2.8, 2.8])
 
     # ML
-    beta, tau2 = meta_regression(y, v, X, 'ML')
+    results = meta_regression(y, v, X, 'ML')
+    beta, tau2 = results.beta, results.tau2
     assert np.allclose(beta, [-0.1072, 0.7653], atol=1e-4)
     assert np.allclose(tau2, 7.7649, atol=1e-4)
 
     # REML
-    beta, tau2 = meta_regression(y, v, X, 'REML')
+    results = meta_regression(y, v, X, 'REML')
+    beta, tau2 = results.beta, results.tau2
     assert np.allclose(beta, [-0.1066, 0.7700], atol=1e-4)
     assert np.allclose(tau2, 10.9499, atol=1e-4)
 
     # DerSimonian-Laird
-    beta, tau2 = meta_regression(y, v, X, 'DL')
+    results = meta_regression(y, v, X, 'DL')
+    beta, tau2 = results.beta, results.tau2
     assert np.allclose(beta, [-0.1070, 0.7664], atol=1e-4)
     assert np.allclose(tau2, 8.3627, atol=1e-4)
