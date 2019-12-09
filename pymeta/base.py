@@ -1,8 +1,8 @@
 import numpy as np
 import scipy as sp
 
-from .estimators import WeightedLeastSquares, DerSimonianLaird
-from .likelihoods import meta_regression_ml_nll, meta_regression_reml_nll
+from .estimators import (WeightedLeastSquares, DerSimonianLaird,
+                         LikelihoodEstimator)
 
 
 class Dataset:
@@ -36,33 +36,12 @@ def meta_regression(y, v, X=None, method='ML', beta=None, tau2=None,
 
     # Optimization-based estimation methods
     if method in ['ml', 'reml']:
-
-        # use D-L estimate for initial values
-        if tau2 is None or beta is None:
-            _beta_dl, _tau2_dl = DerSimonianLaird().fit(dataset)
-            if beta is None:
-                beta = _beta_dl
-            if tau2 is None:
-                tau2 = _tau2_dl
-
-        theta_init = np.r_[beta, tau2]
-
-        ll_func = {
-            'ml': meta_regression_ml_nll,
-            'reml': meta_regression_reml_nll
-        }[method]
-
-        res = sp.optimize.minimize(ll_func, theta_init, dataset,
-                                   **optim_kwargs).x
-        beta, tau = res[:-1], float(res[-1])
-        tau = np.max([tau, 0])
-
+        estimator = LikelihoodEstimator(method=method)
     # Analytical estimation methods
     else:
-        Estimator = {
+        EstimatorClass = {
             'dl': DerSimonianLaird
         }[method]
-        est = Estimator()
-        beta, tau = est.fit(dataset)
+        est = EstimatorClass()
 
-    return beta, tau
+    return est.fit(dataset)
