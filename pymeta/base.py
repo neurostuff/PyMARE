@@ -6,13 +6,15 @@ from .likelihoods import meta_regression_ml_nll, meta_regression_reml_nll
 
 
 def meta_regression(y, v, X=None, method='ML', beta=None, tau2=None,
-                    **optim_kwargs):
+                    add_intercept=True, **optim_kwargs):
 
-    intercept = np.ones((len(y), 1))
+    if add_intercept:
+        intercept = np.ones((len(y), 1))
+        X = intercept if X is None else np.c_[intercept, X]
+
     if X is None:
-        X = intercept
-    else:
-        X = np.c_[intercept, X]
+        raise ValueError("No fixed predictors found. If no X matrix is "
+                         "provided, add_intercept must be True!")
 
     method = method.lower()
 
