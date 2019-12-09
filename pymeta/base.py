@@ -36,7 +36,7 @@ def meta_regression(y, v, X=None, method='ML', beta=None, tau2=None,
 
     # Optimization-based estimation methods
     if method in ['ml', 'reml']:
-        estimator = LikelihoodEstimator(method=method)
+        est = LikelihoodEstimator(method, beta, tau2, **optim_kwargs)
     # Analytical estimation methods
     else:
         EstimatorClass = {
