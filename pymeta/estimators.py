@@ -23,10 +23,11 @@ class WeightedLeastSquares(Estimator):
     def fit(self, dataset):
         v, tau2, X, y = dataset.v, self.tau2, dataset.X, dataset.y
         w = 1. / (v + tau2)
-        return (np.linalg.pinv((X.T * w).dot(X)).dot(X.T) * w).dot(y)
+        beta = (np.linalg.pinv((X.T * w).dot(X)).dot(X.T) * w).dot(y)
+        return beta, None
 
 
-class DersimonianLaird(Estimator):
+class DerSimonianLaird(Estimator):
     """ DerSimonian-Laird meta-regression estimator. """
 
     def fit(self, dataset):
