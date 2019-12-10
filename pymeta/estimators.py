@@ -61,6 +61,7 @@ class LikelihoodEstimator(Estimator):
         self.tau2 = tau2
         self.kwargs = kwargs
 
+    @staticmethod
     @abstractmethod
     def nll(theta, dataset):
         """Negative log-likelihood function."""

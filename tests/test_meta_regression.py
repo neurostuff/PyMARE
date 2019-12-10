@@ -1,7 +1,17 @@
 import numpy as np
+import pytest
 
 from pymeta import Dataset, meta_regression
 from pymeta.results import q_profile
+from pymeta.estimators import MLMetaRegression
+
+
+@pytest.fixture(scope='module')
+def dataset():
+    y = np.array([-1, 0.5, 0.5, 0.5, 1, 1, 2, 10])
+    v = np.array([1, 1, 2.4, 0.5, 1, 1, 1.2, 1.5])
+    X = np.array([1, 1, 2, 2, 4, 4, 2.8, 2.8])
+    return Dataset(y, v, X)
 
 
 def result_matches_target(result, target):
@@ -38,10 +48,7 @@ def test_meta_regression_smoke_test():
     assert np.allclose(tau2, 8.3627, atol=1e-4)
 
 
-def test_q_profile():
-    y = np.array([-1, 0.5, 0.5, 0.5, 1, 1, 2, 10])
-    v = np.array([1, 1, 2.4, 0.5, 1, 1, 1.2, 1.5])
-    X = np.array([1, 1, 2, 2, 4, 4, 2.8, 2.8])
-    results = meta_regression(y, v, X, 'ML')
+def test_q_profile(dataset):
+    results = MLMetaRegression().fit(dataset)
     ci = q_profile(results)
     assert np.allclose(ci, [3.8076, 59.6160], atol=1e-4)

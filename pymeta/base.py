@@ -33,7 +33,8 @@ class Dataset:
 
 
 def meta_regression(y, v, X=None, method='ML', beta=None, tau2=None,
-                    add_intercept=True, **optim_kwargs):
+                    add_intercept=True, alpha=0.05, ci_method='QP',
+                    **optim_kwargs):
 
     dataset = Dataset(y, v, X, add_intercept)
 
