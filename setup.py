@@ -3,8 +3,8 @@
 from setuptools import setup, find_packages
 
 
-DISTNAME = 'pymeta'
-DESCRIPTION = 'Meta-regression in Python'
+DISTNAME = 'pymares'
+DESCRIPTION = 'Python Meta-Analysis and Regression Engine'
 MAINTAINER = 'Tal Yarkoni'
 MAINTAINER_EMAIL = 'tyarkoni@gmail.com'
 LICENSE = 'MIT'

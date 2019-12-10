@@ -56,9 +56,9 @@ class DerSimonianLaird(Estimator):
 
 class LikelihoodEstimator(Estimator):
 
-    def __init__(self, beta=None, tau2=None, **kwargs):
-        self.beta = beta
-        self.tau2 = tau2
+    def __init__(self, **kwargs):
+        self.beta = None
+        self.tau2 = None
         self.kwargs = kwargs
 
     @staticmethod

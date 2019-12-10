@@ -8,7 +8,7 @@ from .estimators import (WeightedLeastSquares, DerSimonianLaird,
 
 class Dataset:
 
-    def __init__(self, y, v, X=None, add_intercept=True):
+    def __init__(self, y, v=None, X=None, add_intercept=True):
         self.y = y
         self.v = v
         self.add_intercept = add_intercept
@@ -32,9 +32,8 @@ class Dataset:
         return X
 
 
-def meta_regression(y, v, X=None, method='ML', beta=None, tau2=None,
-                    add_intercept=True, alpha=0.05, ci_method='QP',
-                    **optim_kwargs):
+def meta_regression(y, v=None, X=None, method='ML', add_intercept=True,
+                    alpha=0.05, ci_method='QP', tau2=None, **optim_kwargs):
 
     dataset = Dataset(y, v, X, add_intercept)
 
@@ -46,12 +45,14 @@ def meta_regression(y, v, X=None, method='ML', beta=None, tau2=None,
             'ml': MLMetaRegression,
             'reml': REMLMetaRegression
         }[method]
-        est = EstimatorClass(beta, tau2, **optim_kwargs)
+        est = EstimatorClass(tau2, **optim_kwargs)
     # Analytical estimation methods
     else:
-        EstimatorClass = {
-            'dl': DerSimonianLaird
+        if method == 'fe':
+            method = 'wls'
+        est = {
+            'dl': DerSimonianLaird(),
+            'wls': WeightedLeastSquares(tau2 or 0.),
         }[method]
-        est = EstimatorClass()
 
     return est.fit(dataset)

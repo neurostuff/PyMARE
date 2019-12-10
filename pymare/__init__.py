@@ -1,4 +1,4 @@
-from .base import Dataset, meta_regression
+from .core import Dataset, meta_regression
 
 __all__ = [
     'Dataset',
