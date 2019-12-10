@@ -40,7 +40,7 @@ class DerSimonianLaird(Estimator):
     def _fit(self, dataset):
         y, X, v, k, p = dataset.y, dataset.X, dataset.v, dataset.k, dataset.p
         # WLS estimate of beta with tau^2 = 0
-        beta_wls = WeightedLeastSquares(0).fit(dataset).beta
+        beta_wls = WeightedLeastSquares(0).fit(dataset).beta['est']
         # Cochrane's Q
         w = 1. / v
         w_sum = w.sum()
@@ -50,7 +50,7 @@ class DerSimonianLaird(Estimator):
         A = w_sum - np.trace((precision.dot(X.T) * w**2).dot(X))
         tau_dl = np.max([0., (Q - k + p) / A])
         # Re-estimate beta with tau^2 estimate
-        beta_dl = WeightedLeastSquares(tau_dl).fit(dataset).beta
+        beta_dl = WeightedLeastSquares(tau_dl).fit(dataset).beta['est']
         return beta_dl, tau_dl
 
 
@@ -71,8 +71,8 @@ class LikelihoodEstimator(Estimator):
         # use D-L estimate for initial values
         if self.tau2 is None or self.beta is None:
             results = DerSimonianLaird().fit(dataset)
-            beta = results.beta if self.beta is None else self.beta
-            tau2 = results.tau2 if self.beta is None else self.tau2
+            beta = results.beta['est'] if self.beta is None else self.beta
+            tau2 = results.tau2['est'] if self.beta is None else self.tau2
 
         theta_init = np.r_[beta, tau2]
 
