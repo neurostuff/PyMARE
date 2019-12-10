@@ -12,7 +12,10 @@ class Dataset:
         self.y = y
         self.v = v
         self.add_intercept = add_intercept
-        self.X = self._get_X(X)
+
+        X = self._get_X(X)
+        self.X = X.values
+        self.X_names = X.columns.tolist()
 
         # Precompute commonly used quantities
         self.k = len(y)
