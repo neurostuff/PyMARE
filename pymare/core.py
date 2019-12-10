@@ -45,7 +45,7 @@ def meta_regression(y, v=None, X=None, method='ML', add_intercept=True,
             'ml': MLMetaRegression,
             'reml': REMLMetaRegression
         }[method]
-        est = EstimatorClass(tau2, **optim_kwargs)
+        est = EstimatorClass(**optim_kwargs)
     # Analytical estimation methods
     else:
         if method == 'fe':
