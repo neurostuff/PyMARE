@@ -1,5 +1,6 @@
+"""Core classes and functions."""
+
 import numpy as np
-import scipy as sp
 import pandas as pd
 
 from .estimators import (WeightedLeastSquares, DerSimonianLaird,

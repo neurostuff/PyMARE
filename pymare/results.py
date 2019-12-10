@@ -1,7 +1,5 @@
 """Tools for representing and manipulating meta-regression results."""
 
-from collections import namedtuple
-
 import numpy as np
 import pandas as pd
 from scipy.optimize import root
@@ -84,5 +82,5 @@ def q_gen(tau2, dataset):
     from .estimators import WeightedLeastSquares
     beta = WeightedLeastSquares(tau2).fit(dataset).beta['est']
     v, y, X = dataset.v, dataset.y, dataset.X
-    w = 1. / (dataset.v + tau2)
+    w = 1. / (v + tau2)
     return (w * (y - X.dot(beta)) ** 2).sum()
