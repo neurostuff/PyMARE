@@ -87,14 +87,13 @@ class MLMetaRegression(LikelihoodEstimator):
     @staticmethod
     def nll(theta, dataset):
         """ ML negative log-likelihood for meta-regression model. """
-        y, v, X, k = dataset.y, dataset.v, dataset.X, dataset.k
-        sigma = np.diag(v)
+        y, v, X = dataset.y, dataset.v, dataset.X
         beta, tau = theta[:-1], theta[-1]
         if tau < 0:
             tau = 0
-        W = np.linalg.inv(sigma + tau * np.eye(k))
+        w = 1. / (v + tau)
         R = y - X.dot(beta)
-        ll = 0.5 * np.log(np.linalg.det(W)) - 0.5 * R.T.dot(W).dot(R)
+        ll = 0.5 * np.log(w).sum() - 0.5 *(R * w * R).sum()
         return -ll
 
 
@@ -103,9 +102,8 @@ class REMLMetaRegression(LikelihoodEstimator):
     @staticmethod
     def nll(theta, dataset):
         """ REML negative log-likelihood for meta-regression model. """
-        v, X, k = dataset.v, dataset.X, dataset.k
-        sigma = np.diag(v)
+        v, X, tau2 = dataset.v, dataset.X, theta[-1]
         ll_ = MLMetaRegression.nll(theta, dataset)
-        W = np.linalg.inv(sigma + theta[-1] * np.eye(k))
-        F = X.T.dot(W).dot(X)
+        w = 1. / (v + tau2)
+        F = (X.T * w).dot(X)
         return ll_ + 0.5 * np.log(np.linalg.det(F))
