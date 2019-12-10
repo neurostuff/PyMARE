@@ -1,5 +1,6 @@
 import numpy as np
 import scipy as sp
+import pandas as pd
 
 from .estimators import (WeightedLeastSquares, DerSimonianLaird,
                          MLMetaRegression, REMLMetaRegression)
@@ -18,17 +19,13 @@ class Dataset:
         self.p = self.X.shape[1]
 
     def _get_X(self, X):
-        if self.add_intercept:
-            intercept = np.ones((len(self.y), 1))
-            if X is None:
-                X = intercept
-            else:
-                if len(X.shape) == 1:
-                    X = X[:, np.newaxis]
-                X = np.c_[intercept, X]
-        if X is None:
+        if X is None and not self.add_intercept:
             raise ValueError("No fixed predictors found. If no X matrix is "
-                            "provided, add_intercept must be True!")
+                             "provided, add_intercept must be True!")
+        X = pd.DataFrame(X)
+        if self.add_intercept:
+            intcpt = pd.DataFrame({'intercept': np.ones(len(self.y))})
+            X = pd.concat([intcpt, X], axis=1)
         return X
 
 
