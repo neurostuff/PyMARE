@@ -55,4 +55,6 @@ def meta_regression(y, v=None, X=None, method='ML', add_intercept=True,
             'wls': WeightedLeastSquares(tau2 or 0.),
         }[method]
 
-    return est.fit(dataset)
+    results = est.fit(dataset)
+    results.compute_stats(method=ci_method, alpha=alpha)
+    return results
