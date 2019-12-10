@@ -1,6 +1,7 @@
 import numpy as np
 
 from pymeta import Dataset, meta_regression
+from pymeta.results import q_profile
 
 
 def result_matches_target(result, target):
@@ -35,3 +36,12 @@ def test_meta_regression_smoke_test():
     beta, tau2 = results.beta, results.tau2
     assert np.allclose(beta, [-0.1070, 0.7664], atol=1e-4)
     assert np.allclose(tau2, 8.3627, atol=1e-4)
+
+
+def test_q_profile():
+    y = np.array([-1, 0.5, 0.5, 0.5, 1, 1, 2, 10])
+    v = np.array([1, 1, 2.4, 0.5, 1, 1, 1.2, 1.5])
+    X = np.array([1, 1, 2, 2, 4, 4, 2.8, 2.8])
+    results = meta_regression(y, v, X, 'ML')
+    ci = q_profile(results)
+    assert np.allclose(ci, [3.8076, 59.6160], atol=1e-4)

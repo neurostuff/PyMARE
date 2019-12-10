@@ -31,7 +31,7 @@ class WeightedLeastSquares(Estimator):
         v, tau2, X, y = dataset.v, self.tau2, dataset.X, dataset.y
         w = 1. / (v + tau2)
         beta = (np.linalg.pinv((X.T * w).dot(X)).dot(X.T) * w).dot(y)
-        return beta, None
+        return beta, self.tau2
 
 
 class DerSimonianLaird(Estimator):
