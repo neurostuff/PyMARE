@@ -27,15 +27,20 @@ class MetaRegressionResults:
 
     def to_df(self):
         fixed = self.beta.copy()
-        fixed['name'] = self.dataset.X.columns
+        fixed['name'] = self.dataset.X_names
         fixed = pd.DataFrame(fixed)
+
         tau2 = pd.DataFrame(pd.Series(self.tau2)).T
         tau2['name'] = 'tau^2'
+
         df = pd.concat([fixed, tau2], axis=0, sort=False)
-        df = df.loc[:, ['name', 'est', 'se', 'ci_l', 'ci_u']]
+        df = df.loc[:, ['name', 'est', 'se', 'z', 'p', 'ci_l', 'ci_u']]
         ci_l = 'ci_{:.6g}'.format(self.alpha / 2)
         ci_u = 'ci_{:.6g}'.format(1 - self.alpha / 2)
-        df.columns = ['name', 'estimate', 'se', ci_l, ci_u]
+        df.columns = ['name', 'estimate', 'se', 'z-score', 'p-val', ci_l, ci_u]
+
+        # Derived statistics
+
         return df
 
     def compute_stats(self, method=None, alpha=None):
@@ -51,11 +56,14 @@ class MetaRegressionResults:
     def _compute_beta_stats(self):
         v, X, alpha = self.dataset.v, self.dataset.X, self.alpha
         w = 1. / (v + self.tau2['est'])
+        estimate = self.beta['est']
         se = np.sqrt(np.diag(np.linalg.pinv((X.T * w).dot(X))))
         z_se = ss.norm.ppf(1 - alpha / 2)
         self.beta['se'] = se
-        self.beta['ci_l'] = self.beta['est'] - z_se * se
-        self.beta['ci_u'] = self.beta['est'] + z_se * se
+        self.beta['ci_l'] = estimate - z_se * se
+        self.beta['ci_u'] = estimate + z_se * se
+        self.beta['z'] = z = estimate / se
+        self.beta['p'] = 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
 
     def _compute_tau2_stats(self):
         self._q_profile()
@@ -78,11 +86,3 @@ def q_gen(tau2, dataset):
     v, y, X = dataset.v, dataset.y, dataset.X
     w = 1. / (dataset.v + tau2)
     return (w * (y - X.dot(beta)) ** 2).sum()
-
-
-
-
-
-
-def bootstrap_ci(results, alpha=0.05, samples=1000):
-    pass
