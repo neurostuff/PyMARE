@@ -8,9 +8,9 @@ import scipy.stats as ss
 
 class MetaRegressionResults:
 
-    def __init__(self, params, inputs, ci_method='QP', alpha=0.05):
+    def __init__(self, params, dataset, ci_method='QP', alpha=0.05):
         self.params = {name:{'est': val} for name, val in params.items()}
-        self.inputs = inputs
+        self.dataset = dataset
         self.ci_method = ci_method
         self.alpha = alpha
 
@@ -25,7 +25,7 @@ class MetaRegressionResults:
 
     def to_df(self):
         fixed = self.params['beta'].copy()
-        fixed['name'] = self.inputs.names
+        fixed['name'] = self.dataset.names
         fixed = pd.DataFrame(fixed)
 
         tau2 = pd.DataFrame(pd.Series(self.params['tau2'])).T
@@ -50,7 +50,7 @@ class MetaRegressionResults:
         self._compute_tau2_stats()
 
     def _compute_beta_stats(self):
-        v, X, alpha = self.inputs.variances, self.inputs.predictors, self.alpha
+        v, X, alpha = self.dataset.variances, self.dataset.predictors, self.alpha
         w = 1. / (v + self['tau2']['est'])
         estimate = self['beta']['est']
         se = np.sqrt(np.diag(np.linalg.pinv((X.T * w).dot(X))))
@@ -70,7 +70,7 @@ class MetaRegressionResults:
 
     def _q_profile(self):
         """Get tau^2 CIs via the Q-Profile method (Viechtbauer, 2007)."""
-        y, v, X = self.inputs[:3]
+        y, v, X = self.dataset.y, self.dataset.v, self.dataset.X
         k, p = X.shape
         df = k - p
         l_crit = ss.chi2.ppf(1 - self.alpha / 2, df)

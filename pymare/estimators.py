@@ -1,9 +1,31 @@
 """Meta-regression estimator classes."""
 
+from functools import wraps
+from inspect import getfullargspec
+
 import numpy as np
 from scipy.optimize import minimize
 
 
+def accepts_dataset(func):
+    '''Decorator that maps Dataset attributes to estimator arguments.'''
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        from .core import Dataset
+        if isinstance(args[0], Dataset):
+            dataset = args[0]
+            args = args[1:]
+            # Map available arguments onto target function's arguments
+            valid_args = set(['y', 'v', 'X']) | set(dataset.kwargs.keys())
+            arg_names = set(getfullargspec(func).args) & valid_args
+            dset_args = {name: getattr(dataset, name) for name in arg_names}
+            # Directly passed arguments take precedence over Dataset contents
+            kwargs = dict(dset_args, **kwargs)
+        return func(*args, **kwargs)
+    return wrapped
+
+
+@accepts_dataset
 def weighted_least_squares(y, v, X, tau2=0):
     """ Weighted least-squares estimation of fixed effects. """
     w = 1. / (v + tau2)
@@ -11,6 +33,7 @@ def weighted_least_squares(y, v, X, tau2=0):
     return {'beta': beta}
 
 
+@accepts_dataset
 def dersimonian_laird(y, v, X):
     k, p = X.shape
     beta_wls = weighted_least_squares(y, v, X, 0)['beta']
@@ -27,6 +50,7 @@ def dersimonian_laird(y, v, X):
     return {'beta': beta_dl, 'tau2': tau_dl}
 
 
+@accepts_dataset
 def likelihood_based(y, v, X, method='ml', beta=None, tau2=None, **kwargs):
     # use D-L estimate for initial values if none provided
     if tau2 is None or beta is None:
