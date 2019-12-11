@@ -5,6 +5,11 @@ import pandas as pd
 from scipy.optimize import root
 import scipy.stats as ss
 
+try:
+    import arviz as az
+except:
+    az = None
+
 from .stats import q_profile, q_gen
 
 
@@ -72,3 +77,25 @@ class MetaRegressionResults:
 
         self._compute_beta_stats()
         self._compute_tau2_stats()
+
+
+class BayesianMetaRegressionResults:
+
+    def __init__(self, data, dataset, ci=95):
+        self.data = data
+        self.dataset = dataset
+        self.ci = ci
+
+    def summary(self, include_theta=False, **kwargs):
+        var_names = ['beta', 'tau2']
+        if include_theta:
+            var_names.append('theta')
+        var_names = kwargs.pop('var_names', var_names)
+        return az.summary(self.data, var_names, **kwargs)
+
+    def plot(self, kind='trace', **kwargs):
+        name = 'plot_{}'.format(kind)
+        plotter = getattr(az, name)
+        if plotter is None:
+            raise ValueError("ArviZ has no plotting function '{}'.".format(name))
+        plotter(self.data, **kwargs)

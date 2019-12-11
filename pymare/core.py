@@ -7,7 +7,7 @@ import pandas as pd
 
 from .estimators import (weighted_least_squares, dersimonian_laird,
                          likelihood_based, stan)
-from .results import MetaRegressionResults
+from .results import MetaRegressionResults, BayesianMetaRegressionResults
 
 
 class Dataset:
@@ -73,6 +73,9 @@ def meta_regression(estimates, variances=None, predictors=None, names=None,
     estimates = estimator(dataset, )
 
     # Return results object with computed stats
-    results = MetaRegressionResults(estimates, dataset, ci_method, alpha)
-    results.compute_stats(method=ci_method, alpha=alpha)
+    if method == 'stan':
+        results = BayesianMetaRegressionResults(estimates, dataset)
+    else:
+        results = MetaRegressionResults(estimates, dataset, ci_method, alpha)
+        results.compute_stats(method=ci_method, alpha=alpha)
     return results

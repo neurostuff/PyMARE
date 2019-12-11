@@ -3,8 +3,10 @@
 import numpy as np
 try:
     from pystan import StanModel
+    import arviz as az
 except:
     StanModel = None
+    az = None
 
 from .estimators import accepts_dataset
 
@@ -16,6 +18,9 @@ class StanMetaRegression:
         if StanModel is None:
             raise ImportError("Unable to import PyStan package. Is it "
                               "installed?")
+        if az is None:
+            raise ValueError("Bayesian meta-regression results require the ArviZ"
+                             " library, which doesn't seem to be installed.")
         self.sampling_kwargs = sampling_kwargs
         self.model = None
         self.result_ = None
@@ -35,11 +40,11 @@ class StanMetaRegression:
         parameters {{
             vector[K] theta;
             vector[C] beta;
-            real<lower=0> tau;
+            real<lower=0> tau2;
         }}
         model {{
             y ~ normal(theta, sigma);
-            theta ~ normal(X * beta, tau);
+            theta ~ normal(X * beta, tau2);
         }}
         """
         self.model = StanModel(model_code=spec)
@@ -59,11 +64,12 @@ class StanMetaRegression:
         data['y'] = y
         data['sigma'] = v
 
-        self.result_ = self.model.sampling(data=data, **self.sampling_kwargs)
-        
+        result = self.model.sampling(data=data, **self.sampling_kwargs)
+        self.result_ = az.from_pystan(result)
+        return self.result_
 
 
 @accepts_dataset
 def stan(y, v, X, groups=None, **sampling_kwargs):
     model = StanMetaRegression(**sampling_kwargs)
-    model.fit(y, v, X, groups)
+    return model.fit(y, v, X, groups)
