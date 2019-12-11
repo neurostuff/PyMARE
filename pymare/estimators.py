@@ -1,111 +1,66 @@
 """Meta-regression estimator classes."""
 
-from abc import ABCMeta, abstractmethod
-
 import numpy as np
 from scipy.optimize import minimize
 
-from .results import MetaRegressionResults
 
-
-class Estimator(metaclass=ABCMeta):
-
-    def fit(self, dataset):
-        beta, tau2 = self._fit(dataset)
-        return MetaRegressionResults(self, dataset, beta, tau2)
-
-    @abstractmethod
-    def _fit(self, dataset):
-        pass
-
-    def set_params(self, **params):
-        for (key, value) in params.items():
-            setattr(self, key, value)
-
-
-class WeightedLeastSquares(Estimator):
+def weighted_least_squares(y, v, X, tau2=0):
     """ Weighted least-squares estimation of fixed effects. """
-
-    def __init__(self, tau2=0):
-        self.tau2 = tau2
-
-    def _fit(self, dataset):
-        v, tau2, X, y = dataset.v, self.tau2, dataset.X, dataset.y
-        w = 1. / (v + tau2)
-        beta = (np.linalg.pinv((X.T * w).dot(X)).dot(X.T) * w).dot(y)
-        return beta, self.tau2
+    w = 1. / (v + tau2)
+    beta = (np.linalg.pinv((X.T * w).dot(X)).dot(X.T) * w).dot(y)
+    return {'beta': beta}
 
 
-class DerSimonianLaird(Estimator):
-    """ DerSimonian-Laird meta-regression estimator. """
-
-    def _fit(self, dataset):
-        y, X, v, k, p = dataset.y, dataset.X, dataset.v, dataset.k, dataset.p
-        # WLS estimate of beta with tau^2 = 0
-        beta_wls = WeightedLeastSquares(0).fit(dataset).beta['est']
-        # Cochrane's Q
-        w = 1. / v
-        w_sum = w.sum()
-        Q = (w * (y - X.dot(beta_wls)) ** 2).sum()
-        # D-L estimate of tau^2
-        precision = np.linalg.pinv((X.T * w).dot(X))
-        A = w_sum - np.trace((precision.dot(X.T) * w**2).dot(X))
-        tau_dl = np.max([0., (Q - k + p) / A])
-        # Re-estimate beta with tau^2 estimate
-        beta_dl = WeightedLeastSquares(tau_dl).fit(dataset).beta['est']
-        return beta_dl, tau_dl
+def dersimonian_laird(y, v, X):
+    k, p = X.shape
+    beta_wls = weighted_least_squares(y, v, X, 0)['beta']
+    # Cochrane's Q
+    w = 1. / v
+    w_sum = w.sum()
+    Q = (w * (y - X.dot(beta_wls)) ** 2).sum()
+    # D-L estimate of tau^2
+    precision = np.linalg.pinv((X.T * w).dot(X))
+    A = w_sum - np.trace((precision.dot(X.T) * w**2).dot(X))
+    tau_dl = np.max([0., (Q - k + p) / A])
+    # Re-estimate beta with tau^2 estimate
+    beta_dl = weighted_least_squares(y, v, X, tau_dl)['beta']
+    return {'beta': beta_dl, 'tau2': tau_dl}
 
 
-class LikelihoodEstimator(Estimator):
+def likelihood_based(y, v, X, method='ml', beta=None, tau2=None, **kwargs):
+    # use D-L estimate for initial values if none provided
+    if tau2 is None or beta is None:
+        est_DL = dersimonian_laird(y, v, X)
+        beta = est_DL['beta'] if beta is None else beta
+        tau2 = est_DL['tau2'] if tau2 is None else tau2
 
-    def __init__(self, **kwargs):
-        self.beta = None
-        self.tau2 = None
-        self.kwargs = kwargs
+    ll_func = globals().get('_{}_nll'.format(method.lower()))
+    if ll_func is None:
+        raise ValueError("No log-likelihood function defined for method '{}'."
+                         .format(method))
 
-    @staticmethod
-    @abstractmethod
-    def nll(theta, dataset):
-        """Negative log-likelihood function."""
-        pass
-
-    def _fit(self, dataset):
-        # use D-L estimate for initial values
-        if self.tau2 is None or self.beta is None:
-            results = DerSimonianLaird().fit(dataset)
-            beta = results.beta['est'] if self.beta is None else self.beta
-            tau2 = results.tau2['est'] if self.beta is None else self.tau2
-
-        theta_init = np.r_[beta, tau2]
-
-        res = minimize(self.nll, theta_init, dataset, **self.kwargs).x
-        beta, tau = res[:-1], float(res[-1])
-        tau = np.max([tau, 0])
-        return beta, tau
+    theta_init = np.r_[beta, tau2]
+    res = minimize(ll_func, theta_init, (y, v, X), **kwargs).x
+    beta, tau = res[:-1], float(res[-1])
+    tau = np.max([tau, 0])
+    return {'beta': beta, 'tau2': tau}
 
 
-class MLMetaRegression(LikelihoodEstimator):
-
-    @staticmethod
-    def nll(theta, dataset):
-        """ ML negative log-likelihood for meta-regression model. """
-        y, v, X = dataset.y, dataset.v, dataset.X
-        beta, tau = theta[:-1], theta[-1]
-        if tau < 0:
-            tau = 0
-        w = 1. / (v + tau)
-        R = y - X.dot(beta)
-        ll = 0.5 * np.log(w).sum() - 0.5 *(R * w * R).sum()
-        return -ll
+def _ml_nll(theta, y, v, X):
+    """ ML negative log-likelihood for meta-regression model. """
+    beta, tau2 = theta[:-1], theta[-1]
+    if tau2 < 0:
+        tau2 = 0
+    w = 1. / (v + tau2)
+    R = y - X.dot(beta)
+    ll = 0.5 * (np.log(w).sum() - (R * w * R).sum())
+    return -ll
 
 
-class REMLMetaRegression(LikelihoodEstimator):
-
-    @staticmethod
-    def nll(theta, dataset):
-        """ REML negative log-likelihood for meta-regression model. """
-        v, X, tau2 = dataset.v, dataset.X, theta[-1]
-        ll_ = MLMetaRegression.nll(theta, dataset)
-        w = 1. / (v + tau2)
-        F = (X.T * w).dot(X)
-        return ll_ + 0.5 * np.log(np.linalg.det(F))
+def _reml_nll(theta, y, v, X):
+    """ REML negative log-likelihood for meta-regression model. """
+    ll_ = _ml_nll(theta, y, v, X)
+    tau2 = theta[-1]
+    w = 1. / (v + tau2)
+    F = (X.T * w).dot(X)
+    return ll_ + 0.5 * np.log(np.linalg.det(F))

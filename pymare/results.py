@@ -8,9 +8,7 @@ import scipy.stats as ss
 
 class MetaRegressionResults:
 
-    def __init__(self, estimator, dataset, beta, tau2, ci_method='QP',
-                 alpha=0.05):
-        self.estimator = estimator
+    def __init__(self, dataset, beta, tau2, ci_method='QP', alpha=0.05):
         self.dataset = dataset
         self.beta = {'est': beta}
         self.tau2 = {'est': tau2}
@@ -37,8 +35,6 @@ class MetaRegressionResults:
         ci_u = 'ci_{:.6g}'.format(1 - self.alpha / 2)
         df.columns = ['name', 'estimate', 'se', 'z-score', 'p-val', ci_l, ci_u]
 
-        # Derived statistics
-
         return df
 
     def compute_stats(self, method=None, alpha=None):
@@ -57,11 +53,15 @@ class MetaRegressionResults:
         estimate = self.beta['est']
         se = np.sqrt(np.diag(np.linalg.pinv((X.T * w).dot(X))))
         z_se = ss.norm.ppf(1 - alpha / 2)
-        self.beta['se'] = se
-        self.beta['ci_l'] = estimate - z_se * se
-        self.beta['ci_u'] = estimate + z_se * se
-        self.beta['z'] = z = estimate / se
-        self.beta['p'] = 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
+        z = estimate / se
+
+        self.beta.update({
+            'se': se,
+            'ci_l': estimate - z_se * se,
+            'ci_u': estimate + z_se * se,
+            'z': z,
+            'p': 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
+        })
 
     def _compute_tau2_stats(self):
         self._q_profile()
@@ -69,18 +69,19 @@ class MetaRegressionResults:
     def _q_profile(self):
         """Get tau^2 CIs via the Q-Profile method (Viechtbauer, 2007)."""
         dataset, alpha = self.dataset, self.alpha
-        df = dataset.k - dataset.p
+        k, p = dataset.X.shape
+        df = k - p
         l_crit = ss.chi2.ppf(1 - alpha / 2, df)
         u_crit = ss.chi2.ppf(alpha / 2, df)
-        lb = root(lambda x: (q_gen(x, dataset) - l_crit)**2, 0).x[0]
-        ub = root(lambda x: (q_gen(x, dataset) - u_crit)**2, 100).x[0]
+        args = (dataset.y, dataset.X, dataset.v)
+        lb = root(lambda x: (q_gen(x, *args) - l_crit)**2, 0).x[0]
+        ub = root(lambda x: (q_gen(x, *args) - u_crit)**2, 100).x[0]
         self.tau2['ci_l'] = lb
         self.tau2['ci_u'] = ub
 
 
-def q_gen(tau2, dataset):
-    from .estimators import WeightedLeastSquares
-    beta = WeightedLeastSquares(tau2).fit(dataset).beta['est']
-    v, y, X = dataset.v, dataset.y, dataset.X
+def q_gen(tau2, y, X, v):
+    from .estimators import weighted_least_squares
+    beta = weighted_least_squares(y, v, X, tau2=tau2)['beta']
     w = 1. / (v + tau2)
     return (w * (y - X.dot(beta)) ** 2).sum()
