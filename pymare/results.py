@@ -8,12 +8,14 @@ import scipy.stats as ss
 
 class MetaRegressionResults:
 
-    def __init__(self, dataset, beta, tau2, ci_method='QP', alpha=0.05):
-        self.dataset = dataset
-        self.beta = {'est': beta}
-        self.tau2 = {'est': tau2}
+    def __init__(self, params, inputs, ci_method='QP', alpha=0.05):
+        self.params = {name:{'est': val} for name, val in params.items()}
+        self.inputs = inputs
         self.ci_method = ci_method
         self.alpha = alpha
+
+    def __getitem__(self, key):
+        return self.params[key]
 
     def summary(self):
         pass
@@ -22,11 +24,11 @@ class MetaRegressionResults:
         pass
 
     def to_df(self):
-        fixed = self.beta.copy()
-        fixed['name'] = self.dataset.X_names
+        fixed = self.params['beta'].copy()
+        fixed['name'] = self.inputs.names
         fixed = pd.DataFrame(fixed)
 
-        tau2 = pd.DataFrame(pd.Series(self.tau2)).T
+        tau2 = pd.DataFrame(pd.Series(self.params['tau2'])).T
         tau2['name'] = 'tau^2'
 
         df = pd.concat([fixed, tau2], axis=0, sort=False)
@@ -48,14 +50,14 @@ class MetaRegressionResults:
         self._compute_tau2_stats()
 
     def _compute_beta_stats(self):
-        v, X, alpha = self.dataset.v, self.dataset.X, self.alpha
-        w = 1. / (v + self.tau2['est'])
-        estimate = self.beta['est']
+        v, X, alpha = self.inputs.variances, self.inputs.predictors, self.alpha
+        w = 1. / (v + self['tau2']['est'])
+        estimate = self['beta']['est']
         se = np.sqrt(np.diag(np.linalg.pinv((X.T * w).dot(X))))
         z_se = ss.norm.ppf(1 - alpha / 2)
         z = estimate / se
 
-        self.beta.update({
+        self['beta'].update({
             'se': se,
             'ci_l': estimate - z_se * se,
             'ci_u': estimate + z_se * se,
@@ -68,16 +70,16 @@ class MetaRegressionResults:
 
     def _q_profile(self):
         """Get tau^2 CIs via the Q-Profile method (Viechtbauer, 2007)."""
-        dataset, alpha = self.dataset, self.alpha
-        k, p = dataset.X.shape
+        y, v, X = self.inputs[:3]
+        k, p = X.shape
         df = k - p
-        l_crit = ss.chi2.ppf(1 - alpha / 2, df)
-        u_crit = ss.chi2.ppf(alpha / 2, df)
-        args = (dataset.y, dataset.X, dataset.v)
+        l_crit = ss.chi2.ppf(1 - self.alpha / 2, df)
+        u_crit = ss.chi2.ppf(self.alpha / 2, df)
+        args = (y, X, v)
         lb = root(lambda x: (q_gen(x, *args) - l_crit)**2, 0).x[0]
         ub = root(lambda x: (q_gen(x, *args) - u_crit)**2, 100).x[0]
-        self.tau2['ci_l'] = lb
-        self.tau2['ci_u'] = ub
+        self['tau2']['ci_l'] = lb
+        self['tau2']['ci_u'] = ub
 
 
 def q_gen(tau2, y, X, v):

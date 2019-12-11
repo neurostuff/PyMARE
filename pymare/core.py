@@ -1,6 +1,7 @@
 """Core classes and functions."""
 
 from inspect import getfullargspec
+from collections import namedtuple
 
 import numpy as np
 import pandas as pd
@@ -11,7 +12,7 @@ from .results import MetaRegressionResults
 
 
 def _setup_X(X, y, add_intercept):
-    if X is None and not self.add_intercept:
+    if X is None and not add_intercept:
         raise ValueError("No fixed predictors found. If no X matrix is "
                          "provided, add_intercept must be True!")
     X = pd.DataFrame(X)
@@ -21,30 +22,17 @@ def _setup_X(X, y, add_intercept):
     return X.values, X.columns.tolist()
 
 
-class Dataset:
-
-    def __init__(self, y, v=None, X=None, add_intercept=True):
-        self.y = y
-        self.v = v
-        self.add_intercept = add_intercept
-        self.X, self.X_names = _setup_X(X, y, add_intercept)
+# Container for input arguments we want to store in results
+InputArgs = namedtuple('InputArgs', ['estimates', 'variances', 'predictors',
+                                     'names', 'method'])
 
 
-def meta_regression(y, v=None, X=None, method='ML', add_intercept=True,
-                    tau2=None, alpha=0.05, ci_method='QP'):
+def meta_regression(estimates, variances=None, predictors=None,
+                    add_intercept=True, method='ML', tau2=None, alpha=0.05,
+                    ci_method='QP'):
 
     # add intercept
-    X, X_names = _setup_X(X, y, add_intercept)
-
-    def _get_X(self, X):
-        if X is None and not self.add_intercept:
-            raise ValueError("No fixed predictors found. If no X matrix is "
-                             "provided, add_intercept must be True!")
-        X = pd.DataFrame(X)
-        if self.add_intercept:
-            intcpt = pd.DataFrame({'intercept': np.ones(len(self.y))})
-            X = pd.concat([intcpt, X], axis=1)
-        return X
+    predictors, names = _setup_X(predictors, estimates, add_intercept)
 
     method = method.lower()
 
@@ -56,14 +44,22 @@ def meta_regression(y, v=None, X=None, method='ML', add_intercept=True,
         'fe': weighted_least_squares,
     }[method]
 
+    # Rename arguments to match more compact internal estimator args
+    y, v, X = estimates, variances, predictors
+
     # Map available arguments onto target function's arguments
     valid_args = set(['y', 'v', 'X', 'tau2', 'method'])
     arg_names = set(getfullargspec(estimator).args) & valid_args
     local_vars = locals()
     kwargs = {name:local_vars[name] for name in arg_names}
 
+    # Get estimates
     estimates = estimator(**kwargs)
-    dataset = Dataset(y, v, X, add_intercept=False)
-    results = MetaRegressionResults(dataset, **estimates)
+
+    # Store key input values/arguments in results
+    input_args = InputArgs(y, v, X, names, method)
+
+    # Return results object with computed stats
+    results = MetaRegressionResults(estimates, input_args, ci_method, alpha)
     results.compute_stats(method=ci_method, alpha=alpha)
     return results
