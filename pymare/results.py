@@ -5,6 +5,8 @@ import pandas as pd
 from scipy.optimize import root
 import scipy.stats as ss
 
+from .stats import q_profile, q_gen
+
 
 class MetaRegressionResults:
 
@@ -46,44 +48,27 @@ class MetaRegressionResults:
         if method is not None:
             self.ci_method = method
 
+        def _compute_beta_stats(self):
+            v, X, alpha = self.dataset.variances, self.dataset.predictors, self.alpha
+            w = 1. / (v + self['tau2']['est'])
+            estimate = self['beta']['est']
+            se = np.sqrt(np.diag(np.linalg.pinv((X.T * w).dot(X))))
+            z_se = ss.norm.ppf(1 - alpha / 2)
+            z = estimate / se
+
+            self['beta'].update({
+                'se': se,
+                'ci_l': estimate - z_se * se,
+                'ci_u': estimate + z_se * se,
+                'z': z,
+                'p': 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
+            })
+
+        def _compute_tau2_stats(self):
+            y, v, X = self.dataset.y, self.dataset.v, self.dataset.X
+            alpha = self.alpha
+            ci = q_profile(y, v, X, alpha)
+            self['tau2'].update(ci)
+
         self._compute_beta_stats()
         self._compute_tau2_stats()
-
-    def _compute_beta_stats(self):
-        v, X, alpha = self.dataset.variances, self.dataset.predictors, self.alpha
-        w = 1. / (v + self['tau2']['est'])
-        estimate = self['beta']['est']
-        se = np.sqrt(np.diag(np.linalg.pinv((X.T * w).dot(X))))
-        z_se = ss.norm.ppf(1 - alpha / 2)
-        z = estimate / se
-
-        self['beta'].update({
-            'se': se,
-            'ci_l': estimate - z_se * se,
-            'ci_u': estimate + z_se * se,
-            'z': z,
-            'p': 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
-        })
-
-    def _compute_tau2_stats(self):
-        self._q_profile()
-
-    def _q_profile(self):
-        """Get tau^2 CIs via the Q-Profile method (Viechtbauer, 2007)."""
-        y, v, X = self.dataset.y, self.dataset.v, self.dataset.X
-        k, p = X.shape
-        df = k - p
-        l_crit = ss.chi2.ppf(1 - self.alpha / 2, df)
-        u_crit = ss.chi2.ppf(self.alpha / 2, df)
-        args = (y, X, v)
-        lb = root(lambda x: (q_gen(x, *args) - l_crit)**2, 0).x[0]
-        ub = root(lambda x: (q_gen(x, *args) - u_crit)**2, 100).x[0]
-        self['tau2']['ci_l'] = lb
-        self['tau2']['ci_u'] = ub
-
-
-def q_gen(tau2, y, X, v):
-    from .estimators import weighted_least_squares
-    beta = weighted_least_squares(y, v, X, tau2=tau2)['beta']
-    w = 1. / (v + tau2)
-    return (w * (y - X.dot(beta)) ** 2).sum()
