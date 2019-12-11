@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from .estimators import (weighted_least_squares, dersimonian_laird,
-                         likelihood_based)
+                         likelihood_based, stan)
 from .results import MetaRegressionResults
 
 
@@ -66,6 +66,7 @@ def meta_regression(estimates, variances=None, predictors=None, names=None,
         'dl': dersimonian_laird,
         'wls': weighted_least_squares,
         'fe': weighted_least_squares,
+        'stan': stan,
     }[method]
 
     # Get estimates
