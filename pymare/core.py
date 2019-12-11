@@ -21,6 +21,11 @@ class Dataset:
         self.predictors = X
         self.names = n
 
+    def __getattr__(self, key):
+        if key in self.kwargs:
+            return self.kwargs[key]
+        raise AttributeError
+
     def _setup_predictors(self, X, names, add_intercept):
         if X is None and not add_intercept:
             raise ValueError("No fixed predictors found. If no X matrix is "
