@@ -11,7 +11,7 @@ def accepts_dataset(func):
     '''Decorator that maps Dataset attributes to estimator arguments.'''
     @wraps(func)
     def wrapped(*args, **kwargs):
-        from .core import Dataset
+        from ..core import Dataset
         if isinstance(args[0], Dataset):
             dataset = args[0]
             args = args[1:]
