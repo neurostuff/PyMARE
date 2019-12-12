@@ -55,8 +55,7 @@ def meta_regression(estimates, variances=None, predictors=None, names=None,
                     add_intercept=True, method='ML', ci_method='QP',
                     alpha=0.05, **kwargs):
 
-    dataset = Dataset(estimates, variances, predictors, names, add_intercept,
-                      **kwargs)
+    dataset = Dataset(estimates, variances, predictors, names, add_intercept)
 
     method = method.lower()
 
@@ -70,7 +69,7 @@ def meta_regression(estimates, variances=None, predictors=None, names=None,
     }[method]
 
     # Get estimates
-    estimates = estimator(dataset, )
+    estimates = estimator(dataset, **kwargs)
 
     # Return results object with computed stats
     if method == 'stan':

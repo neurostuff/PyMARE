@@ -1,5 +1,9 @@
 """Miscellaneous statistical functions."""
 
+import scipy.stats as ss
+from scipy.optimize import root
+
+
 def q_profile(y, v, X, alpha):
     """Get tau^2 CIs via the Q-Profile method (Viechtbauer, 2007)."""
     k, p = X.shape

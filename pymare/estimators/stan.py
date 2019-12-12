@@ -26,7 +26,10 @@ class StanMetaRegression:
         self.result_ = None
 
     def compile(self):
-
+        # Note: we deliberately use a centered parameterization for the
+        # thetas at the moment. This is sub-optimal in terms of estimation,
+        # but allows us to avoid having to add extra logic to detect and
+        # handle intercepts in X.
         spec = f"""
         data {{
             int<lower=1> N;
@@ -38,13 +41,17 @@ class StanMetaRegression:
             vector[N] sigma;
         }}
         parameters {{
-            vector[K] theta;
             vector[C] beta;
+            vector[K] theta;
             real<lower=0> tau2;
         }}
+        transformed parameters {{
+            vector[N] mu;
+            mu = theta[id] + X * beta;
+        }}
         model {{
-            y ~ normal(theta, sigma);
-            theta ~ normal(X * beta, tau2);
+            y ~ normal(mu, sigma);
+            theta ~ normal(0, tau2);
         }}
         """
         self.model = StanModel(model_code=spec)
@@ -58,11 +65,15 @@ class StanMetaRegression:
         groups = groups or np.arange(1, N + 1, dtype=int)
         K = len(np.unique(groups))
 
-        data = {"K": K, "N": N, 'id': groups}
-        data['C'] = X.shape[1]
-        data['X'] = X
-        data['y'] = y
-        data['sigma'] = v
+        data = {
+            "K": K,
+            "N": N,
+            'id': groups,
+            'C': X.shape[1],
+            'X': X,
+            'y': y,
+            'sigma': v
+        }
 
         result = self.model.sampling(data=data, **self.sampling_kwargs)
         self.result_ = az.from_pystan(result)

@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import root
 import scipy.stats as ss
 
 try:
@@ -53,7 +52,7 @@ class MetaRegressionResults:
         if method is not None:
             self.ci_method = method
 
-        def _compute_beta_stats(self):
+        def compute_beta_stats():
             v, X, alpha = self.dataset.variances, self.dataset.predictors, self.alpha
             w = 1. / (v + self['tau2']['est'])
             estimate = self['beta']['est']
@@ -69,14 +68,14 @@ class MetaRegressionResults:
                 'p': 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
             })
 
-        def _compute_tau2_stats(self):
+        def compute_tau2_stats():
             y, v, X = self.dataset.y, self.dataset.v, self.dataset.X
             alpha = self.alpha
             ci = q_profile(y, v, X, alpha)
             self['tau2'].update(ci)
 
-        self._compute_beta_stats()
-        self._compute_tau2_stats()
+        compute_beta_stats()
+        compute_tau2_stats()
 
 
 class BayesianMetaRegressionResults:
