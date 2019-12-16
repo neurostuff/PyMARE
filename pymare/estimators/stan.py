@@ -71,8 +71,8 @@ class StanMetaRegression:
             'id': groups,
             'C': X.shape[1],
             'X': X,
-            'y': y,
-            'sigma': v
+            'y': y.ravel(),
+            'sigma': v.ravel()
         }
 
         result = self.model.sampling(data=data, **self.sampling_kwargs)
