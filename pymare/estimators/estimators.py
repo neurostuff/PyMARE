@@ -71,7 +71,7 @@ def weighted_least_squares(y, v, X, tau2=0.):
     w = 1. / (v + tau2)
     precision = np.linalg.pinv((X * w).T.dot(X))
     beta = (precision.dot(X.T) * w.T).dot(y).ravel()
-    return {'beta': beta}
+    return {'beta': beta, 'tau2': tau2}
 
 
 @validate_input
