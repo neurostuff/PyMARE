@@ -7,25 +7,47 @@ import numpy as np
 from scipy.optimize import minimize
 
 
-def accepts_dataset(func):
-    """Decorator that maps Dataset attributes to estimator arguments."""
+def validate_input(func):
+    """Validates input to estimators.
+
+    If a Dataset is passed as the first argument, maps its attributes onto
+    estimator input args. Also inspects y, v, and X arguments and ensures
+    they're always 2d.
+    """
     @wraps(func)
     def wrapped(*args, **kwargs):
+
         from ..core import Dataset
+
+        func_args = getfullargspec(func).args
+
+        # if Dataset is the first arg, map its attributes onto target func args
         if isinstance(args[0], Dataset):
             dataset = args[0]
             args = args[1:]
-            # Map available arguments onto target function's arguments
             valid_args = set(['y', 'v', 'X']) | set(dataset.kwargs.keys())
-            arg_names = set(getfullargspec(func).args) & valid_args
+            arg_names = set(func_args) & valid_args
             dset_args = {name: getattr(dataset, name) for name in arg_names}
             # Directly passed arguments take precedence over Dataset contents
             kwargs = dict(dset_args, **kwargs)
-        return func(*args, **kwargs)
+
+        # move all args into kwargs
+        for i, val in enumerate(args):
+            kwargs[func_args[i]] = val
+
+        # Ensure key arguments are 2d arrays
+        for var in ('y', 'v', 'X'):
+            if var in kwargs and kwargs[var] is not None:
+                vals = np.array(kwargs[var])
+                if len(vals.shape) == 1:
+                    vals = vals[:, None]
+                kwargs[var] = vals
+
+        return func(**kwargs)
     return wrapped
 
 
-@accepts_dataset
+@validate_input
 def weighted_least_squares(y, v, X, tau2=0.):
     """ Weighted least-squares meta-regression.
 
@@ -47,11 +69,12 @@ def weighted_least_squares(y, v, X, tau2=0.):
             (length = P).
     """
     w = 1. / (v + tau2)
-    beta = (np.linalg.pinv((X.T * w).dot(X)).dot(X.T) * w).dot(y)
+    precision = np.linalg.pinv((X * w).T.dot(X))
+    beta = (precision.dot(X.T) * w.T).dot(y).ravel()
     return {'beta': beta}
 
 
-@accepts_dataset
+@validate_input
 def dersimonian_laird(y, v, X):
     """ DerSimonian-Laird meta-regression estimator.
 
@@ -75,21 +98,22 @@ def dersimonian_laird(y, v, X):
         Controlled clinical trials, 7(3), 177-188.
     """
     k, p = X.shape
-    beta_wls = weighted_least_squares(y, v, X, 0)['beta']
+    beta_wls = weighted_least_squares(y, v, X, 0)['beta'][:, None]
     # Cochrane's Q
     w = 1. / v
     w_sum = w.sum()
-    Q = (w * (y - X.dot(beta_wls)) ** 2).sum()
+    Q = (w * (y - X.dot(beta_wls)) ** 2)
+    Q = Q.sum()
     # D-L estimate of tau^2
-    precision = np.linalg.pinv((X.T * w).dot(X))
-    A = w_sum - np.trace((precision.dot(X.T) * w**2).dot(X))
+    precision = np.linalg.pinv((X * w).T.dot(X))
+    A = w_sum - np.trace(X.dot(precision.dot(X.T) * (w**2).T))
     tau_dl = np.max([0., (Q - k + p) / A])
     # Re-estimate beta with tau^2 estimate
-    beta_dl = weighted_least_squares(y, v, X, tau_dl)['beta']
+    beta_dl = weighted_least_squares(y, v, X, tau_dl)['beta'].ravel()
     return {'beta': beta_dl, 'tau2': tau_dl}
 
 
-@accepts_dataset
+@validate_input
 def likelihood_based(y, v, X, method='ml', beta=None, tau2=None, **kwargs):
     """ Likelihood-based meta-regression estimator.
 
@@ -133,7 +157,7 @@ def likelihood_based(y, v, X, method='ml', beta=None, tau2=None, **kwargs):
         raise ValueError("No log-likelihood function defined for method '{}'."
                          .format(method))
 
-    theta_init = np.r_[beta, tau2]
+    theta_init = np.r_[beta.ravel(), tau2]
     res = minimize(ll_func, theta_init, (y, v, X), **kwargs).x
     beta, tau = res[:-1], float(res[-1])
     tau = np.max([tau, 0])
@@ -142,7 +166,7 @@ def likelihood_based(y, v, X, method='ml', beta=None, tau2=None, **kwargs):
 
 def _ml_nll(theta, y, v, X):
     """ ML negative log-likelihood for meta-regression model. """
-    beta, tau2 = theta[:-1], theta[-1]
+    beta, tau2 = theta[:-1, None], theta[-1]
     if tau2 < 0:
         tau2 = 0
     w = 1. / (v + tau2)
@@ -156,5 +180,5 @@ def _reml_nll(theta, y, v, X):
     ll_ = _ml_nll(theta, y, v, X)
     tau2 = theta[-1]
     w = 1. / (v + tau2)
-    F = (X.T * w).dot(X)
+    F = (X * w).T.dot(X)
     return ll_ + 0.5 * np.log(np.linalg.det(F))

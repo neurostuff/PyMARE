@@ -8,7 +8,7 @@ except:
     StanModel = None
     az = None
 
-from .estimators import accepts_dataset
+from .estimators import validate_input
 
 
 class StanMetaRegression:
@@ -80,7 +80,7 @@ class StanMetaRegression:
         return self.result_
 
 
-@accepts_dataset
+@validate_input
 def stan(y, v, X, groups=None, **sampling_kwargs):
     model = StanMetaRegression(**sampling_kwargs)
     return model.fit(y, v, X, groups)

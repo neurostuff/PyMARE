@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 
 DISTNAME = 'pymares'
-DESCRIPTION = 'Python Meta-Analysis and Regression Engine'
+DESCRIPTION = 'Python Meta-Analysis & Regression Engine'
 MAINTAINER = 'Tal Yarkoni'
 MAINTAINER_EMAIL = 'tyarkoni@gmail.com'
 LICENSE = 'MIT'
