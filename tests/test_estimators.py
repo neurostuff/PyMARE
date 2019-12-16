@@ -1,8 +1,21 @@
 import numpy as np
-import pytest
 
 from pymare.estimators import (weighted_least_squares, dersimonian_laird,
                                likelihood_based)
+
+
+def test_weighted_least_squares_estimator(vars_with_intercept):
+    # ground truth values are from metafor package in R
+    results = weighted_least_squares(*vars_with_intercept)
+    beta, tau2 = results['beta'], results['tau2']
+    assert np.allclose(beta, [-0.2725, 0.6935], atol=1e-4)
+    assert tau2 == 0.
+
+    # With non-zero tau^2
+    results = weighted_least_squares(*vars_with_intercept, tau2=8.)
+    beta, tau2 = results['beta'], results['tau2']
+    assert np.allclose(beta, [-0.1071, 0.7657], atol=1e-4)
+    assert tau2 == 8.
 
 
 def test_dersimonian_laird_estimator(vars_with_intercept):
