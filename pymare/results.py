@@ -81,6 +81,11 @@ class MetaRegressionResults:
 class BayesianMetaRegressionResults:
 
     def __init__(self, data, dataset, ci=95):
+        if az is None:
+            raise ValueError("ArviZ package must be installed in order to work"
+                             " with the BayesianMetaRegressionResults class.")
+        if data.__class__.__name__ == 'StanFit4Model':
+            data = az.from_pystan(data)
         self.data = data
         self.dataset = dataset
         self.ci = ci

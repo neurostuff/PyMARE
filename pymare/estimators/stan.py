@@ -3,10 +3,8 @@
 import numpy as np
 try:
     from pystan import StanModel
-    import arviz as az
 except:
     StanModel = None
-    az = None
 
 from .estimators import validate_input
 
@@ -75,8 +73,7 @@ class StanMetaRegression:
             'sigma': v.ravel()
         }
 
-        result = self.model.sampling(data=data, **self.sampling_kwargs)
-        self.result_ = az.from_pystan(result)
+        self.result_ = self.model.sampling(data=data, **self.sampling_kwargs)
         return self.result_
 
 
