@@ -1,7 +1,7 @@
 import numpy as np
 
 from pymare.estimators import (weighted_least_squares, dersimonian_laird,
-                               likelihood_based)
+                               likelihood_based, stan, StanMetaRegression)
 
 
 def test_weighted_least_squares_estimator(vars_with_intercept):
@@ -40,3 +40,15 @@ def test_restricted_maximum_likelihood_estimator(vars_with_intercept):
     beta, tau2 = results['beta'], results['tau2']
     assert np.allclose(beta, [-0.1066, 0.7700], atol=1e-4)
     assert np.allclose(tau2, 10.9499, atol=1e-4)
+
+
+def test_stan_estimator(vars_with_intercept):
+    # no ground truth here, so we use sanity checks and rough bounnds
+    results = stan(*vars_with_intercept, iter=1200)
+    assert 'StanFit4Model' == results.__class__.__name__
+    summary = results.summary(['beta', 'tau2'])
+    beta = summary['summary'][:2, 0]
+    tau2 = summary['summary'][2, 0]
+    assert -0.4 < beta[0] < 0.1
+    assert 0.6 < beta[1] < 0.9
+    assert 2 < tau2 < 6
