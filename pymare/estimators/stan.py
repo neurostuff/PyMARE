@@ -10,6 +10,19 @@ from .estimators import validate_input
 
 
 class StanMetaRegression:
+    """Bayesian meta-regression estimator using Stan.
+
+    Args:
+        sampling_kwargs: Optional keyword arguments to pass on to the MCMC
+            sampler (e.g., `iter` for number of iterations).
+
+    Notes:
+        For most uses, this class should be ignored in favor of the functional
+        stan() estimator. The object-oriented interface is useful primarily
+        when fitting the meta-regression model repeatedly to different data;
+        the separation of .compile() and .fit() steps allows one to compile
+        the model only once.
+    """
 
     def __init__(self, **sampling_kwargs):
 
@@ -24,6 +37,7 @@ class StanMetaRegression:
         self.result_ = None
 
     def compile(self):
+        """Compile the Stan model."""
         # Note: we deliberately use a centered parameterization for the
         # thetas at the moment. This is sub-optimal in terms of estimation,
         # but allows us to avoid having to add extra logic to detect and
@@ -55,7 +69,30 @@ class StanMetaRegression:
         self.model = StanModel(model_code=spec)
 
     def fit(self, y, v, X, groups=None):
+        """Run the Stan sampler and return results.
 
+        Args:
+            y (ndarray): 1d array of study-level estimates
+            v (ndarray): 1d array of study-level variances
+            X (ndarray): 1d or 2d array containing study-level predictors
+                (including intercept); has dimensions K x P, where K is the
+                number of studies and P is the number of predictor variables.
+            groups ([int], optional): 1d array of integers identifying
+                groups/clusters of observations in the y/v/X inputs. If
+                provided, values must consist of integers in the range of 1..k
+                (inclusive), where k is the number of distinct groups. When
+                None (default), it is assumed that each observation in the
+                inputs is a separate group.
+
+        Returns:
+            A StanFit4Model object (see PyStan documentation for details).
+
+        Notes:
+            This estimator supports (simple) hierarchical models. When multiple
+            estimates are available for at least one of the studies in `y`, the
+            `groups` argument can be used to specify the nesting structure
+            (i.e., which rows in `y`, `v`, and `X` belong to each study).
+        """
         if self.model is None:
             self.compile()
 
@@ -79,5 +116,31 @@ class StanMetaRegression:
 
 @validate_input
 def stan(y, v, X, groups=None, **sampling_kwargs):
+    """Fit a Bayesian meta-regression using Stan.
+
+    Args:
+        y (ndarray): 1d array of study-level estimates
+        v (ndarray): 1d array of study-level variances
+        X (ndarray): 1d or 2d array containing study-level predictors
+            (including intercept); has dimensions K x P, where K is the number
+            of studies and P is the number of predictor variables.
+        groups ([int], optional): 1d array of integers identifying
+            groups/clusters of observations in the y/v/X inputs. If provided,
+            values must consist of integers in the range of 1..k (inclusive),
+            where k is the number of distinct groups. When None (default), it
+            is assumed that each observation in the inputs is a separate group.
+        sampling_kwargs: Optional keyword arguments to pass on to the MCMC
+            sampler (e.g., `iter` for number of iterations).
+
+    Returns:
+        A StanFit4Model object (see PyStan documentation for details).
+
+    Notes:
+        In contrast to the other meta-regression estimators, the Stan estimator
+        supports estimation of (simple) hierarchical models. When multiple
+        estimates are available for at least one of the studies in `y`, the
+        `groups` argument can be used to specify the nesting structure (i.e.,
+        which of the rows in `y`, `v`, and `X` belong to each study).
+    """
     model = StanMetaRegression(**sampling_kwargs)
     return model.fit(y, v, X, groups)
