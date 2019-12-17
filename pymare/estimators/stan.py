@@ -29,9 +29,6 @@ class StanMetaRegression:
         if StanModel is None:
             raise ImportError("Unable to import PyStan package. Is it "
                               "installed?")
-        if az is None:
-            raise ValueError("Bayesian meta-regression results require the ArviZ"
-                             " library, which doesn't seem to be installed.")
         self.sampling_kwargs = sampling_kwargs
         self.model = None
         self.result_ = None

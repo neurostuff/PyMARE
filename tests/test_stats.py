@@ -10,6 +10,5 @@ def test_q_gen(vars_with_intercept):
 def test_q_profile(vars_with_intercept):
     bounds = q_profile(*vars_with_intercept, 0.05)
     assert set(bounds.keys()) == {'ci_l', 'ci_u'}
-    print(bounds)
     assert round(bounds['ci_l'], 4) == 3.8076
     assert round(bounds['ci_u'], 4) == 59.616
