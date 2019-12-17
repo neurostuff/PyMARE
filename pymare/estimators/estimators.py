@@ -58,9 +58,9 @@ def weighted_least_squares(y, v, X, tau2=0.):
     Args:
         y (ndarray): 1d array of study-level estimates
         v (ndarray): 1d array of study-level variances
-        X (ndarray, optional): 1d or 2d array containing study-level
-            predictors (or covariates); has dimensions K x P, where K is the
-            number of studies and P is the number of predictor variables.
+        X (ndarray): 1d or 2d array containing study-level predictors
+            (including intercept); has dimensions K x P, where K is the number
+            of studies and P is the number of predictor variables.
         tau2 (float, optional): Assumed/known value of tau^2. Must be >= 0.
             Defaults to 0.
 
@@ -84,9 +84,9 @@ def dersimonian_laird(y, v, X):
     Args:
         y (ndarray): 1d array of study-level estimates
         v (ndarray): 1d array of study-level variances
-        X (ndarray, optional): 1d or 2d array containing study-level
-            predictors (or covariates); has dimensions K x P, where K is the
-            number of studies and P is the number of predictor variables.
+        X (ndarray): 1d or 2d array containing study-level predictors
+            (including intercept); has dimensions K x P, where K is the number
+            of studies and P is the number of predictor variables.
 
     Returns:
         A dictionary with keys 'beta' and 'tau2' that map respectively to a
@@ -123,9 +123,9 @@ def likelihood_based(y, v, X, method='ml', beta=None, tau2=None, **kwargs):
     Args:
         y (ndarray): 1d array of study-level estimates
         v (ndarray): 1d array of study-level variances
-        X (ndarray, optional): 1d or 2d array containing study-level
-            predictors (or covariates); has dimensions K x P, where K is the
-            number of studies and P is the number of predictor variables.
+        X (ndarray): 1d or 2d array containing study-level predictors
+            (including intercept); has dimensions K x P, where K is the number
+            of studies and P is the number of predictor variables.
         method (str, optional): The estimation method to use. Either 'ML' (for
             maximum-likelihood) or 'REML' (restricted maximum-likelihood).
             Defaults to 'ML'.
