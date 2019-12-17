@@ -9,7 +9,7 @@ MAINTAINER = 'Tal Yarkoni'
 MAINTAINER_EMAIL = 'tyarkoni@gmail.com'
 LICENSE = 'MIT'
 VERSION = '0.0.1'
-INSTALL_REQUIRES = ['numpy', 'scipy']
+INSTALL_REQUIRES = ['numpy', 'scipy', 'pandas']
 
 
 if __name__ == "__main__":
