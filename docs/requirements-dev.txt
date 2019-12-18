@@ -1,0 +1,4 @@
+sphinx-argparse
+numpydoc
+sphinx_gallery
+m2r
