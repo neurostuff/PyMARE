@@ -50,7 +50,7 @@ class MetaRegressionResults:
         tau2 = pd.DataFrame(pd.Series(self.params['tau2'])).T
         tau2['name'] = 'tau^2'
 
-        df = pd.concat([fixed, tau2], axis=0, sort=False)
+        df = pd.concat([fixed, tau2], axis=0, sort=False, ignore_index=True)
         df = df.loc[:, ['name', 'est', 'se', 'z', 'p', 'ci_l', 'ci_u']]
         ci_l = 'ci_{:.6g}'.format(self.alpha / 2)
         ci_u = 'ci_{:.6g}'.format(1 - self.alpha / 2)
@@ -77,7 +77,7 @@ class MetaRegressionResults:
             v, X, alpha = self.dataset.variances, self.dataset.predictors, self.alpha
             w = 1. / (v + self['tau2']['est'])
             estimate = self['beta']['est']
-            se = np.sqrt(np.diag(np.linalg.pinv((X.T * w).dot(X))))
+            se = np.sqrt(np.diag(np.linalg.pinv((X * w).T.dot(X))))
             z_se = ss.norm.ppf(1 - alpha / 2)
             z = estimate / se
 
