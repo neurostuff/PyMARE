@@ -26,7 +26,7 @@ class MetaRegressionResults:
             where width = 1 - alpha. Defaults to 0.05.
     """
     def __init__(self, params, dataset, ci_method='QP', alpha=0.05):
-        self.params = {name:{'est': val} for name, val in params.items()}
+        self.params = {name: {'est': val} for name, val in params.items()}
         self.dataset = dataset
         self.ci_method = ci_method
         self.alpha = alpha
@@ -130,7 +130,7 @@ class BayesianMetaRegressionResults:
 
         Returns:
             A pandas DataFrame, unless the `fmt="xarray"` argument is passed in
-            kwargs, in which case an xarray Dataset is returned. 
+            kwargs, in which case an xarray Dataset is returned.
         """
         var_names = ['beta', 'tau2']
         if include_theta:
