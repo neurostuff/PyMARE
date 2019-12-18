@@ -1,0 +1,84 @@
+# Python CircleCI 2.0 configuration file
+#
+# Check https://circleci.com/docs/2.0/language-python/ for more details
+#
+version: 2.1
+orbs:
+  codecov: codecov/codecov@1.0.5
+jobs:
+
+  build:
+    working_directory: /tmp/src/PyMARE
+    docker:
+      - image: continuumio/miniconda3
+    steps:
+      - checkout
+      - persist_to_workspace:
+          root: /tmp
+          paths:
+              - src/PyMARE
+      - restore_cache:  # ensure this step occurs *before* installing dependencies
+          key: deps9-{{ checksum "pymare/info.py" }}
+      - run:  # will overwrite PyMARE installation each time
+          name: Generate environment
+          command:  |
+            if [[ -e /opt/conda/envs/testenv ]]; then
+                echo "Restoring environment from cache"
+                source activate testenv
+            else
+                conda create -n testenv python=3.6 -yq
+                source activate testenv
+                pip install -e .[tests]
+            fi
+            python setup.py install --user
+      - save_cache:  # environment cache tied to requirements
+          key: deps9-{{ checksum "pymare/info.py" }}
+          paths:
+            - "/opt/conda/envs/testenv"
+
+  style_check:
+    working_directory: /tmp/src/PyMARE
+    docker:
+      - image: continuumio/miniconda3
+    steps:
+      - attach_workspace:  # get PyMARE
+          at: /tmp
+      - restore_cache:  # load environment
+          key: deps9-{{ checksum "pymare/info.py" }}
+      - run:
+          name: Linting
+          command:  |
+            source activate testenv
+            flake8 --ignore=E501,E722,E114,E116,W503,W504 /tmp/src/PyMARE/pymare
+      - store_artifacts:
+          path: /tmp/data/lint
+
+  coverage_and_tests:
+    working_directory: /tmp/src/PyMARE
+    docker:
+      - image: continuumio/miniconda3
+    steps:
+      - attach_workspace:  # get PyMARE
+          at: /tmp
+      - restore_cache:  # load environment
+          key: deps9-{{ checksum "pymare/info.py" }}
+      - run:
+          name: Coverage
+          command:  |
+            apt-get install -yqq curl
+            source activate testenv
+            py.test --cov-report xml:coverage.xml --cov=pymare pymare
+      - codecov/upload:
+          file: /tmp/src/PyMARE/coverage.xml
+
+workflows:
+  version: 2.1
+  run_tests:
+    jobs:
+      - build
+      - style_check:
+          requires:
+            - build
+      - coverage_and_tests:
+          requires:
+            - build
