@@ -3,7 +3,10 @@
 from setuptools import setup, find_packages
 
 
-DISTNAME = 'pymares'
+AUTHOR = 'PyMARE developers'
+COPYRIGHT = 'Copyright 2019--now, PyMARE developers'
+URL = 'https://github.com/neurostuff/PyMARE'
+DISTNAME = 'PyMARE'
 DESCRIPTION = 'Python Meta-Analysis & Regression Engine'
 MAINTAINER = 'Tal Yarkoni'
 MAINTAINER_EMAIL = 'tyarkoni@gmail.com'
@@ -18,6 +21,7 @@ if __name__ == "__main__":
         maintainer=MAINTAINER,
         maintainer_email=MAINTAINER_EMAIL,
         description=DESCRIPTION,
+        author=AUTHOR,
         license=LICENSE,
         version=VERSION,
         zip_safe=False,
