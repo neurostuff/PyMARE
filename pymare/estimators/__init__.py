@@ -1,12 +1,9 @@
-from .estimators import (weighted_least_squares, dersimonian_laird,
-                         likelihood_based, validate_input)
-from .stan import StanMetaRegression, stan
+from .estimators import (WeightedLeastSquares, DerSimonianLaird,
+                         LikelihoodBased, StanMetaRegression)
 
 __all__ = [
-    'validate_input',
-    'weighted_least_squares',
-    'dersimonian_laird',
-    'likelihood_based',
-    'StanMetaRegression',
-    'stan'
+    'WeightedLeastSquares',
+    'DerSimonianLaird',
+    'LikelihoodBased',
+    'StanMetaRegression'
 ]
