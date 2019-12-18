@@ -5,9 +5,8 @@ from functools import partial
 import numpy as np
 import pandas as pd
 
-from .estimators import (weighted_least_squares, dersimonian_laird,
-                         likelihood_based, stan)
-from .results import MetaRegressionResults, BayesianMetaRegressionResults
+from .estimators import (WeightedLeastSquares, DerSimonianLaird,
+                         LikelihoodBased, StanMetaRegression)
 
 
 class Dataset:
@@ -95,6 +94,7 @@ def meta_regression(estimates, variances, predictors=None, names=None,
             to 'QP'. Ignored if method == 'Stan'.
         alpha (float, optional): Desired alpha level (CIs will have 1 - alpha
             coverage). Defaults to 0.05.
+        kwargs: Optional keyword arguments to pass onto the chosen estimator.
 
     Returns:
         A MetaRegressionResults or BayesianMetaRegressionResults instance,
@@ -105,22 +105,18 @@ def meta_regression(estimates, variances, predictors=None, names=None,
 
     method = method.lower()
 
-    estimator = {
-        'ml': partial(likelihood_based, method=method),
-        'reml': partial(likelihood_based, method=method),
-        'dl': dersimonian_laird,
-        'wls': weighted_least_squares,
-        'fe': weighted_least_squares,
-        'stan': stan,
+    estimator_cls = {
+        'ml': partial(LikelihoodBased, method=method),
+        'reml': partial(LikelihoodBased, method=method),
+        'dl': DerSimonianLaird,
+        'wls': WeightedLeastSquares,
+        'fe': WeightedLeastSquares,
+        'stan': StanMetaRegression,
     }[method]
 
     # Get estimates
-    estimates = estimator(dataset, **kwargs)
-
-    # Return results object with computed stats
-    if method == 'stan':
-        results = BayesianMetaRegressionResults(estimates, dataset)
-    else:
-        results = MetaRegressionResults(estimates, dataset, ci_method, alpha)
-        results.compute_stats(method=ci_method, alpha=alpha)
+    est = estimator_cls(**kwargs)
+    results = est.fit(dataset)
+    if hasattr(results, 'compute_stats'):
+        results.compute_stats(ci_method=ci_method, alpha=alpha)
     return results

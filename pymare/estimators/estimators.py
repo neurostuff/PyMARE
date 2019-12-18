@@ -101,7 +101,7 @@ class LikelihoodBased(BaseEstimator):
         self.method = method
         self.beta = beta
         self.tau2 = tau2
-        self.kwargs = self.kwargs
+        self.kwargs = kwargs
 
     def _fit(self, y, v, X):
         # use D-L estimate for initial values if none provided

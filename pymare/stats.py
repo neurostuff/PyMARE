@@ -3,10 +3,7 @@
 import scipy.stats as ss
 from scipy.optimize import root
 
-from .estimators import validate_input
 
-
-@validate_input
 def q_profile(y, v, X, alpha=0.05):
     """Get the CI for tau^2 via the Q-Profile method (Viechtbauer, 2007).
 
@@ -40,7 +37,6 @@ def q_profile(y, v, X, alpha=0.05):
     return {'ci_l': lb, 'ci_u': ub}
 
 
-@validate_input
 def q_gen(y, v, X, tau2):
     """Cochran's Q-statistic.
 
