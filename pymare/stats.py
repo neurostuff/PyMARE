@@ -1,7 +1,21 @@
 """Miscellaneous statistical functions."""
 
+import numpy as np
 import scipy.stats as ss
 from scipy.optimize import root
+
+
+def ensure_2d(arr):
+    """Ensure the passed array has 2 dimensions."""
+    if arr is None:
+        return arr
+    try:
+        arr = np.array(arr)
+    except:
+        return arr
+    if arr.ndim == 1:
+        arr = arr[:, None]
+    return arr
 
 
 def q_profile(y, v, X, alpha=0.05):
@@ -31,7 +45,7 @@ def q_profile(y, v, X, alpha=0.05):
     df = k - p
     l_crit = ss.chi2.ppf(1 - alpha / 2, df)
     u_crit = ss.chi2.ppf(alpha / 2, df)
-    args = (y, v, X)
+    args = (ensure_2d(y), ensure_2d(v), X)
     lb = root(lambda x: (q_gen(*args, x) - l_crit)**2, 0).x[0]
     ub = root(lambda x: (q_gen(*args, x) - u_crit)**2, 100).x[0]
     return {'ci_l': lb, 'ci_u': ub}
@@ -51,9 +65,9 @@ def q_gen(y, v, X, tau2):
     Returns:
         A float giving the value of Cochran's Q-statistic.
     """
+    from .estimators import WeightedLeastSquares
     if tau2 < 0:
         raise ValueError("Value of tau^2 must be >= 0.")
-    from .estimators import weighted_least_squares
-    beta = weighted_least_squares(y, v, X, tau2=tau2)['beta'][:, None]
+    beta = WeightedLeastSquares(tau2=tau2)._fit(y, v, X)['beta'][:, None]
     w = 1. / (v + tau2)
     return (w * (y - X.dot(beta)) ** 2).sum()

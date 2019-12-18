@@ -56,7 +56,6 @@ class DerSimonianLaird(BaseEstimator):
         DerSimonian, R., & Laird, N. (1986). Meta-analysis in clinical trials.
         Controlled clinical trials, 7(3), 177-188.
     """
-
     def _fit(self, y, v, X):
         k, p = X.shape
         beta_wls = WeightedLeastSquares(0.)._fit(y, v, X)['beta'][:, None]

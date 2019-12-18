@@ -7,6 +7,7 @@ import pandas as pd
 
 from .estimators import (WeightedLeastSquares, DerSimonianLaird,
                          LikelihoodBased, StanMetaRegression)
+from .stats import ensure_2d
 
 
 class Dataset:
@@ -26,8 +27,8 @@ class Dataset:
     """
     def __init__(self, estimates, variances, predictors=None, names=None,
                  add_intercept=True, **kwargs):
-        self.estimates = estimates
-        self.variances = variances
+        self.estimates = ensure_2d(estimates)
+        self.variances = ensure_2d(variances)
         self.kwargs = kwargs
         X, n = self._setup_predictors(predictors, names, add_intercept)
         self.predictors = X
