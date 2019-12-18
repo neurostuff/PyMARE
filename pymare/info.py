@@ -49,7 +49,7 @@ TESTS_REQUIRES = [
 ]
 
 EXTRA_REQUIRES = {
-    'something': [
+    'stan': [
         'pystan',
         'arviz'
     ],
