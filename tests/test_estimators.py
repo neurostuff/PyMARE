@@ -1,7 +1,7 @@
 import numpy as np
 
 from pymare.estimators import (WeightedLeastSquares, DerSimonianLaird,
-                         LikelihoodBased, StanMetaRegression)
+                               LikelihoodBased, StanMetaRegression)
 
 
 def test_weighted_least_squares_estimator(dataset):
