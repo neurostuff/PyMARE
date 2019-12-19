@@ -16,7 +16,7 @@ jobs:
       - run:
           name: Install dependencies
           command:  |
-            apt-get -y --fix-missing install python3-dev
+            apt-get -y install gcc
       - persist_to_workspace:
           root: /tmp
           paths:
