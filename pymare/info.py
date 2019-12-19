@@ -39,6 +39,11 @@ REQUIRES = [
     'pandas'
 ]
 
+STAN_REQUIRES = [
+    'pystan',
+    'arviz'
+]
+
 TESTS_REQUIRES = [
     'codecov',
     'coverage',
@@ -48,18 +53,17 @@ TESTS_REQUIRES = [
     'pytest-cov'
 ]
 
+DOC_REQUIRES = [
+    'sphinx>=1.5.3',
+    'sphinx_rtd_theme',
+    'sphinx-argparse',
+    'numpydoc',
+    'm2r'
+]
+
 EXTRA_REQUIRES = {
-    'stan': [
-        'pystan',
-        'arviz'
-    ],
-    'doc': [
-        'sphinx>=1.5.3',
-        'sphinx_rtd_theme',
-        'sphinx-argparse',
-        'numpydoc',
-        'm2r'
-    ],
+    'stan': STAN_REQUIRES,
+    'doc': DOC_REQUIRES,
     'tests': TESTS_REQUIRES,
 }
 

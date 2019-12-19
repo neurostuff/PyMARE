@@ -13,6 +13,10 @@ jobs:
       - image: continuumio/miniconda3
     steps:
       - checkout
+      - run:
+          name: Install dependencies
+          command:  |
+            apt-get install python3-dev
       - persist_to_workspace:
           root: /tmp
           paths:
@@ -28,7 +32,7 @@ jobs:
             else
                 conda create -n testenv python=3.6 -yq
                 source activate testenv
-                pip install -e .[tests,stan]
+                pip install -e .[all]
             fi
             python setup.py install --user
       - save_cache:  # environment cache tied to requirements
