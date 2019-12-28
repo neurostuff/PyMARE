@@ -124,17 +124,24 @@ def meta_regression(estimates, variances=None, predictors=None,
 
     method = method.lower()
 
-    estimator_cls = {
-        'ml': partial(VarianceBasedLikelihoodEstimator, method=method),
-        'reml': partial(VarianceBasedLikelihoodEstimator, method=method),
-        'dl': DerSimonianLaird,
-        'wls': WeightedLeastSquares,
-        'fe': WeightedLeastSquares,
-        'stan': StanMetaRegression,
-    }[method]
+    if method in ['ml', 'reml']:
+        if variances is not None:
+            est_cls = partial(VarianceBasedLikelihoodEstimator, method=method)
+        elif sample_sizes is not None:
+            est_cls = partial(SampleSizeBasedLikelihoodEstimator, method=method)
+        else:
+            raise ValueError("If method is ML or REML, one of `variances` or "
+                             "`sample sizes` must be passed!")
+    else:
+        est_cls = {
+            'dl': DerSimonianLaird,
+            'wls': WeightedLeastSquares,
+            'fe': WeightedLeastSquares,
+            'stan': StanMetaRegression,
+        }[method]
 
     # Get estimates
-    est = estimator_cls(**kwargs)
+    est = est_cls(**kwargs)
     results = est.fit(dataset)
     if hasattr(results, 'compute_stats'):
         results.compute_stats(ci_method=ci_method, alpha=alpha)
