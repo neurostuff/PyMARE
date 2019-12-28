@@ -1,6 +1,7 @@
 """Meta-regression estimator classes."""
 
 from abc import ABCMeta, abstractmethod
+from inspect import getfullargspec
 
 import numpy as np
 from scipy.optimize import minimize
@@ -14,14 +15,38 @@ class BaseEstimator(metaclass=ABCMeta):
     _result_cls = MetaRegressionResults
 
     @abstractmethod
-    def _fit(self, y, v, X):
-        # Subclasses should retain this minimal signature in all cases; this
-        # ensures that the fit() wrapper in the base class can be ignored by
-        # users who want to avoid input/output overhead and call _fit directly.
+    def _fit(self):
+        # Subclasses must implement _fit() method that directly takes arrays.
+        # The following named arguments are allowed, and will be automatically
+        # extracted from the Dataset instance:
+        # * y (estimates)
+        # * v (variances)
+        # * n (sample_sizes)
+        # * X (predictors)
         pass
 
+    def accepts_dataset(self, dataset):
+        """ Returns whether current class can fit the passed Dataset.
+
+        Args:
+            dataset (Dataset): A Dataset instance
+
+        Returns:
+            A boolean.
+        """
+        args = getfullargspec(self._fit)[0]
+        for name in args:
+            if getattr(dataset, name) is None:
+                return False
+        return True
+
     def fit(self, dataset):
-        results = self._fit(dataset.y, dataset.v, dataset.X)
+        kwargs = {}
+        spec = getfullargspec(self._fit)
+        for name in spec.args:
+            kwargs[name] = getattr(dataset, name)
+
+        results = self._fit(**kwargs)
         return self._result_cls(results, dataset, self)
 
 
@@ -127,8 +152,7 @@ class LikelihoodBased(BaseEstimator):
             tau2 = 0
         w = 1. / (v + tau2)
         R = y - X.dot(beta)
-        ll = 0.5 * (np.log(w).sum() - (R * w * R).sum())
-        return -ll
+        return -0.5 * (np.log(w).sum() - (R * w * R).sum())
 
     def _reml_nll(self, theta, y, v, X):
         """ REML negative log-likelihood for meta-regression model. """
