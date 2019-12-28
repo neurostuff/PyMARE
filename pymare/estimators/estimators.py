@@ -103,20 +103,16 @@ class DerSimonianLaird(BaseEstimator):
         return {'beta': beta_dl, 'tau2': tau_dl}
 
 
-class LikelihoodBased(BaseEstimator):
-    """ Likelihood-based meta-regression estimator.
+class VarianceBasedLikelihoodEstimator(BaseEstimator):
+    """ Likelihood-based estimator for estimates with known variances.
 
-    Iteratively estimates the between-subject variance tau^2 and fixed effects
+    Iteratively estimates the between-subject variance tau^2 and fixed effect
     betas using the specified likelihood-based estimator (ML or REML).
 
     Args:
         method (str, optional): The estimation method to use. Either 'ML' (for
             maximum-likelihood) or 'REML' (restricted maximum-likelihood).
             Defaults to 'ML'.
-        beta (array, optional): Initial beta values to use in optimization. If
-            None (default), the DerSimonian-Laird estimate is used.
-        tau2 (float, optional): Initial tau^2 value to use in optimization. If
-            None (default), the DerSimonian-Laird estimate is used.
         kwargs (dict, optional): Keyword arguments to pass to the SciPy
             minimizer.
 
@@ -126,26 +122,22 @@ class LikelihoodBased(BaseEstimator):
         passed in as keyword arguments.
     """
 
-    def __init__(self, method='ml', beta=None, tau2=None, **kwargs):
-        self.method = method
-        self.beta = beta
-        self.tau2 = tau2
+    def __init__(self, method='ml', **kwargs):
+        nll_func = getattr(self, '_{}_nll'.format(method.lower()))
+        if nll_func is None:
+            raise ValueError("No log-likelihood function defined for method "
+                             "'{}'.".format(method))
+        self._nll_func = nll_func
         self.kwargs = kwargs
 
     def _fit(self, y, v, X):
-        # use D-L estimate for initial values if none provided
-        if self.tau2 is None or self.beta is None:
-            est_DL = DerSimonianLaird()._fit(y, v, X)
-            beta = est_DL['beta'] if self.beta is None else self.beta
-            tau2 = est_DL['tau2'] if self.tau2 is None else self.tau2
-
-        ll_func = getattr(self, '_{}_nll'.format(self.method.lower()))
-        if ll_func is None:
-            raise ValueError("No log-likelihood function defined for method "
-                             "'{}'.".format(self.method))
+        # use D-L estimate for initial values
+        est_DL = DerSimonianLaird()._fit(y, v, X)
+        beta = est_DL['beta']
+        tau2 = est_DL['tau2']
 
         theta_init = np.r_[beta.ravel(), tau2]
-        res = minimize(ll_func, theta_init, (y, v, X), **self.kwargs).x
+        res = minimize(self._nll_func, theta_init, (y, v, X), **self.kwargs).x
         beta, tau = res[:-1], float(res[-1])
         tau = np.max([tau, 0])
         return {'beta': beta, 'tau2': tau}
@@ -164,6 +156,68 @@ class LikelihoodBased(BaseEstimator):
         ll_ = self._ml_nll(theta, y, v, X)
         tau2 = theta[-1]
         w = 1. / (v + tau2)
+        F = (X * w).T.dot(X)
+        return ll_ + 0.5 * np.log(np.linalg.det(F))
+
+
+class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
+    """ Likelihood-based estimator for estimates with known sample sizes but
+    unknown variances.
+
+    Iteratively estimates the between-subject variance tau^2 and fixed effect
+    betas using the specified likelihood-based estimator (ML or REML).
+
+    Args:
+        method (str, optional): The estimation method to use. Either 'ML' (for
+            maximum-likelihood) or 'REML' (restricted maximum-likelihood).
+            Defaults to 'ML'.
+        beta (array, optional): Initial beta values to use in optimization. If
+            None (default), uses the weighted least squares estimate.
+        tau2 (float, optional): Initial tau^2 value to use in optimization.
+            Defaults to 0.
+        kwargs (dict, optional): Keyword arguments to pass to the SciPy
+            minimizer.
+
+    Notes:
+        The ML and REML solutions are obtained via SciPy's scalar function
+        minimizer (scipy.optimize.minimize). Parameters to minimize() can be
+        passed in as keyword arguments.
+    """
+
+    def __init__(self, method='ml', **kwargs):
+        nll_func = getattr(self, '_{}_nll'.format(method.lower()))
+        if nll_func is None:
+            raise ValueError("No log-likelihood function defined for method "
+                             "'{}'.".format(method))
+        self._nll_func = nll_func
+        self.kwargs = kwargs
+
+    def _fit(self, y, n, X):
+        # set tau^2 to 0 and compute starting values
+        tau2 = 0.
+        beta = WeightedLeastSquares(tau2=tau2)._fit(y, n, X)['beta']
+        sigma = ((y - X.dot(beta))**2 * n).mean()
+
+        theta_init = np.r_[beta.ravel(), sigma, tau2]
+        res = minimize(self._nll_func, theta_init, (y, n, X), **self.kwargs).x
+        beta, sigma, tau = res[:-2], float(res[:-2]), float(res[-1])
+        tau = np.max([tau, 0])
+        return {'beta': beta, 'sigma2': sigma, 'tau2': tau}
+
+    def _ml_nll(self, theta, y, n, X):
+        """ ML negative log-likelihood for meta-regression model. """
+        beta, sigma, tau2 = theta[:-2, None], theta[-2], theta[-1]
+        if tau2 < 0:
+            tau2 = 0
+        w = tau2 + sigma / n
+        R = y - X.dot(beta)
+        return -0.5 * (np.log(w).sum() - (R**2 / w).sum())
+
+    def _reml_nll(self, theta, y, n, X):
+        """ REML negative log-likelihood for meta-regression model. """
+        ll_ = self._ml_nll(theta, y, n, X)
+        sigma2, tau2 = theta[-2:]
+        w = tau2 + sigma2 / n
         F = (X * w).T.dot(X)
         return ll_ + 0.5 * np.log(np.linalg.det(F))
 

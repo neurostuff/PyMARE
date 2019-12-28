@@ -6,7 +6,9 @@ import numpy as np
 import pandas as pd
 
 from .estimators import (WeightedLeastSquares, DerSimonianLaird,
-                         LikelihoodBased, StanMetaRegression)
+                         VarianceBasedLikelihoodEstimator,
+                         SampleSizeBasedLikelihoodEstimator,
+                         StanMetaRegression)
 from .stats import ensure_2d
 
 
@@ -123,8 +125,8 @@ def meta_regression(estimates, variances=None, predictors=None,
     method = method.lower()
 
     estimator_cls = {
-        'ml': partial(LikelihoodBased, method=method),
-        'reml': partial(LikelihoodBased, method=method),
+        'ml': partial(VarianceBasedLikelihoodEstimator, method=method),
+        'reml': partial(VarianceBasedLikelihoodEstimator, method=method),
         'dl': DerSimonianLaird,
         'wls': WeightedLeastSquares,
         'fe': WeightedLeastSquares,
