@@ -34,7 +34,7 @@ class BaseEstimator(metaclass=ABCMeta):
         Returns:
             A boolean.
         """
-        args = getfullargspec(self._fit)[0]
+        args = getfullargspec(self._fit)[0][1:]
         for name in args:
             if getattr(dataset, name) is None:
                 return False
@@ -43,8 +43,13 @@ class BaseEstimator(metaclass=ABCMeta):
     def fit(self, dataset):
         kwargs = {}
         spec = getfullargspec(self._fit)
-        for name in spec.args:
-            kwargs[name] = getattr(dataset, name)
+        n_kw = len(spec.defaults) if spec.defaults else 0
+        n_args = len(spec.args) - n_kw - 1
+        for i, name in enumerate(spec.args[1:]):
+            if i >= n_args:
+                kwargs[name] = getattr(dataset, name, spec.defaults[i-n_args])
+            else:
+                kwargs[name] = getattr(dataset, name)
 
         results = self._fit(**kwargs)
         return self._result_cls(results, dataset, self)

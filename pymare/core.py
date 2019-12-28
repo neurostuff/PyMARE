@@ -42,7 +42,9 @@ class Dataset:
         # Provide convenient access to stored kwargs.
         if key in self.kwargs:
             return self.kwargs[key]
-        raise AttributeError
+        raise AttributeError("{} object has no attribute {}".format(
+                                self.__class__.__name__, key))
+
 
     def _get_predictors(self, X, names, add_intercept):
         if X is None and not add_intercept:
