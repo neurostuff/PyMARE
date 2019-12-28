@@ -16,14 +16,11 @@ class Dataset:
     Args:
         estimates (array-like): 1d array of study-level estimates with length K
         variances (array-like, optional): 1d array of study-level variances
-            with length K. If not passed, `weights` argument must be set.
+            with length K
         predictors (array-like, optional): 1d or 2d array containing
             study-level predictors (or covariates); has dimensions K x P
-        weights (str or array-like, optional): either a string indicating how
-            weights should be computed, or a 1d array of study-level weights
-             with length K. Valid string values are:
-                * "inverse-variance" (default): compute weights as 1/variances
-                * "uniform": assign equal weight (1) to all observations
+        sample_sizes (array-like, optional): 1d array of study-level sample
+            sizes (length K)
         names ([str], optional): List of length P containing the names of the
             predictors
         add_intercept (bool, optional): If True, an intercept column is
@@ -32,12 +29,11 @@ class Dataset:
         kwargs (dict, optional): Keyword arguments to pass onto estimators
     """
     def __init__(self, estimates, variances=None, predictors=None,
-                 weights='inverse-variance', names=None, add_intercept=True,
-                 **kwargs):
+                 sample_sizes=None, names=None, add_intercept=True, **kwargs):
         self.estimates = ensure_2d(estimates)
         self.variances = ensure_2d(variances)
+        self.sample_sizes = ensure_2d(sample_sizes)
         self.kwargs = kwargs
-        self.weights = self._get_weights(weights)
         X, n = self._get_predictors(predictors, names, add_intercept)
         self.predictors = X
         self.names = n
@@ -47,23 +43,6 @@ class Dataset:
         if key in self.kwargs:
             return self.kwargs[key]
         raise AttributeError
-
-    def _get_weights(self, weights):
-        if isinstance(weights, 'str'):
-            if weights == 'inverse-variance':
-                if self.variances is None:
-                    raise ValueError("Inverse-variance weighting specified, "
-                                     "but no variances were provided!")
-                return 1./self.variances
-            elif weights == 'uniform':
-                return np.ones_like(self.estimates)
-            else:
-                raise ValueError("'{}' is not a recognized specification for "
-                                 "weight computation. Either pass an array of "
-                                 "weights, or use 'inverse-variance' or "
-                                 "'uniform'.".format(weights))
-        else:
-            return weights
 
     def _get_predictors(self, X, names, add_intercept):
         if X is None and not add_intercept:
@@ -93,28 +72,25 @@ class Dataset:
         return self.predictors
 
     @property
-    def w(self):
-        """Alias for the `weights` attribute."""
-        return self.weights
+    def n(self):
+        """Alias for the `sample_sizes` attribute."""
+        return self.sample_sizes
 
 
-def meta_regression(estimates, variances=None, predictors=None, weights=None,
-                    names=None, add_intercept=True, method='ML',
-                    ci_method='QP', alpha=0.05, **kwargs):
+def meta_regression(estimates, variances=None, predictors=None,
+                    sample_sizes=None, names=None, add_intercept=True,
+                    method='ML', ci_method='QP', alpha=0.05, **kwargs):
     """Fits the standard meta-regression/meta-analysis model to provided data.
 
     Args:
         estimates (array-like): 1d array of study-level estimates with length K
         variances (array-like, optional): 1d array of study-level variances
-            with length K. If not passed, `weights` argument must be set.
+            with length K
         predictors (array-like, optional): 1d or 2d array containing
             study-level predictors (or covariates); has dimensions K x P. If
             omitted, add_intercept must be True.
-        weights (str or array-like, optional): either a string indicating how
-            weights should be computed, or a 1d array of study-level weights
-             with length K. Valid string values are:
-                * "inverse-variance" (default): compute weights as 1/variances
-                * "uniform": assign equal weight (1) to all observations
+        sample_sizes (array-like, optional): 1d array of study-level sample
+            sizes (length K)
         names ([str], optional): List of length P containing the names of the
             predictors
         add_intercept (bool, optional): If True, an intercept column is
@@ -139,7 +115,7 @@ def meta_regression(estimates, variances=None, predictors=None, weights=None,
         depending on the specified method ('Stan' will return the latter; all
         other methods return the former).
     """
-    dataset = Dataset(estimates, variances, predictors, weights, names,
+    dataset = Dataset(estimates, variances, predictors, sample_sizes, names,
                       add_intercept)
 
     method = method.lower()
