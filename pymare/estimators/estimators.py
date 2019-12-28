@@ -197,27 +197,28 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         tau2 = 0.
         beta = WeightedLeastSquares(tau2=tau2)._fit(y, n, X)['beta']
         sigma = ((y - X.dot(beta))**2 * n).mean()
-
         theta_init = np.r_[beta.ravel(), sigma, tau2]
         res = minimize(self._nll_func, theta_init, (y, n, X), **self.kwargs).x
-        beta, sigma, tau = res[:-2], float(res[:-2]), float(res[-1])
+        beta, sigma, tau = res[:-2], float(res[-2]), float(res[-1])
         tau = np.max([tau, 0])
         return {'beta': beta, 'sigma2': sigma, 'tau2': tau}
 
     def _ml_nll(self, theta, y, n, X):
         """ ML negative log-likelihood for meta-regression model. """
-        beta, sigma, tau2 = theta[:-2, None], theta[-2], theta[-1]
+        beta, sigma2, tau2 = theta[:-2, None], theta[-2], theta[-1]
         if tau2 < 0:
             tau2 = 0
-        w = tau2 + sigma / n
+        if sigma2 < 0:
+            sigma2 = 0
+        w = 1 / (tau2 + sigma2 / n)
         R = y - X.dot(beta)
-        return -0.5 * (np.log(w).sum() - (R**2 / w).sum())
+        return -0.5 * (np.log(w).sum() - (R * w * R).sum())
 
     def _reml_nll(self, theta, y, n, X):
         """ REML negative log-likelihood for meta-regression model. """
         ll_ = self._ml_nll(theta, y, n, X)
         sigma2, tau2 = theta[-2:]
-        w = tau2 + sigma2 / n
+        w = 1 / (tau2 + sigma2 / n)
         F = (X * w).T.dot(X)
         return ll_ + 0.5 * np.log(np.linalg.det(F))
 
