@@ -6,7 +6,9 @@ import numpy as np
 import pandas as pd
 
 from .estimators import (WeightedLeastSquares, DerSimonianLaird,
-                         LikelihoodBased, StanMetaRegression)
+                         VarianceBasedLikelihoodEstimator,
+                         SampleSizeBasedLikelihoodEstimator,
+                         StanMetaRegression)
 from .stats import ensure_2d
 
 
@@ -15,9 +17,12 @@ class Dataset:
 
     Args:
         estimates (array-like): 1d array of study-level estimates with length K
-        variances (array-like): 1d array of study-level variances with length K
+        variances (array-like, optional): 1d array of study-level variances
+            with length K
         predictors (array-like, optional): 1d or 2d array containing
             study-level predictors (or covariates); has dimensions K x P
+        sample_sizes (array-like, optional): 1d array of study-level sample
+            sizes (length K)
         names ([str], optional): List of length P containing the names of the
             predictors
         add_intercept (bool, optional): If True, an intercept column is
@@ -25,12 +30,13 @@ class Dataset:
             predictors matrix is passed as-is to estimators.
         kwargs (dict, optional): Keyword arguments to pass onto estimators
     """
-    def __init__(self, estimates, variances, predictors=None, names=None,
-                 add_intercept=True, **kwargs):
+    def __init__(self, estimates, variances=None, predictors=None,
+                 sample_sizes=None, names=None, add_intercept=True, **kwargs):
         self.estimates = ensure_2d(estimates)
         self.variances = ensure_2d(variances)
+        self.sample_sizes = ensure_2d(sample_sizes)
         self.kwargs = kwargs
-        X, n = self._setup_predictors(predictors, names, add_intercept)
+        X, n = self._get_predictors(predictors, names, add_intercept)
         self.predictors = X
         self.names = n
 
@@ -38,9 +44,11 @@ class Dataset:
         # Provide convenient access to stored kwargs.
         if key in self.kwargs:
             return self.kwargs[key]
-        raise AttributeError
+        raise AttributeError("{} object has no attribute {}".format(
+                                self.__class__.__name__, key))
 
-    def _setup_predictors(self, X, names, add_intercept):
+
+    def _get_predictors(self, X, names, add_intercept):
         if X is None and not add_intercept:
             raise ValueError("No fixed predictors found. If no X matrix is "
                              "provided, add_intercept must be True!")
@@ -67,17 +75,26 @@ class Dataset:
         """Alias for the `predictors` attribute."""
         return self.predictors
 
+    @property
+    def n(self):
+        """Alias for the `sample_sizes` attribute."""
+        return self.sample_sizes
 
-def meta_regression(estimates, variances, predictors=None, names=None,
-                    add_intercept=True, method='ML', ci_method='QP',
-                    alpha=0.05, **kwargs):
+
+def meta_regression(estimates, variances=None, predictors=None,
+                    sample_sizes=None, names=None, add_intercept=True,
+                    method='ML', ci_method='QP', alpha=0.05, **kwargs):
     """Fits the standard meta-regression/meta-analysis model to provided data.
 
     Args:
-        estimates ([float]): 1d array of study-level estimates with length K
-        variances ([float]): 1d array of study-level variances with length K
-        predictors ([float], optional): 1d or 2d array containing study-level
-            predictors (or covariates); has dimensions K x P
+        estimates (array-like): 1d array of study-level estimates with length K
+        variances (array-like, optional): 1d array of study-level variances
+            with length K
+        predictors (array-like, optional): 1d or 2d array containing
+            study-level predictors (or covariates); has dimensions K x P. If
+            omitted, add_intercept must be True.
+        sample_sizes (array-like, optional): 1d array of study-level sample
+            sizes (length K)
         names ([str], optional): List of length P containing the names of the
             predictors
         add_intercept (bool, optional): If True, an intercept column is
@@ -102,21 +119,29 @@ def meta_regression(estimates, variances, predictors=None, names=None,
         depending on the specified method ('Stan' will return the latter; all
         other methods return the former).
     """
-    dataset = Dataset(estimates, variances, predictors, names, add_intercept)
+    dataset = Dataset(estimates, variances, predictors, sample_sizes, names,
+                      add_intercept)
 
     method = method.lower()
 
-    estimator_cls = {
-        'ml': partial(LikelihoodBased, method=method),
-        'reml': partial(LikelihoodBased, method=method),
-        'dl': DerSimonianLaird,
-        'wls': WeightedLeastSquares,
-        'fe': WeightedLeastSquares,
-        'stan': StanMetaRegression,
-    }[method]
+    if method in ['ml', 'reml']:
+        if variances is not None:
+            est_cls = partial(VarianceBasedLikelihoodEstimator, method=method)
+        elif sample_sizes is not None:
+            est_cls = partial(SampleSizeBasedLikelihoodEstimator, method=method)
+        else:
+            raise ValueError("If method is ML or REML, one of `variances` or "
+                             "`sample sizes` must be passed!")
+    else:
+        est_cls = {
+            'dl': DerSimonianLaird,
+            'wls': WeightedLeastSquares,
+            'fe': WeightedLeastSquares,
+            'stan': StanMetaRegression,
+        }[method]
 
     # Get estimates
-    est = estimator_cls(**kwargs)
+    est = est_cls(**kwargs)
     results = est.fit(dataset)
     if hasattr(results, 'compute_stats'):
         results.compute_stats(ci_method=ci_method, alpha=alpha)
