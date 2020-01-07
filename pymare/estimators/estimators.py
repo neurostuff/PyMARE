@@ -47,7 +47,7 @@ class BaseEstimator(metaclass=ABCMeta):
         n_args = len(spec.args) - n_kw - 1
         for i, name in enumerate(spec.args[1:]):
             if i >= n_args:
-                kwargs[name] = getattr(dataset, name, spec.defaults[i-n_args])
+                kwargs[name] = getattr(dataset, name, spec.defaults[i - n_args])
             else:
                 kwargs[name] = getattr(dataset, name)
 
