@@ -13,10 +13,6 @@ jobs:
       - image: continuumio/miniconda3
     steps:
       - checkout
-      - run:
-          name: Install dependencies
-          command:  |
-            apt-get -y install gcc
       - persist_to_workspace:
           root: /tmp
           paths:
@@ -71,7 +67,7 @@ jobs:
           command:  |
             apt-get install -yqq curl
             source activate testenv
-            py.test --cov-report xml:coverage.xml --cov=pymare pymare
+            py.test --cov-report xml:coverage.xml --cov=pymare --ignore=pymare/tests/test_stan_estimators.py pymare
       - codecov/upload:
           file: /tmp/src/PyMARE/coverage.xml
 
