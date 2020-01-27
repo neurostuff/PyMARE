@@ -8,7 +8,7 @@ import pandas as pd
 from .estimators import (WeightedLeastSquares, DerSimonianLaird,
                          VarianceBasedLikelihoodEstimator,
                          SampleSizeBasedLikelihoodEstimator,
-                         StanMetaRegression)
+                         StanMetaRegression, Hedges)
 from .stats import ensure_2d
 
 
@@ -105,6 +105,7 @@ def meta_regression(estimates, variances=None, predictors=None,
                 * 'ML': Maximum-likelihood estimator
                 * 'REML': Restricted maximum-likelihood estimator
                 * 'DL': DerSimonian-Laird estimator
+                * 'HE': Hedges estimator
                 * 'WLS' or 'FE': Weighted least squares (fixed effects only)
                 * 'Stan': Full Bayesian MCMC estimation via Stan
         ci_method (str, optional): Estimation method to use when computing
@@ -138,6 +139,7 @@ def meta_regression(estimates, variances=None, predictors=None,
             'wls': WeightedLeastSquares,
             'fe': WeightedLeastSquares,
             'stan': StanMetaRegression,
+            'he': Hedges
         }[method]
 
     # Get estimates
