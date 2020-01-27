@@ -97,10 +97,32 @@ class DerSimonianLaird(BaseEstimator):
         # D-L estimate of tau^2
         precision = np.linalg.pinv((X * w).T.dot(X))
         A = w_sum - np.trace(X.dot(precision.dot(X.T) * (w**2).T))
-        tau_dl = np.max([0., (Q - k + p) / A])
+        tau_dl = (Q - k + p) / A
+        tau_dl = np.max([0., tau_dl])
         # Re-estimate beta with tau^2 estimate
         beta_dl = WeightedLeastSquares(tau_dl)._fit(y, v, X)['beta'].ravel()
         return {'beta': beta_dl, 'tau2': tau_dl}
+
+
+class Hedges(BaseEstimator):
+    """ Hedges meta-regression estimator.
+
+    Estimates the between-subject variance tau^2 using the Hedges & Olkin
+    (1985) approach.
+
+    References:
+        Hedges LV, Olkin I. 1985. Statistical Methods for Meta‐Analysis.
+    """
+    def _fit(self, y, v, X):
+        k, p = X.shape
+        precision = np.linalg.pinv(X.T.dot(X))
+        beta = precision.dot(X.T).dot(y).ravel()
+        mse = ((y.ravel() - X.dot(beta)) ** 2).sum() / (k - p)
+        tau_ho = mse - v.sum() / k
+        tau_ho = max([0, tau_ho])
+        # Estimate beta with tau^2 estimate
+        beta_ho = WeightedLeastSquares(tau_ho)._fit(y, v, X)['beta'].ravel()
+        return {'beta': beta_ho, 'tau2': tau_ho}
 
 
 class VarianceBasedLikelihoodEstimator(BaseEstimator):
