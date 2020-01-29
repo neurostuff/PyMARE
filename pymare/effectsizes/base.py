@@ -1,75 +1,53 @@
 """Tools for effect size computation/conversion."""
 
-from typing import Iterable
 import warnings
 import inspect
 from functools import partial
 
 from sympy import sympify, lambdify, nonlinsolve, Symbol
 
-from pymare import Dataset
+from . import expressions
 
 
-# Equations that cover conversion between basic quantities.
-BASE_EQUATIONS = [
-    'sd - sqrt(v)',
-    'sem - sd / sqrt(n)',
-    't - y / sem'
-]
-
-# Standardized effect size metrics.
-EFFECT_SIZE_EQUATIONS = [
-    'd - y / sd',
-    'g - y * j / sd',
-    'j - 1 - (3 / (4 * (n - 1) -1))'
-]
-
-
-def get_system(mode='base', target=None, known_vars=None):
+def get_system(inputs=None, target=None, known_vars=None, metric=None):
     """Returns a system of SymPy equations that meet specified criteria.
-    
+
     Args:
-        mode (str, optional): Describes the set of equations to start from.
-            Options include:
-                * 'base': Equations to compute basic quantities from common
-                  inputs like variance, point estimate, etc.
-                * 'onesample': All effect size metrics that apply to the
-                  one-sample case.
-                * 'paired': All effect size metrics that apply to the paired
-                  samples case.
-                * 'twosample': All effect size metrics that apply to the
-                  independent samples case.
+        inputs (int, optional): Number of inputs in the originating comparison.
+            Used to select appropriate expressions. Specify 1 for one-sample,
+            2 for two-sample, or None to select only expressions that are not
+            specific to either case.
         target (str, optional): The name of the target output metric. Can be
             any quantity that occurs at least once in an equation (e.g., 't',
             'g', 'sem', etc.). If provided, the system will contain only a
             single equation in the event that one is sufficient to produce the
             desired target. Defaults to None, in which case all equations in
-            the set specified by the `mode` will be returned.
+            the set specified by the `inputs` will be returned.
         known_vars ([str], optional): An iterable of strings giving the names
             of any known variables. These will be used to screen equations in
             the event that `target` is provided. Defaults to None.
-    
-    Returns:
-        [sympy.core.expr.Expr]: A list of sympy expressions.
-    """
-    # Build list of candidate expressions based on the mode
-    if mode == 'base':
-        exprs = BASE_EQUATIONS
-    else:
-        exprs = EFFECT_SIZE_EQUATIONS
 
-    exprs = [sympify(expr) for expr in exprs]
+    Returns:
+        [Expression]: A list of Expression instances.
+    """
+    # Build list of candidate expressions based on the inputs
+    exprs = [exp for exp in expressions.expressions
+             if exp.inputs is None or inputs == exp.inputs]
 
     # If a target is passed, check if any single equation is sufficient
     if target is not None:
         known_vars = known_vars or {}
         known_set = set(known_vars.keys()) | set(target)
         for exp in exprs:
-            free = set(s.name for s in exp.free_symbols)
+            free = set(s.name for s in exp.symbols)
             if target not in free:
                 continue
             if not free - known_set:
                 return [exp]
+    
+        # TODO: use a smarter search algorithm to extract a spanning tree in
+        # cases where a single equation is insufficent but the full set is
+        # unnecessary.
     
     return exprs
 
@@ -136,7 +114,7 @@ def solve_system(system, known_vars=None):
 
 class EffectSizeConverter:
     """Converts between effect size metrics and dependent quantities.
-    
+
     Args:
         dataset (Dataset, optional): Optional PyMARE dataset to extract input
             quantities from. Other arguments will take precedent over values
@@ -147,24 +125,29 @@ class EffectSizeConverter:
         n ((float, iterable), optional): Sample size(s). Defaults to None.
         t ((float, iterable), optional): t-statistic(s). Defaults to None.
         y2 ((float, iterable), optional): Second set of of point estimates, in
-            the paired or two-sample case. Defaults to None.
+            the two-sample case. Defaults to None.
         v2 ((float, iterable), optional): Second set of variances, in the
-            paired or two-sample case. Defaults to None.
+            two-sample case. Defaults to None.
         n2 ((float, iterable), optional): [description]. Second set of sample
-            sizes, in the paired or two-sample case. Defaults to None.
-        paired (bool, optional): If one of y2, v2, or n2 is defined, indicates
-            whether the inputs reflect a paired (True) or independent-samples
-            (False) comparison. Defaults to True. Ignored if only one set of
-            values is provided.
+            sizes, in the two-sample case. Defaults to None.
+
+    Notes:
+        All input variables are assumed to reflect study- or analysis-level
+        summaries, and are _not_ individual data points. E.g., do not pass in
+        a vector of point estimates as `y` and a scalar for the variances `v`.
+        The lengths of all inputs must match. This is true even if two sets of
+        values are provided (i.e., if y2, v2, or n2 are passed). In this case,
+        the pairs reflect study-level summaries for the two groups, and are not
+        the raw scores for (potentially different-sized) groups.
+
+        It also follows from this assumption that if two sets of values are
+        provided, the data are assumed to come from an independent-samples
+        comparison. Paired-sampled comparisons are not handled, and must be
+        converted to one-sample summaries prior to initialization.
+
     """
     def __init__(self, dataset=None, y=None, v=None, n=None, t=None, d=None,
-                 y2=None, v2=None, n2=None, paired=True):
-        # If two ys but only one sample size are provided and the test is
-        # paired, assume the same sample size in both conditions
-        if (y is not None and y2 is not None
-            and n is not None and n2 is None and paired):
-            n2 = n
-
+                 y2=None, v2=None, n2=None):
         # Assume equal variances if there are two estimates but only one variance
         if (y is not None and y2 is not None and v is not None
             and v2 is None):
@@ -174,7 +157,7 @@ class EffectSizeConverter:
 
         # Validate presence of quantities that need to be passed in pairs
         if y2 is not None or v2 is not None or n2 is not None:
-            self.two_sample = True
+            self.inputs = 2
             scope_vars = locals()
             for q1 in ['y', 'v', 'n']:
                 q2 = '%s2' % q1
@@ -184,7 +167,7 @@ class EffectSizeConverter:
                         "There appear to be 2 conditions or groups. Please "
                         "provide either both %s and %s or neither." % (q1, q2))
         else:
-            self.two_sample = False
+            self.inputs = 1
 
         # Consolidate available variables
         local_vars = locals()
@@ -195,14 +178,15 @@ class EffectSizeConverter:
         # Set any known variables
         self.known_vars = {}
         args = inspect.getfullargspec(self.__init__).args
-        args = list(set(args) - {'self', 'dataset', 'paired'})
+        args = list(set(args) - {'self', 'dataset'})
         for var in args:
             if local_vars[var] is not None:
                 self.known_vars[var] = local_vars[var]
 
-        system = get_system(mode='base')
-        new_vars = solve_system(system, self.known_vars)
-        self.known_vars.update(new_vars)
+        # system = get_system(inputs=self.inputs)
+        # system = [exp.sympy for exp in system]
+        # new_vars = solve_system(system, self.known_vars)
+        # self.known_vars.update(new_vars)
 
     def _extract_from_dataset(self, dataset):
         pass
@@ -231,12 +215,9 @@ class EffectSizeConverter:
         if stat in self.known_vars:
             return self.known_vars[stat]
 
-        if self.two_sample:
-            mode = 'twosample'
-        else:
-            mode = 'paired' if self.paired else 'onesample'
-
-        system = get_system(mode=mode, target=stat, known_vars=self.known_vars)
+        system = get_system(inputs=self.inputs, target=stat,
+                            known_vars=self.known_vars)
+        system = [exp.sympy for exp in system]
         result = solve_system(system, self.known_vars)
         self.known_vars.update(result)
         return result[stat]
