@@ -60,7 +60,7 @@ expressions = [
 ]
 
 
-def filter_expressions(target, known_vars, inputs=1):
+def select_expressions(target, known_vars, inputs=1):
 
     exp_dict = defaultdict(list)
 

@@ -6,50 +6,7 @@ from functools import partial
 
 from sympy import sympify, lambdify, nonlinsolve, Symbol
 
-from . import expressions
-
-
-def get_system(inputs=None, target=None, known_vars=None, metric=None):
-    """Returns a system of SymPy equations that meet specified criteria.
-
-    Args:
-        inputs (int, optional): Number of inputs in the originating comparison.
-            Used to select appropriate expressions. Specify 1 for one-sample,
-            2 for two-sample, or None to select only expressions that are not
-            specific to either case.
-        target (str, optional): The name of the target output metric. Can be
-            any quantity that occurs at least once in an equation (e.g., 't',
-            'g', 'sem', etc.). If provided, the system will contain only a
-            single equation in the event that one is sufficient to produce the
-            desired target. Defaults to None, in which case all equations in
-            the set specified by the `inputs` will be returned.
-        known_vars ([str], optional): An iterable of strings giving the names
-            of any known variables. These will be used to screen equations in
-            the event that `target` is provided. Defaults to None.
-
-    Returns:
-        [Expression]: A list of Expression instances.
-    """
-    # Build list of candidate expressions based on the inputs
-    exprs = [exp for exp in expressions.expressions
-             if exp.inputs is None or inputs == exp.inputs]
-
-    # If a target is passed, check if any single equation is sufficient
-    if target is not None:
-        known_vars = known_vars or {}
-        known_set = set(known_vars.keys()) | set(target)
-        for exp in exprs:
-            free = set(s.name for s in exp.symbols)
-            if target not in free:
-                continue
-            if not free - known_set:
-                return [exp]
-    
-        # TODO: use a smarter search algorithm to extract a spanning tree in
-        # cases where a single equation is insufficent but the full set is
-        # unnecessary.
-    
-    return exprs
+from .expressions import select_expressions
 
 
 def solve_system(system, known_vars=None):
@@ -183,11 +140,6 @@ class EffectSizeConverter:
             if local_vars[var] is not None:
                 self.known_vars[var] = local_vars[var]
 
-        # system = get_system(inputs=self.inputs)
-        # system = [exp.sympy for exp in system]
-        # new_vars = solve_system(system, self.known_vars)
-        # self.known_vars.update(new_vars)
-
     def _extract_from_dataset(self, dataset):
         pass
 
@@ -208,15 +160,16 @@ class EffectSizeConverter:
 
         Notes:
             All values computed via to() are internally cached. Do not try to
-            update the instance's known values directly and recompute
-            quantities; all changes in data require initialization of a new
-            instance.
+            update the instance's known values directly and then recompute
+            quantities; any change to input data require initialization of a
+            new instance.
         """
         if stat in self.known_vars:
             return self.known_vars[stat]
 
-        system = get_system(inputs=self.inputs, target=stat,
-                            known_vars=self.known_vars)
+        known = set(self.known_vars.keys())
+        system = select_expressions(target=stat, known_vars=known,
+                                    inputs=self.inputs)
         system = [exp.sympy for exp in system]
         result = solve_system(system, self.known_vars)
         self.known_vars.update(result)
