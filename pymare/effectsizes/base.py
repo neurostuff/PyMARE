@@ -172,5 +172,10 @@ class EffectSizeConverter:
                                     inputs=self.inputs)
         system = [exp.sympy for exp in system]
         result = solve_system(system, self.known_vars)
+
+        if result is None:
+            raise ValueError("Unable to solve for statistic '{}' given the "
+                             "known quantities ({}).".format(stat, known))
+
         self.known_vars.update(result)
         return result[stat]
