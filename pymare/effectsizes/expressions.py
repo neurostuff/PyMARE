@@ -46,7 +46,6 @@ EXPRESSIONS = [
 
     # Two-sample procedures
     Expression('sd2 - sqrt(v2)', inputs=2),
-    Expression('sd_pooled - sqrt((v + v2) / 2)', inputs=2),
     Expression('t - (y - y2) / sqrt(v / n + v2 / n2)',
                "Two-sample t-test (unequal variances)", inputs=2),
     Expression('sd_pooled - sqrt((v * (n - 1) + v2 * (n2 - 1)) / (n + n2 + 2))',
@@ -83,7 +82,7 @@ def select_expressions(target, known_vars, inputs=1):
             if sym not in known_vars:
                 exp_dict[sym.name].append(exp)
 
-    def df_search(sym, exprs, known, visited, depth=0):
+    def df_search(sym, exprs, known, visited):
         """Recursively select expressions needed to solve for sym."""
 
         if sym not in exp_dict:
@@ -103,15 +102,15 @@ def select_expressions(target, known_vars, inputs=1):
 
             new_exprs = list(exprs) + [exp]
             free_symbols = sym_names - known.union({sym})
-            visited = set(visited) | {sym}
+            _visited = set(visited) | {sym}
 
             # If there are no more free symbols, we're done
             if not free_symbols:
-                results.append((new_exprs, visited))
+                results.append((new_exprs, _visited))
                 continue
 
             # Loop over remaining free symbols and recurse
-            candidates = [df_search(child, new_exprs, known, visited, depth + 1)
+            candidates = [df_search(child, new_exprs, known, _visited)
                           for child in free_symbols]
             candidates = [c for c in candidates if c is not None]
 
