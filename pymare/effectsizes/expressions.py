@@ -61,6 +61,18 @@ expressions = [
 
 
 def select_expressions(target, known_vars, inputs=1):
+    """Select a ~minimal system of expressions needed to solve for the target.
+
+    Args:
+        target (str): The named statistic to solve for ('t', 'd', 'g', etc.).
+        known_vars (set): A set of strings giving the names of the known
+            variables.
+        inputs (None, int): Restricts the system to expressions that apply in
+            the one-sample case (1), two-sample case (2), or both (None).
+
+    Returns:
+        A list of Expression instances, or None if there is no solution.
+    """
 
     exp_dict = defaultdict(list)
 
@@ -72,6 +84,7 @@ def select_expressions(target, known_vars, inputs=1):
                 exp_dict[sym.name].append(exp)
 
     def df_search(sym, exprs, known, visited, depth=0):
+        """Recursively select expressions needed to solve for sym."""
 
         if sym not in exp_dict:
             return None
