@@ -27,7 +27,7 @@ class Expression:
         self.symbols = self.sympy.free_symbols
 
 
-expressions = [
+EXPRESSIONS = [
 
     # Common to one-sample and two-sample procedures
     Expression('sd - sqrt(v)'),
@@ -76,7 +76,7 @@ def select_expressions(target, known_vars, inputs=1):
 
     exp_dict = defaultdict(list)
 
-    for exp in expressions:
+    for exp in EXPRESSIONS:
         if exp.inputs is not None and exp.inputs != inputs:
             continue
         for sym in exp.symbols:

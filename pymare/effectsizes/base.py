@@ -122,7 +122,7 @@ class EffectSizeConverter:
                     (scope_vars[q2] is None and scope_vars[q1] is not None)):
                     raise ValueError(
                         "There appear to be 2 conditions or groups. Please "
-                        "provide either both %s and %s or neither." % (q1, q2))
+                        "provide both of %s and %s or neither." % (q1, q2))
         else:
             self.inputs = 1
 
