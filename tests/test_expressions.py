@@ -8,6 +8,7 @@ from pymare.effectsizes.expressions import Expression, select_expressions
 def _symbol_set(*args):
     return set([Symbol(a) for a in args])
 
+
 def test_Expression_init():
     # Fails because SymPy can't parse expression
     with pytest.raises(SympifyError):
