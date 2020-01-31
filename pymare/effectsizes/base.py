@@ -4,7 +4,7 @@ import warnings
 import inspect
 from functools import partial
 
-from sympy import sympify, lambdify, nonlinsolve, Symbol
+from sympy import sympify, lambdify, Symbol, solve
 
 from .expressions import select_expressions
 
@@ -45,11 +45,15 @@ def solve_system(system, known_vars=None):
         dummies.add(dummy)
         system.append(symbols[name] - dummy)
 
-    # Solve the system for all existing symbols
+    # Solve the system for all existing symbols.
+    # NOTE: previously we used the nonlinsolve() solver instead of solve().
+    # for inscrutable reasons, nonlinsolve behaves unpredictably, and sometimes
+    # fails to produce solutions even for repeated runs of the exact same
+    # inputs. Conclusion: do not use nonlinsolve.
     symbols = list(symbols.values())
-    solutions = nonlinsolve(system, symbols)
+    solutions = solve(system, symbols)
 
-    if not len(solutions.args):
+    if not len(solutions):
         return {}
 
     # Prepare the dummy list and data args in a fixed order
@@ -58,7 +62,7 @@ def solve_system(system, known_vars=None):
 
     # Compute any solved vars via numpy and store in new dict
     results = {}
-    for i, sol in enumerate(solutions.args[0]):
+    for i, sol in enumerate(solutions[0]):
         name = symbols[i].name
         free = sol.free_symbols
         if (not (free - dummies) and not
