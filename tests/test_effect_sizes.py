@@ -25,6 +25,5 @@ def test_EffectSizeConverter_smoke_test(data):
 
     esc = EffectSizeConverter(**data)
     assert set(esc.known_vars.keys()) == set(data.keys())
-    print(esc.to_g())
     assert np.allclose(esc.to_d(), np.array([-0.63246, -0.140744]), atol=1e-5)
     assert np.allclose(esc.to_g(), np.array([-0.61065, -0.13707]), atol=1e-5)

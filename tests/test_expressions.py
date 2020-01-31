@@ -48,7 +48,7 @@ def test_select_expressions():
 
     exps = select_expressions('g', {'y', 'y2', 'n', 'n2', 'v', 'v2'}, inputs=2)
     assert len(exps) == 4
-    targets = ['sd_pooled - sqrt((v*(n - 1) + v2*(n2 - 1))/(n + n2 + 2))',
+    targets = ['sd_pooled - sqrt((v*(n - 1) + v2*(n2 - 1))/(n + n2 - 2))',
                'd - (y - y2)/sd_pooled', '-d*j + g',
                'j - 1 + 3/(4*n + 4*n2 - 9)']
     assert set([str(e.sympy) for e in exps]) == set(targets)

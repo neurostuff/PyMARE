@@ -134,4 +134,3 @@ def select_expressions(target, known_vars, inputs=1):
     # base case
     candidates = df_search(target, [], known_vars, set())
     return None if not candidates else candidates[0]
-
