@@ -48,7 +48,7 @@ EXPRESSIONS = [
     Expression('sd2 - sqrt(v2)', inputs=2),
     Expression('t - (y - y2) / sqrt(v / n + v2 / n2)',
                "Two-sample t-test (unequal variances)", inputs=2),
-    Expression('sd_pooled - sqrt((v * (n - 1) + v2 * (n2 - 1)) / (n + n2 + 2))',
+    Expression('sd_pooled - sqrt((v * (n - 1) + v2 * (n2 - 1)) / (n + n2 - 2))',
                "Pooled standard deviation (Cohen version)", inputs=2),
     Expression('d - (y - y2) / sd_pooled', "Cohen's d (two-sample)",
                inputs=2),
