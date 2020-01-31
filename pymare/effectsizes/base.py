@@ -80,17 +80,26 @@ class EffectSizeConverter:
         dataset (Dataset, optional): Optional PyMARE dataset to extract input
             quantities from. Other arguments will take precedent over values
             found in the Dataset. Defaults to None.
-        y ((float, iterable), optional): Point estimate(s) (e.g., means).
-            Defaults to None.
-        v ((float, iterable), optional): Variance(s). Defaults to None.
-        n ((float, iterable), optional): Sample size(s). Defaults to None.
-        t ((float, iterable), optional): t-statistic(s). Defaults to None.
-        y2 ((float, iterable), optional): Second set of of point estimates, in
-            the two-sample case. Defaults to None.
-        v2 ((float, iterable), optional): Second set of variances, in the
-            two-sample case. Defaults to None.
-        n2 ((float, iterable), optional): [description]. Second set of sample
-            sizes, in the two-sample case. Defaults to None.
+        **kwargs: Optional keyword arguments providing additional inputs. All
+            values must be floats, 1d ndarrays, or any iterable that can be
+            converted to an ndarray. All variables must have the same length.
+            Allowable variable currently include:
+            * y: Point estimate with unbounded distributions--most commonly,
+                study- or experiment-level estimates of means.
+            * v: Sampling variance of the mean.
+            * sd: Sample standard deviation.
+            * n: Sample size.
+            * sem: Standard error of the mean.
+            * d: Cohen's d.
+            * g: Hedges' g.
+            * t: t-statistic.
+            * z: z-score.
+            In addition, for any of the above, one can pass in a second set of
+            values, representing a second group of estimates, by appending any
+            name with '2'--e.g., y2, v2, sd2, n2, etc. Note that if any such
+            variable is passed, the corresponding estimate for the first group
+            must also be passed--e.g., if `v2` is set, `v` must also be
+            provided.
 
     Notes:
         All input variables are assumed to reflect study- or analysis-level
@@ -107,45 +116,36 @@ class EffectSizeConverter:
         converted to one-sample summaries prior to initialization.
 
     """
-    def __init__(self, dataset=None, y=None, v=None, n=None, t=None, d=None,
-                 y2=None, v2=None, n2=None):
+    def __init__(self, dataset=None, **kwargs):
         # Assume equal variances if there are two estimates but only one variance
-        if (y is not None and y2 is not None and v is not None
-            and v2 is None):
-            v2 = v
+        if (kwargs.get('y') is not None and kwargs.get('y2') is not None
+            and kwargs.get('v') is not None and kwargs.get('v2') is None):
+            kwargs['v2'] = kwargs['v']
             warnings.warn("Two sets of estimates were provided, but only one "
                           "variance. Assuming equal variances.")
 
         # Validate presence of quantities that need to be passed in pairs
-        if y2 is not None or v2 is not None or n2 is not None:
+        var_names = list(kwargs.keys())
+        if any([name.endswith('2') for name in var_names]):
             self.inputs = 2
-            scope_vars = locals()
-            for q1 in ['y', 'v', 'n']:
+            all_vars = set([v.strip('2') for v in var_names])
+            for q1 in all_vars:
                 q2 = '%s2' % q1
-                if ((scope_vars[q1] is not None and scope_vars[q2] is None) or
-                    (scope_vars[q2] is None and scope_vars[q1] is not None)):
+                if ((kwargs.get(q1) is not None and kwargs.get(q2) is None) or
+                    (kwargs.get(q2) is None and kwargs.get(q1) is not None)):
                     raise ValueError(
-                        "There appear to be 2 conditions or groups. Please "
+                        "There appear to be 2 groups of estimates. Please "
                         "provide both of %s and %s or neither." % (q1, q2))
         else:
             self.inputs = 1
 
-        # Consolidate available variables
-        local_vars = locals()
-        if dataset is not None:
-            dataset_vars = self._extract_from_dataset(dataset)
-            local_vars.update(dataset_vars)
+        # Extract variables from dataset if passed
+        self.known_vars = {} if dataset is None else self._from_dataset(dataset)
 
-        # Set any known variables
-        self.known_vars = {}
-        args = inspect.getfullargspec(self.__init__).args
-        args = list(set(args) - {'self', 'dataset'})
-        for var in args:
-            if local_vars[var] is not None:
-                self.known_vars[var] = local_vars[var]
+        self.known_vars.update(kwargs)
 
-    def _extract_from_dataset(self, dataset):
-        pass
+    def _from_dataset(self, dataset):
+        return {}
 
     def __getattr__(self, key):
         if key.startswith('to_'):
