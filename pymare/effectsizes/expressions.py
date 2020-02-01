@@ -3,6 +3,11 @@ from collections import defaultdict
 from itertools import chain
 
 from sympy import sympify
+from sympy.core.compatibility import exec_
+
+
+_locals = {}
+exec_('from sympy.stats import *', _locals)
 
 
 class Expression:
@@ -23,7 +28,7 @@ class Expression:
         self.inputs = inputs
         self.metric = metric
 
-        self.sympy = sympify(expr)
+        self.sympy = sympify(expr, locals=_locals)
         self.symbols = self.sympy.free_symbols
 
 
@@ -32,6 +37,7 @@ EXPRESSIONS = [
     # Common to one-sample and two-sample procedures
     Expression('sd - sqrt(v)'),
     Expression('sem - sd / sqrt(n)'),
+    Expression('p - cdf(Normal("normal", 0, 1))(z)'),
 
     # One-sample procedures
     Expression('t - y / sem', "One-sample t-test", inputs=1),

@@ -67,7 +67,7 @@ def solve_system(system, known_vars=None):
         free = sol.free_symbols
         if (not (free - dummies) and not
             (len(free) == 1 and list(free)[0].name.strip('_') == name)):
-            func = lambdify(dummy_list, sol, 'numpy')
+            func = lambdify(dummy_list, sol, ['numpy', 'scipy'])
             results[name] = func(*data_args)
 
     return results
@@ -94,12 +94,12 @@ class EffectSizeConverter:
             * g: Hedges' g.
             * t: t-statistic.
             * z: z-score.
-            In addition, for any of the above, one can pass in a second set of
-            values, representing a second group of estimates, by appending any
-            name with '2'--e.g., y2, v2, sd2, n2, etc. Note that if any such
-            variable is passed, the corresponding estimate for the first group
-            must also be passed--e.g., if `v2` is set, `v` must also be
-            provided.
+            In addition, for most of the above (all but 't', 'd', 'g', 'z'),
+            one can pass in a second set of values, representing a second group
+            of estimates, by appending any name with '2'--e.g., y2, v2, sd2,
+            n2, etc. Note that if any such variable is passed, the
+            corresponding estimate for the first group must also be passed--
+            e.g., if `v2` is set, `v` must also be provided.
 
     Notes:
         All input variables are assumed to reflect study- or analysis-level
@@ -129,7 +129,8 @@ class EffectSizeConverter:
         if any([name.endswith('2') for name in var_names]):
             self.inputs = 2
             all_vars = set([v.strip('2') for v in var_names])
-            for q1 in all_vars:
+            pair_vars = all_vars - {'t', 'z', 'd', 'p'}
+            for q1 in pair_vars:
                 q2 = '%s2' % q1
                 if ((kwargs.get(q1) is not None and kwargs.get(q2) is None) or
                     (kwargs.get(q2) is None and kwargs.get(q1) is not None)):

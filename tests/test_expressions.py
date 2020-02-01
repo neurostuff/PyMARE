@@ -52,3 +52,6 @@ def test_select_expressions():
                'd - (y - y2)/sd_pooled', '-d*j + g',
                'j - 1 + 3/(4*n + 4*n2 - 9)']
     assert set([str(e.sympy) for e in exps]) == set(targets)
+
+    exps = select_expressions('p', {'z'})
+    assert len(exps) == 1
