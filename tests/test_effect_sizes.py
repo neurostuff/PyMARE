@@ -42,3 +42,11 @@ def test_EffectSizeConverter_from_df(data):
     df = pd.DataFrame(data)
     esc = EffectSizeConverter(df)
     assert np.allclose(esc.to_g(), np.array([-0.61065, -0.13707]), atol=1e-5)
+
+
+def test_EffectSizeConverter_to_dataset(data):
+    esc = EffectSizeConverter(**data)
+    X = np.array([1, 2])
+    dataset = esc.to_dataset(predictors=X, names=['dummy'])
+    assert dataset.__class__.__name__ == 'Dataset'
+    assert dataset.names == ['intercept', 'dummy']

@@ -7,6 +7,7 @@ from functools import partial
 from sympy import sympify, lambdify, Symbol, solve
 
 from .expressions import select_expressions
+from pymare import Dataset
 
 
 def solve_system(system, known_vars=None):
@@ -53,7 +54,7 @@ def solve_system(system, known_vars=None):
     symbols = list(symbols.values())
     solutions = solve(system, symbols)
 
-    if not len(solutions):
+    if not solutions:
         return {}
 
     # Prepare the dummy list and data args in a fixed order
@@ -66,7 +67,7 @@ def solve_system(system, known_vars=None):
         name = symbols[i].name
         free = sol.free_symbols
         if (not (free - dummies) and not
-            (len(free) == 1 and list(free)[0].name.strip('_') == name)):
+                (len(free) == 1 and list(free)[0].name.strip('_') == name)):
             func = lambdify(dummy_list, sol, ['numpy', 'scipy'])
             results[name] = func(*data_args)
 
@@ -95,7 +96,8 @@ class EffectSizeConverter:
             * g: Hedges' g.
             * t: t-statistic.
             * z: z-score.
-            In addition, for most of the above (all but 't', 'd', 'g', 'z'),
+            * p: p-value.
+            In addition, for most of the above (all but 't', 'd', 'g', 'p', 'z'),
             one can pass in a second set of values, representing a second group
             of estimates, by appending any name with '2'--e.g., y2, v2, sd2,
             n2, etc. Note that if any such variable is passed, the
@@ -152,6 +154,14 @@ class EffectSizeConverter:
         if key.startswith('to_'):
             stat = key.replace('to_', '')
             return partial(self.to, stat=stat)
+
+    def to_dataset(self, estimate='y', **kwargs):
+        estimates = self.to(estimate)
+        # TODO: replace this with quantity-appropriate variance (e.g., var_g)
+        variances = self.known_vars.get('v')
+        sample_sizes = self.known_vars.get('n')
+        return Dataset(estimates=estimates, variances=variances,
+                       sample_sizes=sample_sizes, **kwargs)
 
     def to(self, stat):
         """Compute and return values for the specified statistic, if possible.
