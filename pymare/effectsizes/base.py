@@ -77,6 +77,10 @@ class EffectSizeConverter:
     """Converts between effect size metrics and dependent quantities.
 
     Args:
+        data (DataFrame): Optional pandas DataFrame to extract variables from.
+            Column names must match the controlled names listed below for
+            kwargs. If additional kwargs are provided, they will take
+            precedence over the values in the data frame.
         **kwargs: Optional keyword arguments providing additional inputs. All
             values must be floats, 1d ndarrays, or any iterable that can be
             converted to an ndarray. All variables must have the same length.
@@ -113,7 +117,12 @@ class EffectSizeConverter:
         converted to one-sample summaries prior to initialization.
 
     """
-    def __init__(self, **kwargs):
+    def __init__(self, data=None, **kwargs):
+
+        if data is not None:
+            df_cols = {col: data.loc[:, col].values for col in data.columns}
+            kwargs = dict(**df_cols, **kwargs)
+
         # Assume equal variances if there are two estimates but only one variance
         if (kwargs.get('y') is not None and kwargs.get('y2') is not None
             and kwargs.get('v') is not None and kwargs.get('v2') is None):

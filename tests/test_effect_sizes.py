@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+import pandas as pd
 
 from pymare.effectsizes import (EffectSizeConverter, solve_system,
                                 select_expressions)
@@ -35,3 +36,9 @@ def test_EffectSizeConverter_smoke_test(data):
 
     esc = EffectSizeConverter(p=data['p'])
     assert np.allclose(esc.to_z(), np.array([-1.645, 2.326]), atol=1e-3)
+
+
+def test_EffectSizeConverter_from_df(data):
+    df = pd.DataFrame(data)
+    esc = EffectSizeConverter(df)
+    assert np.allclose(esc.to_g(), np.array([-0.61065, -0.13707]), atol=1e-5)
