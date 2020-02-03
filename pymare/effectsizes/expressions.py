@@ -12,7 +12,7 @@ exec_('from sympy.stats import *', _locals)
 
 class Expression:
     """Represents a single statistical expression.
-    
+
     Args:
         expr (str): String representation of the mathematical expression.
         description (str, optional): Optional text description of expression.

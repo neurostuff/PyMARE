@@ -47,7 +47,6 @@ class Dataset:
         raise AttributeError("{} object has no attribute {}".format(
                                 self.__class__.__name__, key))
 
-
     def _get_predictors(self, X, names, add_intercept):
         if X is None and not add_intercept:
             raise ValueError("No fixed predictors found. If no X matrix is "

@@ -77,13 +77,10 @@ class EffectSizeConverter:
     """Converts between effect size metrics and dependent quantities.
 
     Args:
-        dataset (Dataset, optional): Optional PyMARE dataset to extract input
-            quantities from. Other arguments will take precedent over values
-            found in the Dataset. Defaults to None.
         **kwargs: Optional keyword arguments providing additional inputs. All
             values must be floats, 1d ndarrays, or any iterable that can be
             converted to an ndarray. All variables must have the same length.
-            Allowable variable currently include:
+            Allowable variables currently include:
             * y: Point estimate with unbounded distributions--most commonly,
                 study- or experiment-level estimates of means.
             * v: Sampling variance of the mean.
@@ -116,7 +113,7 @@ class EffectSizeConverter:
         converted to one-sample summaries prior to initialization.
 
     """
-    def __init__(self, dataset=None, **kwargs):
+    def __init__(self, **kwargs):
         # Assume equal variances if there are two estimates but only one variance
         if (kwargs.get('y') is not None and kwargs.get('y2') is not None
             and kwargs.get('v') is not None and kwargs.get('v2') is None):
@@ -140,13 +137,7 @@ class EffectSizeConverter:
         else:
             self.inputs = 1
 
-        # Extract variables from dataset if passed
-        self.known_vars = {} if dataset is None else self._from_dataset(dataset)
-
-        self.known_vars.update(kwargs)
-
-    def _from_dataset(self, dataset):
-        return {}
+        self.known_vars = kwargs.copy()
 
     def __getattr__(self, key):
         if key.startswith('to_'):
