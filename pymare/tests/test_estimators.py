@@ -2,7 +2,8 @@ import numpy as np
 
 from pymare.estimators import (WeightedLeastSquares, DerSimonianLaird,
                                VarianceBasedLikelihoodEstimator,
-                               SampleSizeBasedLikelihoodEstimator)
+                               SampleSizeBasedLikelihoodEstimator,
+                               StanMetaRegression, Hedges)
 
 
 def test_weighted_least_squares_estimator(dataset):
@@ -27,6 +28,16 @@ def test_dersimonian_laird_estimator(dataset):
     assert np.allclose(tau2, 8.3627, atol=1e-4)
 
 
+def test_hedges_estimator(dataset):
+    # ground truth values are from metafor package in R, except that metafor
+    # always gives negligibly different values for tau2, likely due to
+    # algorithmic differences in the computation.
+    results = Hedges().fit(dataset)
+    beta, tau2 = results['beta']['est'], results['tau2']['est']
+    assert np.allclose(beta, [-0.1066, 0.7704], atol=1e-4)
+    assert np.allclose(tau2, 11.3881, atol=1e-4)
+
+
 def test_variance_based_maximum_likelihood_estimator(dataset):
     # ground truth values are from metafor package in R
     results = VarianceBasedLikelihoodEstimator(method='ML').fit(dataset)
@@ -44,7 +55,7 @@ def test_variance_based_restricted_maximum_likelihood_estimator(dataset):
 
 
 def test_sample_size_based_maximum_likelihood_estimator(dataset_n):
-    # ground truth values are from metafor package in R
+    # test values have not been verified for convergence with other packages
     results = SampleSizeBasedLikelihoodEstimator(method='ML').fit(dataset_n)
     beta = results['beta']['est']
     sigma2 = results['sigma2']['est']
@@ -55,7 +66,7 @@ def test_sample_size_based_maximum_likelihood_estimator(dataset_n):
 
 
 def test_sample_size_based_restricted_maximum_likelihood_estimator(dataset_n):
-    # ground truth values are from metafor package in R
+    # test values have not been verified for convergence with other packages
     results = SampleSizeBasedLikelihoodEstimator(method='REML').fit(dataset_n)
     beta = results['beta']['est']
     sigma2 = results['sigma2']['est']
