@@ -28,7 +28,7 @@ jobs:
             else
                 conda create -n testenv python=3.6 -yq
                 source activate testenv
-                pip install -e .[tests]
+                pip install -e .[all]
             fi
             python setup.py install --user
       - save_cache:  # environment cache tied to requirements
@@ -67,7 +67,7 @@ jobs:
           command:  |
             apt-get install -yqq curl
             source activate testenv
-            py.test --cov-report xml:coverage.xml --cov=pymare pymare
+            py.test --cov-report xml:coverage.xml --cov=pymare --ignore=pymare/tests/test_stan_estimators.py pymare
       - codecov/upload:
           file: /tmp/src/PyMARE/coverage.xml
 
