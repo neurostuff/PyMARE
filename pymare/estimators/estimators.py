@@ -105,7 +105,7 @@ class DerSimonianLaird(BaseEstimator):
         # D-L estimate of tau^2
         precision = np.linalg.pinv((X * w).T.dot(X))
         A = w_sum - np.trace(X.dot(precision.dot(X.T) * (w**2).T))
-        tau_dl = (Q - k + p) / A
+        tau_dl = (Q - (k - p)) / A
         tau_dl = np.max([0., tau_dl])
         # Re-estimate beta with tau^2 estimate
         beta_dl = WeightedLeastSquares(tau_dl)._fit(y, v, X)['beta'].ravel()
