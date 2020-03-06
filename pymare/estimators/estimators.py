@@ -235,6 +235,10 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         self.kwargs = kwargs
 
     def _fit(self, y, n, X):
+        if n.std() < np.sqrt(np.finfo(float).eps):
+            raise ValueError("Sample size likelihood estimator cannot work with all-equal samples sizes")
+        if n.std() < n.mean()/10
+            raise Warning("Sample sizes are too close, sample size likelihood estimator may fail")
         # set tau^2 to 0 and compute starting values
         tau2 = 0.
         k, p = X.shape
