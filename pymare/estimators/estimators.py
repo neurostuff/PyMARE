@@ -62,6 +62,11 @@ class WeightedLeastSquares(BaseEstimator):
     known/assumed between-study variance tau^2. When tau^2 = 0 (default), the
     model is the standard inverse-weighted fixed-effects meta-regression.
 
+    References:
+        Brockwell, S. E., & Gordon, I. R. (2001). A comparison of statistical
+        methods for meta-analysis. Statistics in Medicine, 20(6), 825–840.
+        https://doi.org/10.1002/sim.650
+
     Args:
         tau2 (float, optional): Assumed/known value of tau^2. Must be >= 0.
             Defaults to 0.
@@ -85,6 +90,9 @@ class DerSimonianLaird(BaseEstimator):
     References:
         DerSimonian, R., & Laird, N. (1986). Meta-analysis in clinical trials.
         Controlled clinical trials, 7(3), 177-188.
+        Kosmidis, I., Guolo, A., & Varin, C. (2017). Improving the accuracy of
+        likelihood-based inference in meta-analysis and meta-regression.
+        Biometrika, 104(2), 489–496. https://doi.org/10.1093/biomet/asx001
     """
     def _fit(self, y, v, X):
         k, p = X.shape
