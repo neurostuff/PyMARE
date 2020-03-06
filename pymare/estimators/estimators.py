@@ -150,6 +150,12 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         The ML and REML solutions are obtained via SciPy's scalar function
         minimizer (scipy.optimize.minimize). Parameters to minimize() can be
         passed in as keyword arguments.
+    References:
+        DerSimonian, R., & Laird, N. (1986). Meta-analysis in clinical trials.
+        Controlled clinical trials, 7(3), 177-188.
+        Kosmidis, I., Guolo, A., & Varin, C. (2017). Improving the accuracy of
+        likelihood-based inference in meta-analysis and meta-regression.
+        Biometrika, 104(2), 489–496. https://doi.org/10.1093/biomet/asx001
     """
 
     def __init__(self, method='ml', **kwargs):
