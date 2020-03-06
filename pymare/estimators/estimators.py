@@ -218,6 +218,12 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         The ML and REML solutions are obtained via SciPy's scalar function
         minimizer (scipy.optimize.minimize). Parameters to minimize() can be
         passed in as keyword arguments.
+
+    References:
+        Sangnawakij, P., Böhning, D., Adams, S., Stanton, M., & Holling, H. 
+        (2017). Statistical methodology for estimating the mean difference in 
+        a meta-analysis without  study-specific variance information. Statistics 
+        in Medicine, 36(9), 1395–1413. https://doi.org/10.1002/sim.7232
     """
 
     def __init__(self, method='ml', **kwargs):
@@ -231,8 +237,9 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     def _fit(self, y, n, X):
         # set tau^2 to 0 and compute starting values
         tau2 = 0.
-        beta = WeightedLeastSquares(tau2=tau2)._fit(y, n, X)['beta']
-        sigma = ((y - X.dot(beta))**2 * n).mean()
+        k, p = X.shape
+        beta = WeightedLeastSquares(tau2=tau2)._fit(y, 1/n, X)['beta']
+        sigma = ((y - X.dot(beta))**2 * n).sum() / (k-p) 
         theta_init = np.r_[beta.ravel(), sigma, tau2]
         res = minimize(self._nll_func, theta_init, (y, n, X), **self.kwargs).x
         beta, sigma, tau = res[:-2], float(res[-2]), float(res[-1])
@@ -248,7 +255,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
             sigma2 = 0
         w = 1 / (tau2 + sigma2 / n)
         R = y - X.dot(beta)
-        return -0.5 * (np.log(w).sum() - (R * w * R).sum())
+        return 0.5 * (np.log(w).sum() + (R * w * R).sum())
 
     def _reml_nll(self, theta, y, n, X):
         """ REML negative log-likelihood for meta-regression model. """
