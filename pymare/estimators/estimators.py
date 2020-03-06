@@ -62,6 +62,11 @@ class WeightedLeastSquares(BaseEstimator):
     known/assumed between-study variance tau^2. When tau^2 = 0 (default), the
     model is the standard inverse-weighted fixed-effects meta-regression.
 
+    References:
+        Brockwell, S. E., & Gordon, I. R. (2001). A comparison of statistical
+        methods for meta-analysis. Statistics in Medicine, 20(6), 825–840.
+        https://doi.org/10.1002/sim.650
+
     Args:
         tau2 (float, optional): Assumed/known value of tau^2. Must be >= 0.
             Defaults to 0.
@@ -85,6 +90,9 @@ class DerSimonianLaird(BaseEstimator):
     References:
         DerSimonian, R., & Laird, N. (1986). Meta-analysis in clinical trials.
         Controlled clinical trials, 7(3), 177-188.
+        Kosmidis, I., Guolo, A., & Varin, C. (2017). Improving the accuracy of
+        likelihood-based inference in meta-analysis and meta-regression.
+        Biometrika, 104(2), 489–496. https://doi.org/10.1093/biomet/asx001
     """
     def _fit(self, y, v, X):
         k, p = X.shape
@@ -96,8 +104,8 @@ class DerSimonianLaird(BaseEstimator):
         Q = Q.sum()
         # D-L estimate of tau^2
         precision = np.linalg.pinv((X * w).T.dot(X))
-        A = w_sum - np.trace(X.dot(precision.dot(X.T) * (w**2).T))
-        tau_dl = (Q - k + p) / A
+        A = w_sum - np.trace((precision.dot((X * w**2).T)).dot(X))
+        tau_dl = (Q - (k - p)) / A
         tau_dl = np.max([0., tau_dl])
         # Re-estimate beta with tau^2 estimate
         beta_dl = WeightedLeastSquares(tau_dl)._fit(y, v, X)['beta'].ravel()
@@ -142,6 +150,12 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         The ML and REML solutions are obtained via SciPy's scalar function
         minimizer (scipy.optimize.minimize). Parameters to minimize() can be
         passed in as keyword arguments.
+    References:
+        DerSimonian, R., & Laird, N. (1986). Meta-analysis in clinical trials.
+        Controlled clinical trials, 7(3), 177-188.
+        Kosmidis, I., Guolo, A., & Varin, C. (2017). Improving the accuracy of
+        likelihood-based inference in meta-analysis and meta-regression.
+        Biometrika, 104(2), 489–496. https://doi.org/10.1093/biomet/asx001
     """
 
     def __init__(self, method='ml', **kwargs):
