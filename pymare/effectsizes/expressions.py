@@ -35,11 +35,11 @@ class Expression:
 EXPRESSIONS = [
 
     # Common to one-sample and two-sample procedures
-    Expression('sd - sqrt(v)'),
-    Expression('sem - sd / sqrt(n)'),
     Expression('p - cdf(Normal("normal", 0, 1))(z)'),
 
     # One-sample procedures
+    Expression('sd - sqrt(v)'),
+    Expression('sem - sd / sqrt(n)'),
     Expression('t - y / sem', "One-sample t-test", inputs=1),
     Expression('d - y / sd', "Cohen's d (one sample)", inputs=1),
     Expression('d - t / sqrt(n)', "Cohen's d (from t)", inputs=1),
@@ -51,16 +51,17 @@ EXPRESSIONS = [
                "Approximate correction factor for Hedges' g", inputs=1),
 
     # Two-sample procedures
+    Expression('sd1 - sqrt(v1)', inputs=2),
     Expression('sd2 - sqrt(v2)', inputs=2),
-    Expression('t - (y - y2) / sqrt(v / n + v2 / n2)',
+    Expression('t - (y1 - y2) / sqrt(v1 / n1 + v2 / n2)',
                "Two-sample t-test (unequal variances)", inputs=2),
-    Expression('sd_pooled - sqrt((v * (n - 1) + v2 * (n2 - 1)) / (n + n2 - 2))',
+    Expression('sd - sqrt((v1 * (n1 - 1) + v2 * (n2 - 1)) / (n1 + n2 - 2))',
                "Pooled standard deviation (Cohen version)", inputs=2),
-    Expression('d - (y - y2) / sd_pooled', "Cohen's d (two-sample)",
+    Expression('d - (y1 - y2) / sd', "Cohen's d (two-sample)",
                inputs=2),
-    Expression('d - t * sqrt(1 / n + 1 / n2)', "Cohen's d (two-sample from t)",
+    Expression('d - t * sqrt(1 / n1 + 1 / n2)', "Cohen's d (two-sample from t)",
                inputs=2),
-    Expression('j - (1 - (3 / (4 * (n + n2) - 9)))',
+    Expression('j - (1 - (3 / (4 * (n1 + n2) - 9)))',
                "Approximate correction factor for Hedges' g", inputs=2)
 ]
 

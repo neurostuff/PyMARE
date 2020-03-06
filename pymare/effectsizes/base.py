@@ -1,8 +1,8 @@
 """Tools for effect size computation/conversion."""
 
 import warnings
-import inspect
 from functools import partial
+from abc import ABCMeta
 
 from sympy import sympify, lambdify, Symbol, solve
 
@@ -74,91 +74,19 @@ def solve_system(system, known_vars=None):
     return results
 
 
-class EffectSizeConverter:
-    """Converts between effect size metrics and dependent quantities.
-
-    Args:
-        data (DataFrame): Optional pandas DataFrame to extract variables from.
-            Column names must match the controlled names listed below for
-            kwargs. If additional kwargs are provided, they will take
-            precedence over the values in the data frame.
-        **kwargs: Optional keyword arguments providing additional inputs. All
-            values must be floats, 1d ndarrays, or any iterable that can be
-            converted to an ndarray. All variables must have the same length.
-            Allowable variables currently include:
-            * y: Point estimate with unbounded distributions--most commonly,
-                study- or experiment-level estimates of means.
-            * v: Sampling variance of the mean.
-            * sd: Sample standard deviation.
-            * n: Sample size.
-            * sem: Standard error of the mean.
-            * d: Cohen's d.
-            * g: Hedges' g.
-            * t: t-statistic.
-            * z: z-score.
-            * p: p-value.
-            In addition, for most of the above (all but 't', 'd', 'g', 'p', 'z'),
-            one can pass in a second set of values, representing a second group
-            of estimates, by appending any name with '2'--e.g., y2, v2, sd2,
-            n2, etc. Note that if any such variable is passed, the
-            corresponding estimate for the first group must also be passed--
-            e.g., if `v2` is set, `v` must also be provided.
-
-    Notes:
-        All input variables are assumed to reflect study- or analysis-level
-        summaries, and are _not_ individual data points. E.g., do not pass in
-        a vector of point estimates as `y` and a scalar for the variances `v`.
-        The lengths of all inputs must match. This is true even if two sets of
-        values are provided (i.e., if y2, v2, or n2 are passed). In this case,
-        the pairs reflect study-level summaries for the two groups, and are not
-        the raw scores for (potentially different-sized) groups.
-
-        It also follows from this assumption that if two sets of values are
-        provided, the data are assumed to come from an independent-samples
-        comparison. Paired-sampled comparisons are not handled, and must be
-        converted to one-sample summaries prior to initialization.
-
-    """
-    def __init__(self, data=None, **kwargs):
-
-        if data is not None:
-            df_cols = {col: data.loc[:, col].values for col in data.columns}
-            kwargs = dict(**df_cols, **kwargs)
-
-        # Assume equal variances if there are two estimates but only one variance
-        if (kwargs.get('y') is not None and kwargs.get('y2') is not None
-            and kwargs.get('v') is not None and kwargs.get('v2') is None):
-            kwargs['v2'] = kwargs['v']
-            warnings.warn("Two sets of estimates were provided, but only one "
-                          "variance. Assuming equal variances.")
-
-        # Validate presence of quantities that need to be passed in pairs
-        var_names = list(kwargs.keys())
-        if any([name.endswith('2') for name in var_names]):
-            self.inputs = 2
-            all_vars = set([v.strip('2') for v in var_names])
-            pair_vars = all_vars - {'t', 'z', 'd', 'p'}
-            for q1 in pair_vars:
-                q2 = '%s2' % q1
-                if ((kwargs.get(q1) is not None and kwargs.get(q2) is None) or
-                    (kwargs.get(q2) is None and kwargs.get(q1) is not None)):
-                    raise ValueError(
-                        "There appear to be 2 groups of estimates. Please "
-                        "provide both of %s and %s or neither." % (q1, q2))
-        else:
-            self.inputs = 1
-
-        self.known_vars = kwargs.copy()
+class EffectSizeConverter(metaclass=ABCMeta):
+    """Base class for effect size converters."""
+    def __init__(self, **kwargs):
+        self.known_vars = kwargs
 
     def __getattr__(self, key):
         if key.startswith('to_'):
             stat = key.replace('to_', '')
             return partial(self.to, stat=stat)
 
-    def to_dataset(self, estimate='y', **kwargs):
+    def to_dataset(self, estimate='g', **kwargs):
         estimates = self.to(estimate)
-        # TODO: replace this with quantity-appropriate variance (e.g., var_g)
-        variances = self.known_vars.get('v')
+        variances = self.known_vars.get('v_{}'.format(estimate))
         sample_sizes = self.known_vars.get('n')
         return Dataset(estimates=estimates, variances=variances,
                        sample_sizes=sample_sizes, **kwargs)
@@ -194,3 +122,100 @@ class EffectSizeConverter:
 
         self.known_vars.update(result)
         return result[stat]
+
+
+class OneSampleEffectSizeConverter(EffectSizeConverter):
+    """Effect size converter for one-sample or paired comparisons.
+
+    Args:
+        data (DataFrame): Optional pandas DataFrame to extract variables from.
+            Column names must match the controlled names listed below for
+            kwargs. If additional kwargs are provided, they will take
+            precedence over the values in the data frame.
+        **kwargs: Optional keyword arguments providing additional inputs. All
+            values must be floats, 1d ndarrays, or any iterable that can be
+            converted to an ndarray. All variables must have the same length.
+            Allowable variables currently include:
+            * y: Point estimate with unbounded distributions--most commonly,
+                study- or experiment-level estimates of means.
+            * v: Sampling variance of the mean.
+            * sd: Sample standard deviation.
+            * n: Sample size.
+            * sem: Standard error of the mean.
+            * d: Cohen's d.
+            * g: Hedges' g.
+            * t: t-statistic.
+            * z: z-score.
+            * p: p-value.
+
+    Notes:
+        All input variables are assumed to reflect study- or analysis-level
+        summaries, and are _not_ individual data points. E.g., do not pass in
+        a vector of point estimates as `y` and a scalar for the variances `v`.
+        The lengths of all inputs must match.
+    """
+    def __init__(self, data=None, **kwargs):
+        
+        if data is not None:
+            df_cols = {col: data.loc[:, col].values for col in data.columns}
+            kwargs = dict(**df_cols, **kwargs)
+
+        super().__init__(**kwargs)
+
+
+class TwoSampleEffectSizeConverter(EffectSizeConverter):
+    """Effect size converter for two-sample comparisons.
+
+    Args:
+        data (DataFrame): Optional pandas DataFrame to extract variables from.
+            Column names must match the controlled names listed below for
+            kwargs. If additional kwargs are provided, they will take
+            precedence over the values in the data frame.
+        **kwargs: Optional keyword arguments providing additional inputs. All
+            values must be floats, 1d ndarrays, or any iterable that can be
+            converted to an ndarray. All variables must have the same length.
+            All variables must be passed in pairs. Allowable variables
+            currently include:
+            * y1, y2: Point estimates with unbounded distributions--most
+                commonly, study- or experiment-level estimates of means.
+            * v1, v2: Sampling variances of the means.
+            * sd1, sd2: Sample standard deviations.
+            * n1, n2: Sample sizes.
+            * sem1, sem2: Standard errors of the means.
+            In addition, for most of the above (all but 't', 'd', 'g', 'p', 'z'),
+            one can pass in a second set of values, representing a second group
+            of estimates, by appending any name with '2'--e.g., y2, v2, sd2,
+            n2, etc. Note that if any such variable is passed, the
+            corresponding estimate for the first group must also be passed--
+            e.g., if `v2` is set, `v` must also be provided.
+
+    Notes:
+        All input variables are assumed to reflect study- or analysis-level
+        summaries, and are _not_ individual data points. E.g., do not pass in
+        a vector of point estimates as `y` and a scalar for the variances `v`.
+        The lengths of all inputs must match. Note that the variable pairs
+        (e.g., y1 and y2) reflect study-level summaries for the two groups, and
+        are not the raw scores for (potentially different-sized) groups.
+
+        When using the TwoSampleEffectSizeConverter, it is assumed that the
+        paired inputs are from independent samples. Paired-sampled comparisons
+        are not supported (use the OneSampleEffectSizeConverter instead).
+    """
+    def __init__(self, data=None, **kwargs):
+
+        if data is not None:
+            df_cols = {col: data.loc[:, col].values for col in data.columns}
+            kwargs = dict(**df_cols, **kwargs)
+
+        # Validate that all inputs were passed in pairs
+        var_names = set([v.strip('[12]') for v in kwargs.keys()])
+        pair_vars = var_names - {'t', 'z', 'd', 'p'}
+        for var in pair_vars:
+            name1, name2 = '%s1' % var, '%s2' % var
+            var1, var2 = kwargs.get(name1), kwargs.get(name2)
+            if (var1 is None) != (var2 is None):
+                raise ValueError(
+                    "Input variable '{}' must be provided in pairs; please "
+                    "provide both {} and {} (or neither)." % (var, q1, q2))
+
+        super().__init__(**kwargs)
