@@ -73,4 +73,4 @@ def test_sample_size_based_restricted_maximum_likelihood_estimator(dataset_n):
     tau2 = results['tau2']['est']
     assert np.allclose(beta, [-2.1071], atol=1e-1)
     assert np.allclose(sigma2, 13.048, atol=10)
-    assert np.allclose(tau2, 3.2177, atol=1e-1)
+    assert np.allclose(tau2, 3.2177, atol=1)
