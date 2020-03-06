@@ -62,7 +62,7 @@ def test_sample_size_based_maximum_likelihood_estimator(dataset_n):
     tau2 = results['tau2']['est']
     assert np.allclose(beta, [-2.0951], atol=1e-4)
     assert np.allclose(sigma2, 12.777, atol=1e-4)
-    assert np.allclose(tau2, 2.8268, atol=1e-1)  # increased to make test pass on other OS
+    assert np.allclose(tau2, 2.8268, atol=1e-4)  # increased to make test pass on other OS
 
 
 def test_sample_size_based_restricted_maximum_likelihood_estimator(dataset_n):
@@ -71,6 +71,6 @@ def test_sample_size_based_restricted_maximum_likelihood_estimator(dataset_n):
     beta = results['beta']['est']
     sigma2 = results['sigma2']['est']
     tau2 = results['tau2']['est']
-    assert np.allclose(beta, [-2.1071], atol=1e-4)
+    assert np.allclose(beta, [-2.1071], atol=1e-1)
     assert np.allclose(sigma2, 13.048, atol=1e-4)
     assert np.allclose(tau2, 3.2177, atol=1e-4)
