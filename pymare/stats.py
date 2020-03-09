@@ -2,7 +2,7 @@
 
 import numpy as np
 import scipy.stats as ss
-from scipy.optimize import minimize
+from scipy.optimize import minimize, Bounds
 
 
 def ensure_2d(arr):
@@ -46,8 +46,9 @@ def q_profile(y, v, X, alpha=0.05):
     l_crit = ss.chi2.ppf(1 - alpha / 2, df)
     u_crit = ss.chi2.ppf(alpha / 2, df)
     args = (ensure_2d(y), ensure_2d(v), X)
-    lb = minimize(lambda x: (q_gen(*args, x) - l_crit)**2, 0,   bounds=[(0,None)]).x[0]
-    ub = minimize(lambda x: (q_gen(*args, x) - u_crit)**2, 100, bounds=[(0,None)]).x[0]
+    bds = Bounds([0], [np.inf], keep_feasible=True)
+    lb = minimize(lambda x: (q_gen(*args, x) - l_crit)**2, [0],   bounds=bds).x[0]
+    ub = minimize(lambda x: (q_gen(*args, x) - u_crit)**2, [100], bounds=bds).x[0]
     return {'ci_l': lb, 'ci_u': ub}
 
 
