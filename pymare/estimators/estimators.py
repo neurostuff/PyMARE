@@ -4,7 +4,7 @@ from abc import ABCMeta, abstractmethod
 from inspect import getfullargspec
 
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import minimize, Bounds
 
 from ..results import MetaRegressionResults, BayesianMetaRegressionResults
 
@@ -173,7 +173,14 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         tau2 = est_DL['tau2']
 
         theta_init = np.r_[beta.ravel(), tau2]
-        res = minimize(self._nll_func, theta_init, (y, v, X), **self.kwargs).x
+
+        lb = np.ones(len(theta_init)) * -np.inf
+        ub = -lb
+        lb[-1] = 0.  # bound only the variance
+        bds = Bounds(lb, ub, keep_feasible=True)
+
+        res = minimize(self._nll_func, theta_init, (y, v, X), bounds=bds,
+                       **self.kwargs).x
         beta, tau = res[:-1], float(res[-1])
         tau = np.max([tau, 0])
         return {'beta': beta, 'tau2': tau}
@@ -234,7 +241,14 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         beta = WeightedLeastSquares(tau2=tau2)._fit(y, n, X)['beta']
         sigma = ((y - X.dot(beta))**2 * n).mean()
         theta_init = np.r_[beta.ravel(), sigma, tau2]
-        res = minimize(self._nll_func, theta_init, (y, n, X), **self.kwargs).x
+
+        lb = np.ones(len(theta_init)) * -np.inf
+        ub = -lb
+        lb[-2:] = 0.  # bound only the variances
+        bds = Bounds(lb, ub, keep_feasible=True)
+
+        res = minimize(self._nll_func, theta_init, (y, n, X), bounds=bds,
+                       **self.kwargs).x
         beta, sigma, tau = res[:-2], float(res[-2]), float(res[-1])
         tau = np.max([tau, 0])
         return {'beta': beta, 'sigma2': sigma, 'tau2': tau}
