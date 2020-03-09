@@ -242,8 +242,8 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         # set tau^2 to 0 and compute starting values
         tau2 = 0.
         k, p = X.shape
-        beta = WeightedLeastSquares(tau2=tau2)._fit(y, 1/n, X)['beta']
-        sigma = ((y - X.dot(beta))**2 * n).sum() / (k-p) 
+        beta = WeightedLeastSquares(tau2=tau2)._fit(y, n, X)['beta'][:, None]
+        sigma = ((y - X.dot(beta))**2 * n).sum() / (k - p)
         theta_init = np.r_[beta.ravel(), sigma, tau2]
         res = minimize(self._nll_func, theta_init, (y, n, X), **self.kwargs).x
         beta, sigma, tau = res[:-2], float(res[-2]), float(res[-1])
@@ -259,7 +259,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
             sigma2 = 0
         w = 1 / (tau2 + sigma2 / n)
         R = y - X.dot(beta)
-        return 0.5 * (np.log(w).sum() + (R * w * R).sum())
+        return -0.5 * (np.log(w).sum() - (R * w * R).sum())
 
     def _reml_nll(self, theta, y, n, X):
         """ REML negative log-likelihood for meta-regression model. """
