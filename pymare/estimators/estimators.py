@@ -52,6 +52,7 @@ class BaseEstimator(metaclass=ABCMeta):
                 kwargs[name] = getattr(dataset, name)
         self.params_ = self._fit(**kwargs)
         self.dataset_ = dataset
+        return self
 
     def summary(self):
         if not hasattr(self, 'params_'):
