@@ -40,6 +40,10 @@ def q_profile(y, v, X, alpha=0.05):
         P(tau^2 <= lower_bound)  == P(tau^2 >= upper_bound) == alpha/2), and
         *not* the smallest possible range of tau^2 values that provides the
         desired coverage.
+
+    References:
+        Viechtbauer, W. (2007). Confidence intervals for the amount of
+        heterogeneity in meta-analysis. Statistics in Medicine, 26(1), 37-52.
     """
     k, p = X.shape
     df = k - p
