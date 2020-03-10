@@ -50,8 +50,9 @@ class BaseEstimator(metaclass=ABCMeta):
                 kwargs[name] = getattr(dataset, name, spec.defaults[i - n_args])
             else:
                 kwargs[name] = getattr(dataset, name)
+        self.params_ = self._fit(**kwargs)
 
-        results = self._fit(**kwargs)
+    def summary(self):
         return self._result_cls(results, dataset, self)
 
 
