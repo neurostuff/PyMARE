@@ -20,14 +20,18 @@ class MetaRegressionResults:
             contains entries for at least 'beta' and 'tau^2'.
         dataset (`pymare.Dataset`): A Dataset instance containing the inputs
             to the estimator.
+        estimator (`pymare.estimators.BaseEstimator`): The estimator used to
+            produce the results.
         ci_method (str, optional): The method to use when generating confidence
             intervals for tau^2. Currently only 'QP' (Q-Profile) is supported.
         alpha (float, optional): alpha value defining the coverage of the CIs,
             where width = 1 - alpha. Defaults to 0.05.
     """
-    def __init__(self, params, dataset, ci_method='QP', alpha=0.05):
+    def __init__(self, params, dataset, estimator=None, ci_method='QP',
+                 alpha=0.05):
         self.params = {name: {'est': val} for name, val in params.items()}
         self.dataset = dataset
+        self.estimator = estimator
         self.ci_method = ci_method
         self.alpha = alpha
 
