@@ -72,9 +72,9 @@ def q_gen(y, v, X, tau2):
     Returns:
         A float giving the value of Cochran's Q-statistic.
     """
-    from .estimators import WeightedLeastSquares
     if tau2 < 0:
         raise ValueError("Value of tau^2 must be >= 0.")
-    beta = WeightedLeastSquares(tau2=tau2)._fit(y, v, X)['beta'][:, None]
     w = 1. / (v + tau2)
+    precision = np.linalg.pinv((X * w).T.dot(X))
+    beta = (precision.dot(X.T) * w.T).dot(y)
     return (w * (y - X.dot(beta)) ** 2).sum()
