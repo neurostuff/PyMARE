@@ -5,7 +5,8 @@ from pymare.estimators import StanMetaRegression
 
 def test_stan_estimator(dataset):
     # no ground truth here, so we use sanity checks and rough bounnds
-    results = StanMetaRegression(iter=2500).fit(dataset)
+    est = StanMetaRegression(iter=2500).fit(dataset)
+    results = est.summary()
     assert 'BayesianMetaRegressionResults' == results.__class__.__name__
     summary = results.summary(['beta', 'tau2'])
     beta1, beta2, tau2 = summary['mean'].values[:3]
