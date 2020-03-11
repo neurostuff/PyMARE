@@ -85,11 +85,10 @@ class EffectSizeConverter(metaclass=ABCMeta):
             return partial(self.to, stat=stat)
 
     def to_dataset(self, estimate='g', **kwargs):
-        estimates = self.to(estimate)
-        variances = self.known_vars.get('v_{}'.format(estimate))
-        sample_sizes = self.known_vars.get('n')
-        return Dataset(estimates=estimates, variances=variances,
-                       sample_sizes=sample_sizes, **kwargs)
+        y = self.to(estimate)
+        v = self.known_vars.get('v_{}'.format(estimate))
+        n = self.known_vars.get('n')
+        return Dataset(y=y, v=v, n=n, **kwargs)
 
     def to(self, stat):
         """Compute and return values for the specified statistic, if possible.
@@ -112,7 +111,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
 
         known = set(self.known_vars.keys())
         system = select_expressions(target=stat, known_vars=known,
-                                    inputs=self.inputs)
+                                    inputs=self._inputs)
         system = [exp.sympy for exp in system]
         result = solve_system(system, self.known_vars)
 
@@ -154,6 +153,8 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
         a vector of point estimates as `y` and a scalar for the variances `v`.
         The lengths of all inputs must match.
     """
+    _inputs = 1
+
     def __init__(self, data=None, **kwargs):
         
         if data is not None:
@@ -201,6 +202,8 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
         paired inputs are from independent samples. Paired-sampled comparisons
         are not supported (use the OneSampleEffectSizeConverter instead).
     """
+    _inputs = 2
+
     def __init__(self, data=None, **kwargs):
 
         if data is not None:
