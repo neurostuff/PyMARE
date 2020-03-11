@@ -144,7 +144,4 @@ def meta_regression(estimates, variances=None, predictors=None,
     # Get estimates
     est = est_cls(**kwargs)
     est.fit(dataset)
-    results = est.summary()
-    if hasattr(results, 'compute_stats'):
-        results.compute_stats(ci_method=ci_method, alpha=alpha)
-    return results
+    return  est.summary()

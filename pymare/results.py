@@ -49,6 +49,7 @@ class MetaRegressionResults:
         self.estimator = estimator
         self.ci_method = ci_method
         self.alpha = alpha
+        self.compute_stats()
 
     def __getitem__(self, key):
         """Provides item-based access to parameter results."""
@@ -62,6 +63,7 @@ class MetaRegressionResults:
 
     def to_df(self):
         """Return a pandas DataFrame summarizing results."""
+
         fixed = self.params['beta'].copy()
         fixed['name'] = self.dataset.names
         fixed = pd.DataFrame(fixed)
