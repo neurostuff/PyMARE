@@ -46,10 +46,10 @@ class Dataset:
 
         # Extract columns from DataFrame
         if data is not None:
-            y = data.loc[y or 'y'].values
-            v = data.loc[v or 'v'].values
+            y = data.loc[:, y or 'y'].values
+            v = data.loc[:, v or 'v'].values
             X_names = X or 'X'
-            X = data.loc[X_names].values
+            X = data.loc[:, X_names].values
 
         self.y = ensure_2d(y)
         self.v = ensure_2d(v)

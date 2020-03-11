@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import pandas as pd
 
 from pymare import Dataset, meta_regression
 
@@ -14,6 +15,20 @@ def test_dataset_init(variables):
     dataset = Dataset(*variables, X_names=['bork'], add_intercept=False)
     assert dataset.X.shape == (n, 1)
     assert dataset.X_names == ['bork']
+
+
+def test_dataset_init_from_df(variables):
+    df = pd.DataFrame({
+        'y': [2, 4, 6],
+        'v_alt': [100, 100, 100],
+        'X1': [5, 2, 1],
+        'X7': [9, 8, 7]
+    })
+    dataset = Dataset(v='v_alt', X=['X1', 'X7'], data=df)
+    assert dataset.X.shape == (3, 3)
+    assert dataset.X_names == ['intercept', 'X1', 'X7']
+    assert np.array_equal(dataset.y, np.array([[2, 4, 6]]).T)
+    assert np.array_equal(dataset.v, np.array([[100, 100, 100]]).T)
 
 
 def test_meta_regression_wrapper(variables):
