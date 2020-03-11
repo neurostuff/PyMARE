@@ -1,6 +1,7 @@
 """Statistical expressions."""
 from collections import defaultdict
 from itertools import chain
+import re
 
 from sympy import sympify
 from sympy.core.compatibility import exec_
@@ -8,6 +9,37 @@ from sympy.core.compatibility import exec_
 
 _locals = {}
 exec_('from sympy.stats import *', _locals)
+
+
+# Common to one-sample and two-sample procedures
+_base_expressions = [
+    ('p - cdf(Normal("normal", 0, 1))(z)',),
+    ('sd - sqrt(v)',),
+    ('sem - sd / sqrt(n)',),
+    ('t - y / sem', "One-sample t-test"),
+    ('d - y / sd', "Cohen's d (one sample)"),
+    ('d - t / sqrt(n)', "Cohen's d (from t)"),
+    ('g - d * j', "Hedges' g"),
+    # TODO: we currently use Hedges' approximation instead of original J
+    # function because the gamma function slows solving down considerably and
+    # breaks numpy during lambdification. Need to fix/improve this.
+    ('j - (1 - (3 / (4 * (n - 1) - 1)))',
+     "Approximate correction factor for Hedges' g"),
+]
+
+
+_two_sample_expressions = [
+    ('sd1 - sqrt(v1)',),
+    ('sd2 - sqrt(v2)',),
+    ('t - (y1 - y2) / sqrt(v1 / n1 + v2 / n2)',
+     "Two-sample t-test (unequal variances)"),
+    ('sd - sqrt((v1 * (n1 - 1) + v2 * (n2 - 1)) / (n1 + n2 - 2))',
+     "Pooled standard deviation (Cohen version)"),
+    ('d - (y1 - y2) / sd', "Cohen's d (two-sample)"),
+    ('d - t * sqrt(1 / n1 + 1 / n2)', "Cohen's d (two-sample from t)"),
+    ('j - (1 - (3 / (4 * (n1 + n2) - 9)))',
+     "Approximate correction factor for Hedges' g")
+]
 
 
 class Expression:
@@ -19,51 +51,29 @@ class Expression:
         inputs (bool, optional): Indicates whether the expression applies
             in the one-sample case (1), two-sample case (2), or both
             (None).
-        metric (str, optional): Name of metric for which this expression
-            applies. Defaults to None (all inputs with unlabeled metricss).
     """
-    def __init__(self, expr, description=None, inputs=None, metric=None):
+    def __init__(self, expr, description=None, inputs=None):
         self.expr = expr
         self.description = description
         self.inputs = inputs
-        self.metric = metric
-
         self.sympy = sympify(expr, locals=_locals)
         self.symbols = self.sympy.free_symbols
 
 
-EXPRESSIONS = [
+def _construct_sets():
+    one_samp = [Expression(*exp, inputs=1) for exp in _base_expressions]
+    two_samp = [Expression(*exp, inputs=2) for exp in _two_sample_expressions]
+    for exp in _base_expressions:
+        for n in ['1', '2']:
+            eq = re.sub(r"(\b(p|d|t|y|n|sd|sem|g|j|v)\b)",
+                        r"\g<1>{}".format(n),
+                        exp[0])
+            two_samp.append(Expression(eq, *exp[1:], inputs=2))
+    return one_samp, two_samp
 
-    # Common to one-sample and two-sample procedures
-    Expression('p - cdf(Normal("normal", 0, 1))(z)'),
 
-    # One-sample procedures
-    Expression('sd - sqrt(v)'),
-    Expression('sem - sd / sqrt(n)'),
-    Expression('t - y / sem', "One-sample t-test", inputs=1),
-    Expression('d - y / sd', "Cohen's d (one sample)", inputs=1),
-    Expression('d - t / sqrt(n)', "Cohen's d (from t)", inputs=1),
-    Expression('g - d * j', "Hedges' g"),
-    # TODO: we currently use Hedges' approximation instead of original J
-    # function because the gamma function slows solving down considerably and
-    # breaks numpy during lambdification. Need to fix/improve this.
-    Expression('j - (1 - (3 / (4 * (n - 1) - 1)))',
-               "Approximate correction factor for Hedges' g", inputs=1),
-
-    # Two-sample procedures
-    Expression('sd1 - sqrt(v1)', inputs=2),
-    Expression('sd2 - sqrt(v2)', inputs=2),
-    Expression('t - (y1 - y2) / sqrt(v1 / n1 + v2 / n2)',
-               "Two-sample t-test (unequal variances)", inputs=2),
-    Expression('sd - sqrt((v1 * (n1 - 1) + v2 * (n2 - 1)) / (n1 + n2 - 2))',
-               "Pooled standard deviation (Cohen version)", inputs=2),
-    Expression('d - (y1 - y2) / sd', "Cohen's d (two-sample)",
-               inputs=2),
-    Expression('d - t * sqrt(1 / n1 + 1 / n2)', "Cohen's d (two-sample from t)",
-               inputs=2),
-    Expression('j - (1 - (3 / (4 * (n1 + n2) - 9)))',
-               "Approximate correction factor for Hedges' g", inputs=2)
-]
+# Construct the 1-sample and 2-sample expression sets at import time
+one_sample_expressions, two_sample_expressions = _construct_sets()
 
 
 def select_expressions(target, known_vars, inputs=1):
@@ -82,7 +92,8 @@ def select_expressions(target, known_vars, inputs=1):
 
     exp_dict = defaultdict(list)
 
-    for exp in EXPRESSIONS:
+    exprs = one_sample_expressions if inputs == 1 else two_sample_expressions
+    for exp in exprs:
         if exp.inputs is not None and exp.inputs != inputs:
             continue
         for sym in exp.symbols:
