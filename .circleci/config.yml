@@ -28,30 +28,13 @@ jobs:
             else
                 conda create -n testenv python=3.6 -yq
                 source activate testenv
-                pip install -e .[tests]
+                pip install -e .[all]
             fi
             python setup.py install --user
       - save_cache:  # environment cache tied to requirements
           key: deps9-{{ checksum "pymare/info.py" }}
           paths:
             - "/opt/conda/envs/testenv"
-
-  style_check:
-    working_directory: /tmp/src/PyMARE
-    docker:
-      - image: continuumio/miniconda3
-    steps:
-      - attach_workspace:  # get PyMARE
-          at: /tmp
-      - restore_cache:  # load environment
-          key: deps9-{{ checksum "pymare/info.py" }}
-      - run:
-          name: Linting
-          command:  |
-            source activate testenv
-            flake8 --ignore=E501,E722,E114,E116,W503,W504 /tmp/src/PyMARE/pymare
-      - store_artifacts:
-          path: /tmp/data/lint
 
   coverage_and_tests:
     working_directory: /tmp/src/PyMARE
@@ -67,7 +50,7 @@ jobs:
           command:  |
             apt-get install -yqq curl
             source activate testenv
-            py.test --cov-report xml:coverage.xml --cov=pymare pymare
+            py.test --cov-report xml:coverage.xml --cov=pymare --ignore=pymare/tests/test_stan_estimators.py pymare
       - codecov/upload:
           file: /tmp/src/PyMARE/coverage.xml
 
@@ -76,9 +59,6 @@ workflows:
   run_tests:
     jobs:
       - build
-      - style_check:
-          requires:
-            - build
       - coverage_and_tests:
           requires:
             - build
