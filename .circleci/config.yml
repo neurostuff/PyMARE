@@ -36,23 +36,6 @@ jobs:
           paths:
             - "/opt/conda/envs/testenv"
 
-  style_check:
-    working_directory: /tmp/src/PyMARE
-    docker:
-      - image: continuumio/miniconda3
-    steps:
-      - attach_workspace:  # get PyMARE
-          at: /tmp
-      - restore_cache:  # load environment
-          key: deps9-{{ checksum "pymare/info.py" }}
-      - run:
-          name: Linting
-          command:  |
-            source activate testenv
-            flake8 --ignore=E501,E722,E114,E116,W503,W504 /tmp/src/PyMARE/pymare
-      - store_artifacts:
-          path: /tmp/data/lint
-
   coverage_and_tests:
     working_directory: /tmp/src/PyMARE
     docker:
@@ -76,9 +59,6 @@ workflows:
   run_tests:
     jobs:
       - build
-      - style_check:
-          requires:
-            - build
       - coverage_and_tests:
           requires:
             - build
