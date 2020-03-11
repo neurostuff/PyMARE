@@ -50,9 +50,16 @@ class BaseEstimator(metaclass=ABCMeta):
                 kwargs[name] = getattr(dataset, name, spec.defaults[i - n_args])
             else:
                 kwargs[name] = getattr(dataset, name)
+        self.params_ = self._fit(**kwargs)
+        self.dataset_ = dataset
+        return self
 
-        results = self._fit(**kwargs)
-        return self._result_cls(results, dataset, self)
+    def summary(self):
+        if not hasattr(self, 'params_'):
+            name = self.__class__.__name__
+            raise ValueError("This {} instance hasn't been fitted yet. Please "
+                             "call fit() before summary().".format(name))
+        return self._result_cls(self.params_, self.dataset_, self)
 
 
 class WeightedLeastSquares(BaseEstimator):

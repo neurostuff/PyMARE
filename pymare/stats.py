@@ -40,6 +40,10 @@ def q_profile(y, v, X, alpha=0.05):
         P(tau^2 <= lower_bound)  == P(tau^2 >= upper_bound) == alpha/2), and
         *not* the smallest possible range of tau^2 values that provides the
         desired coverage.
+
+    References:
+        Viechtbauer, W. (2007). Confidence intervals for the amount of
+        heterogeneity in meta-analysis. Statistics in Medicine, 26(1), 37-52.
     """
     k, p = X.shape
     df = k - p
@@ -68,9 +72,9 @@ def q_gen(y, v, X, tau2):
     Returns:
         A float giving the value of Cochran's Q-statistic.
     """
-    from .estimators import WeightedLeastSquares
     if tau2 < 0:
         raise ValueError("Value of tau^2 must be >= 0.")
-    beta = WeightedLeastSquares(tau2=tau2)._fit(y, v, X)['beta'][:, None]
     w = 1. / (v + tau2)
+    precision = np.linalg.pinv((X * w).T.dot(X))
+    beta = (precision.dot(X.T) * w.T).dot(y)
     return (w * (y - X.dot(beta)) ** 2).sum()
