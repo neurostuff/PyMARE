@@ -18,13 +18,11 @@ def test_Expression_init():
     assert exp.symbols == _symbol_set('x', 'y')
     assert exp.description is None
     assert exp.inputs is None
-    assert exp.metric is None
 
-    exp = Expression("x + y - cos(z)", "Test expression", 1, "OR")
+    exp = Expression("x + y - cos(z)", "Test expression", 1)
     assert exp.symbols == _symbol_set('x', 'y', 'z')
     assert exp.description == "Test expression"
     assert exp.inputs == 1
-    assert exp.metric == "OR"
 
 
 def test_select_expressions():
@@ -42,15 +40,15 @@ def test_select_expressions():
     # For 2-sample test, need n2 as well
     assert select_expressions('t', {'d', 'n'}, 2) is None
 
-    exps = select_expressions('t', {'d', 'n', 'n2'}, 2)
+    exps = select_expressions('t', {'d', 'n1', 'n2'}, 2)
     assert len(exps) == 1
-    assert exps[0].symbols == _symbol_set('t', 'd', 'n', 'n2')
+    assert exps[0].symbols == _symbol_set('t', 'd', 'n1', 'n2')
 
-    exps = select_expressions('g', {'y', 'y2', 'n', 'n2', 'v', 'v2'}, inputs=2)
+    exps = select_expressions('g', {'y1', 'y2', 'n1', 'n2', 'v1', 'v2'}, inputs=2)
     assert len(exps) == 4
-    targets = ['sd_pooled - sqrt((v*(n - 1) + v2*(n2 - 1))/(n + n2 - 2))',
-               'd - (y - y2)/sd_pooled', '-d*j + g',
-               'j - 1 + 3/(4*n + 4*n2 - 9)']
+    targets = ['sd - sqrt((v1*(n1 - 1) + v2*(n2 - 1))/(n1 + n2 - 2))',
+               'd - (y1 - y2)/sd', '-d*j + g',
+               'j - 1 + 3/(4*n1 + 4*n2 - 9)']
     assert set([str(e.sympy) for e in exps]) == set(targets)
 
     exps = select_expressions('p', {'z'})

@@ -37,6 +37,7 @@ _two_sample_expressions = [
      "Pooled standard deviation (Cohen version)"),
     ('d - (y1 - y2) / sd', "Cohen's d (two-sample)"),
     ('d - t * sqrt(1 / n1 + 1 / n2)', "Cohen's d (two-sample from t)"),
+    ('g - d * j', "Hedges' g"),
     ('j - (1 - (3 / (4 * (n1 + n2) - 9)))',
      "Approximate correction factor for Hedges' g")
 ]
