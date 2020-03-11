@@ -14,7 +14,7 @@ def variables():
 
 @pytest.fixture(scope='package')
 def dataset(variables):
-    return Dataset(*variables, names=['my_covariate'])
+    return Dataset(*variables, X_names=['my_covariate'])
 
 
 @pytest.fixture(scope='package')
@@ -22,7 +22,7 @@ def dataset_n():
     y = np.array([[-3., -0.5, 0., -5.01, 0.35, -2., -6., -4., -4.3, -0.1, -1.]]).T
     n = np.array([[16, 16, 20.548, 32.597, 14., 11.118, 4.444, 12.414, 26.963,
                    130.556, 126.76]]).T / 2
-    return Dataset(y, sample_sizes=n)
+    return Dataset(y, n=n)
 
 
 @pytest.fixture(scope='package')

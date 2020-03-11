@@ -16,29 +16,29 @@ class Dataset:
     """Container for input data and arguments to estimators.
 
     Args:
-        estimates (array-like): 1d array of study-level estimates with length K
-        variances (array-like, optional): 1d array of study-level variances
+        y (array-like): 1d array of study-level estimates with length K
+        v (array-like, optional): 1d array of study-level variances
             with length K
-        predictors (array-like, optional): 1d or 2d array containing
+        X (array-like, optional): 1d or 2d array containing
             study-level predictors (or covariates); has dimensions K x P
-        sample_sizes (array-like, optional): 1d array of study-level sample
+        n (array-like, optional): 1d array of study-level sample
             sizes (length K)
-        names ([str], optional): List of length P containing the names of the
+        X_names ([str], optional): List of length P containing the names of the
             predictors
         add_intercept (bool, optional): If True, an intercept column is
             automatically added to the predictor matrix. If False, the
             predictors matrix is passed as-is to estimators.
         kwargs (dict, optional): Keyword arguments to pass onto estimators
     """
-    def __init__(self, estimates, variances=None, predictors=None,
-                 sample_sizes=None, names=None, add_intercept=True, **kwargs):
-        self.estimates = ensure_2d(estimates)
-        self.variances = ensure_2d(variances)
-        self.sample_sizes = ensure_2d(sample_sizes)
+    def __init__(self, y, v=None, X=None, n=None, X_names=None,
+                 add_intercept=True, **kwargs):
+        self.y = ensure_2d(y)
+        self.v = ensure_2d(v)
+        self.n = ensure_2d(n)
         self.kwargs = kwargs
-        X, n = self._get_predictors(predictors, names, add_intercept)
-        self.predictors = X
-        self.names = n
+        X, names = self._get_predictors(X, X_names, add_intercept)
+        self.X = X
+        self.X_names = names
 
     def __getattr__(self, key):
         # Provide convenient access to stored kwargs.
@@ -59,43 +59,22 @@ class Dataset:
             X = pd.concat([intercept, X], axis=1)
         return X.values, X.columns.tolist()
 
-    @property
-    def y(self):
-        """Alias for the `estimates` attribute."""
-        return self.estimates
 
-    @property
-    def v(self):
-        """Alias for the `variances` attribute."""
-        return self.variances
-
-    @property
-    def X(self):
-        """Alias for the `predictors` attribute."""
-        return self.predictors
-
-    @property
-    def n(self):
-        """Alias for the `sample_sizes` attribute."""
-        return self.sample_sizes
-
-
-def meta_regression(estimates, variances=None, predictors=None,
-                    sample_sizes=None, names=None, add_intercept=True,
+def meta_regression(y, v=None, X=None, n=None, X_names=None, add_intercept=True,
                     method='ML', ci_method='QP', alpha=0.05, **kwargs):
     """Fits the standard meta-regression/meta-analysis model to provided data.
 
     Args:
-        estimates (array-like): 1d array of study-level estimates with length K
-        variances (array-like, optional): 1d array of study-level variances
+        y (array-like): 1d array of study-level estimates with length K
+        v (array-like, optional): 1d array of study-level variances
             with length K
-        predictors (array-like, optional): 1d or 2d array containing
+        X (array-like, optional): 1d or 2d array containing
             study-level predictors (or covariates); has dimensions K x P. If
             omitted, add_intercept must be True.
-        sample_sizes (array-like, optional): 1d array of study-level sample
+        n (array-like, optional): 1d array of study-level sample
             sizes (length K)
-        names ([str], optional): List of length P containing the names of the
-            predictors
+        X_names ([str], optional): List of length P containing the names of the
+            predictors (i.e., columns of X)
         add_intercept (bool, optional): If True, an intercept column is
             automatically added to the predictor matrix. If False, the
             predictors matrix is passed as-is to estimators.
@@ -119,15 +98,14 @@ def meta_regression(estimates, variances=None, predictors=None,
         depending on the specified method ('Stan' will return the latter; all
         other methods return the former).
     """
-    dataset = Dataset(estimates, variances, predictors, sample_sizes, names,
-                      add_intercept)
+    dataset = Dataset(y, v, X, n, X_names, add_intercept)
 
     method = method.lower()
 
     if method in ['ml', 'reml']:
-        if variances is not None:
+        if v is not None:
             est_cls = partial(VarianceBasedLikelihoodEstimator, method=method)
-        elif sample_sizes is not None:
+        elif n is not None:
             est_cls = partial(SampleSizeBasedLikelihoodEstimator, method=method)
         else:
             raise ValueError("If method is ML or REML, one of `variances` or "

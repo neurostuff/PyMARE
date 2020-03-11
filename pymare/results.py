@@ -44,7 +44,7 @@ class MetaRegressionResults:
     def to_df(self):
         """Return a pandas DataFrame summarizing results."""
         fixed = self.params['beta'].copy()
-        fixed['name'] = self.dataset.names
+        fixed['name'] = self.dataset.X_names
         fixed = pd.DataFrame(fixed)
 
         tau2 = pd.DataFrame(pd.Series(self.params['tau2'])).T
@@ -74,7 +74,7 @@ class MetaRegressionResults:
             self.ci_method = ci_method
 
         def compute_beta_stats():
-            v, X, alpha = self.dataset.variances, self.dataset.predictors, self.alpha
+            v, X, alpha = self.dataset.v, self.dataset.X, self.alpha
             w = 1. / (v + self['tau2']['est'])
             estimate = self['beta']['est']
             se = np.sqrt(np.diag(np.linalg.pinv((X * w).T.dot(X))))

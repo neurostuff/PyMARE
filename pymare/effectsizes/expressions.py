@@ -15,8 +15,8 @@ exec_('from sympy.stats import *', _locals)
 _base_expressions = [
     ('p - cdf(Normal("normal", 0, 1))(z)',),
     ('sd - sqrt(v)',),
-    ('sem - sd / sqrt(n)',),
-    ('t - y / sem', "One-sample t-test"),
+    ('se - sd / sqrt(n)',),
+    ('t - y / se', "One-sample t-test"),
     ('d - y / sd', "Cohen's d (one sample)"),
     ('d - t / sqrt(n)', "Cohen's d (from t)"),
     ('g - d * j', "Hedges' g"),
@@ -66,7 +66,7 @@ def _construct_sets():
     two_samp = [Expression(*exp, inputs=2) for exp in _two_sample_expressions]
     for exp in _base_expressions:
         for n in ['1', '2']:
-            eq = re.sub(r"(\b(p|d|t|y|n|sd|sem|g|j|v)\b)",
+            eq = re.sub(r"(\b(p|d|t|y|n|sd|se|g|j|v)\b)",
                         r"\g<1>{}".format(n),
                         exp[0])
             two_samp.append(Expression(eq, *exp[1:], inputs=2))
