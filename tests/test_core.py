@@ -11,12 +11,9 @@ def test_dataset_init(variables):
     assert dataset.X.shape == (n, 2)
     assert dataset.X_names == ['intercept', 'bork']
 
-    dataset = Dataset(*variables, X_names=['bork'], add_intercept=False,
-                      extra_arg=200)
+    dataset = Dataset(*variables, X_names=['bork'], add_intercept=False)
     assert dataset.X.shape == (n, 1)
     assert dataset.X_names == ['bork']
-    assert 'extra_arg' in dataset.kwargs
-    assert dataset.extra_arg == 200
 
 
 def test_meta_regression_wrapper(variables):
