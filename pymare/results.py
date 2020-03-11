@@ -99,8 +99,7 @@ class MetaRegressionResults:
         alpha = self.alpha
         # for estimators that don't need variances, we use the estimated sigma
         if v is None:
-            v = self.params.get('sigma', {'est': 0})['est']
-            v = np.ones((len(X), 1)) * v
+            v = self.params.get('sigma', {'est': 0})['est'] / n
         tau2 = self.params.get('tau2', {'est': 0})['est']
 
         # Stats for fixed effects
