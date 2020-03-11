@@ -4,7 +4,7 @@ from abc import ABCMeta, abstractmethod
 from inspect import getfullargspec
 
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import minimize, Bounds
 
 from ..results import MetaRegressionResults, BayesianMetaRegressionResults
 
@@ -173,7 +173,14 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         tau2 = est_DL['tau2']
 
         theta_init = np.r_[beta.ravel(), tau2]
-        res = minimize(self._nll_func, theta_init, (y, v, X), **self.kwargs).x
+
+        lb = np.ones(len(theta_init)) * -np.inf
+        ub = -lb
+        lb[-1] = 0.  # bound only the variance
+        bds = Bounds(lb, ub, keep_feasible=True)
+
+        res = minimize(self._nll_func, theta_init, (y, v, X), bounds=bds,
+                       **self.kwargs).x
         beta, tau = res[:-1], float(res[-1])
         tau = np.max([tau, 0])
         return {'beta': beta, 'tau2': tau}
@@ -218,6 +225,12 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         The ML and REML solutions are obtained via SciPy's scalar function
         minimizer (scipy.optimize.minimize). Parameters to minimize() can be
         passed in as keyword arguments.
+
+    References:
+        Sangnawakij, P., Böhning, D., Niwitpong, S. A., Adams, S., Stanton, M., 
+        & Holling, H. (2019). Meta-analysis without study-specific variance 
+        information: Heterogeneity case. Statistical Methods in Medical Research, 
+        28(1), 196–210. https://doi.org/10.1177/0962280217718867    
     """
 
     def __init__(self, method='ml', **kwargs):
@@ -229,12 +242,26 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         self.kwargs = kwargs
 
     def _fit(self, y, n, X):
+        if n.std() < np.sqrt(np.finfo(float).eps):
+            raise ValueError("Sample size-based likelihood estimator cannot "
+                             "work with all-equal sample sizes.")
+        if n.std() < n.mean() / 10:
+            raise Warning("Sample sizes are too close, sample size-based "
+                          "likelihood estimator may fail.")
         # set tau^2 to 0 and compute starting values
         tau2 = 0.
-        beta = WeightedLeastSquares(tau2=tau2)._fit(y, n, X)['beta']
-        sigma = ((y - X.dot(beta))**2 * n).mean()
+        k, p = X.shape
+        beta = WeightedLeastSquares(tau2=tau2)._fit(y, n, X)['beta'][:, None]
+        sigma = ((y - X.dot(beta))**2 * n).sum() / (k - p)
         theta_init = np.r_[beta.ravel(), sigma, tau2]
-        res = minimize(self._nll_func, theta_init, (y, n, X), **self.kwargs).x
+
+        lb = np.ones(len(theta_init)) * -np.inf
+        ub = -lb
+        lb[-2:] = 0.  # bound only the variances
+        bds = Bounds(lb, ub, keep_feasible=True)
+
+        res = minimize(self._nll_func, theta_init, (y, n, X), bounds=bds,
+                       **self.kwargs).x
         beta, sigma, tau = res[:-2], float(res[-2]), float(res[-1])
         tau = np.max([tau, 0])
         return {'beta': beta, 'sigma2': sigma, 'tau2': tau}
