@@ -50,10 +50,12 @@ from pymare.estimators import LikelihoodBased
 
 # A handy container we can pass to any estimator
 dataset = Dataset(y, v, X)
-# Estimator class for all likelihood-based methods
-estimator = LikelihoodBased(method='REML')
+# Estimator class for likelihood-based methods when variances are known
+estimator = VarianceBasedLikelihoodEstimator(method='REML')
 # All estimators accept a `Dataset` instance as the first argument to `.fit()`
-result = estimator.fit(dataset)
+estimator.fit(dataset)
+# Post-fitting we can obtain a MetaRegressionResults instance via .summary()
+results = estimator.summary()
 # Print summary of results as a pandas DataFrame
 print(result.to_df())
 ```
