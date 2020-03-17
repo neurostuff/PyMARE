@@ -140,7 +140,7 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
             * v: Sampling variance of the mean.
             * sd: Sample standard deviation.
             * n: Sample size.
-            * sem: Standard error of the mean.
+            * se: Standard error of the mean.
             * d: Cohen's d.
             * g: Hedges' g.
             * t: t-statistic.

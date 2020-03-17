@@ -12,12 +12,15 @@ exec_('from sympy.stats import *', _locals)
 
 
 # Common to one-sample and two-sample procedures
-_base_expressions = [
+_common_expressions = [
     ('p - cdf(Normal("normal", 0, 1))(z)',),
+]
+
+_one_sample_expressions = [
     ('sd - sqrt(v)',),
     ('se - sd / sqrt(n)',),
     ('t - y / se', "One-sample t-test"),
-    ('d - y / sd', "Cohen's d (one sample)"),
+    ('d - y / sd', "Cohen's d (one-sample)"),
     ('d - t / sqrt(n)', "Cohen's d (from t)"),
     ('g - d * j', "Hedges' g"),
     # TODO: we currently use Hedges' approximation instead of original J
@@ -25,12 +28,12 @@ _base_expressions = [
     # breaks numpy during lambdification. Need to fix/improve this.
     ('j - (1 - (3 / (4 * (n - 1) - 1)))',
      "Approximate correction factor for Hedges' g"),
+    ('v_g - ((n -1)/(n - 3)) * j**2 * (1 / (n - 1) + d**2) - d**2',
+     "Variance of Hedges' g")
 ]
 
 
 _two_sample_expressions = [
-    ('sd1 - sqrt(v1)',),
-    ('sd2 - sqrt(v2)',),
     ('t - (y1 - y2) / sqrt(v1 / n1 + v2 / n2)',
      "Two-sample t-test (unequal variances)"),
     ('sd - sqrt((v1 * (n1 - 1) + v2 * (n2 - 1)) / (n1 + n2 - 2))',
@@ -39,7 +42,10 @@ _two_sample_expressions = [
     ('d - t * sqrt(1 / n1 + 1 / n2)', "Cohen's d (two-sample from t)"),
     ('g - d * j', "Hedges' g"),
     ('j - (1 - (3 / (4 * (n1 + n2) - 9)))',
-     "Approximate correction factor for Hedges' g")
+     "Approximate correction factor for Hedges' g"),
+    ('v_d - ((n1 + n2)/(n1 * n2) + d**2 / 2 * (n1 + n2 - 2))',
+     "Variance of Cohen's d"),
+    ('v_g - j**2 * v_d', "Variance of Hedges' g")
 ]
 
 
@@ -62,14 +68,20 @@ class Expression:
 
 
 def _construct_sets():
-    one_samp = [Expression(*exp, inputs=1) for exp in _base_expressions]
-    two_samp = [Expression(*exp, inputs=2) for exp in _two_sample_expressions]
-    for exp in _base_expressions:
+    # Process 1-sample expression
+    one_samp = _common_expressions + _one_sample_expressions
+    one_samp = [Expression(*exp, inputs=1) for exp in one_samp]
+
+    # Process 2-sample expressions
+    two_samp = _common_expressions + _two_sample_expressions
+    two_samp = [Expression(*exp, inputs=2) for exp in two_samp]
+    for exp in _one_sample_expressions:
         for n in ['1', '2']:
             eq = re.sub(r"(\b(p|d|t|y|n|sd|se|g|j|v)\b)",
                         r"\g<1>{}".format(n),
                         exp[0])
             two_samp.append(Expression(eq, *exp[1:], inputs=2))
+
     return one_samp, two_samp
 
 
