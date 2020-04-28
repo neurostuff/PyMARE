@@ -28,7 +28,9 @@ _one_sample_expressions = [
     # breaks numpy during lambdification. Need to fix/improve this.
     ('j - (1 - (3 / (4 * (n - 1) - 1)))',
      "Approximate correction factor for Hedges' g"),
-    ('v_g - ((n -1)/(n - 3)) * j**2 * (1 / (n - 1) + d**2) - d**2',
+    ('v_d - ((n - 1)/(n - 3)) * (1 / n + d**2) - d**2 / j**2 * n',
+     "Variance of Cohen's d")
+    ('v_g - ((n - 1)/(n - 3)) * j**2 * (1 / n + d**2) - d**2',
      "Variance of Hedges' g")
 ]
 
