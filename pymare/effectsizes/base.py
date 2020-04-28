@@ -82,12 +82,15 @@ class EffectSizeConverter(metaclass=ABCMeta):
     def __getattr__(self, key):
         if key.startswith('get_'):
             stat = key.replace('get_', '')
-            return partial(self.to, stat=stat)
+            return partial(self.get, stat=stat)
 
     def to_dataset(self, estimate='g', **kwargs):
         y = self.get(estimate)
         v = self.get('v_{}'.format(estimate), error=False)
-        n = self.get('n', error=False)
+        try:
+            n = self.get('n')
+        except:
+            n = None
         return Dataset(y=y, v=v, n=n, **kwargs)
 
     def get(self, stat, error=True):
@@ -95,8 +98,9 @@ class EffectSizeConverter(metaclass=ABCMeta):
 
         Args:
             stat (str): The name of the statistic to compute (e.g., 'd', 'g').
-            error (bool): Whether or not to raise an exception in the event
-                that the requested quantity cannot be computed.
+            error (bool): Specifies behavior in the event that the requested
+                quantity cannot be computed. If True (default), raises an
+                exception. If False, returns None.
         
         Returns:
             A float or ndarray containing the requested parameter values, if
@@ -111,7 +115,8 @@ class EffectSizeConverter(metaclass=ABCMeta):
         if stat in self.known_vars:
             return self.known_vars[stat]
 
-        known = set(self.known_vars.keys())
+        known = set([k for k, v in self.known_vars.items() if v is not None])
+
         system = select_expressions(target=stat, known_vars=known,
                                     inputs=self._inputs)
         system = [exp.sympy for exp in system]
