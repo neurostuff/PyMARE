@@ -80,21 +80,23 @@ class EffectSizeConverter(metaclass=ABCMeta):
         self.known_vars = kwargs
 
     def __getattr__(self, key):
-        if key.startswith('to_'):
-            stat = key.replace('to_', '')
+        if key.startswith('get_'):
+            stat = key.replace('get_', '')
             return partial(self.to, stat=stat)
 
     def to_dataset(self, estimate='g', **kwargs):
-        y = self.to(estimate)
-        v = self.known_vars.get('v_{}'.format(estimate))
-        n = self.known_vars.get('n')
+        y = self.get(estimate)
+        v = self.get('v_{}'.format(estimate), error=False)
+        n = self.get('n', error=False)
         return Dataset(y=y, v=v, n=n, **kwargs)
 
-    def to(self, stat):
+    def get(self, stat, error=True):
         """Compute and return values for the specified statistic, if possible.
 
         Args:
             stat (str): The name of the statistic to compute (e.g., 'd', 'g').
+            error (bool): Whether or not to raise an exception in the event
+                that the requested quantity cannot be computed.
         
         Returns:
             A float or ndarray containing the requested parameter values, if
@@ -115,7 +117,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
         system = [exp.sympy for exp in system]
         result = solve_system(system, self.known_vars)
 
-        if result is None:
+        if result is None and error:
             raise ValueError("Unable to solve for statistic '{}' given the "
                              "known quantities ({}).".format(stat, known))
 
