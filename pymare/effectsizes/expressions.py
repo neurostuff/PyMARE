@@ -3,7 +3,7 @@ from collections import defaultdict
 from itertools import chain
 import re
 
-from sympy import sympify
+from sympy import sympify, Symbol
 from sympy.core.compatibility import exec_
 
 
@@ -29,7 +29,7 @@ _one_sample_expressions = [
     ('j - (1 - (3 / (4 * (n - 1) - 1)))',
      "Approximate correction factor for Hedges' g"),
     ('v_d - ((n - 1)/(n - 3)) * (1 / n + d**2) - d**2 / j**2 * n',
-     "Variance of Cohen's d")
+     "Variance of Cohen's d"),
     ('v_g - ((n - 1)/(n - 3)) * j**2 * (1 / n + d**2) - d**2',
      "Variance of Hedges' g")
 ]
@@ -108,6 +108,13 @@ def select_expressions(target, known_vars, inputs=1):
     exp_dict = defaultdict(list)
 
     exprs = one_sample_expressions if inputs == 1 else two_sample_expressions
+
+    # make sure target exists before going any further
+    all_symbols = set().union(*[e.symbols for e in exprs])
+    if Symbol(target) not in all_symbols:
+        raise ValueError("Target symbol '{}' cannot be found in any of the "
+                         "known expressions).".format(target))
+
     for exp in exprs:
         if exp.inputs is not None and exp.inputs != inputs:
             continue
