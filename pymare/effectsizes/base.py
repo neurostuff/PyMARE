@@ -189,9 +189,6 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
             * se: Standard error of the mean.
             * d: Cohen's d.
             * g: Hedges' g.
-            * t: t-statistic.
-            * z: z-score.
-            * p: p-value.
 
     Notes:
         All input variables are assumed to reflect study- or analysis-level
@@ -229,20 +226,12 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
             * sd1, sd2: Sample standard deviations.
             * n1, n2: Sample sizes.
             * sem1, sem2: Standard errors of the means.
-            In addition, for most of the above (all but 't', 'd', 'g', 'p', 'z'),
-            one can pass in a second set of values, representing a second group
-            of estimates, by appending any name with '2'--e.g., y2, v2, sd2,
-            n2, etc. Note that if any such variable is passed, the
-            corresponding estimate for the first group must also be passed--
-            e.g., if `v2` is set, `v` must also be provided.
 
     Notes:
         All input variables are assumed to reflect study- or analysis-level
         summaries, and are _not_ individual data points. E.g., do not pass in
-        a vector of point estimates as `y` and a scalar for the variances `v`.
-        The lengths of all inputs must match. Note that the variable pairs
-        (e.g., y1 and y2) reflect study-level summaries for the two groups, and
-        are not the raw scores for (potentially different-sized) groups.
+        a vector of point estimates as `y1` and a scalar for the variances `v1`.
+        The lengths of all inputs must match.
 
         When using the TwoSampleEffectSizeConverter, it is assumed that the
         paired inputs are from independent samples. Paired-sampled comparisons
