@@ -3,6 +3,7 @@
 import warnings
 from functools import partial
 from abc import ABCMeta
+from collections import defaultdict
 
 from sympy import sympify, lambdify, Symbol, solve
 
@@ -20,7 +21,7 @@ def solve_system(system, known_vars=None):
             when evaluating the solution. Keys are the names of parameters
             (e.g., 'sem', 't'), values are numerical data types (including
             numpy arrays).
-    
+
     Returns:
         A dictionary of newly computed values, where the keys are parameter
         names and the values are numerical data types.
@@ -77,12 +78,51 @@ def solve_system(system, known_vars=None):
 class EffectSizeConverter(metaclass=ABCMeta):
     """Base class for effect size converters."""
     def __init__(self, **kwargs):
-        self.known_vars = kwargs
+        self.known_vars = {}
+        self._system_cache = defaultdict(dict)
+        self.set_data(**kwargs)
 
     def __getattr__(self, key):
         if key.startswith('get_'):
             stat = key.replace('get_', '')
             return partial(self.get, stat=stat)
+
+    def set_data(self, incremental=False, **kwargs):
+        """Update instance data.
+
+        Args:
+            incremental (bool): If True, updates data incrementally (i.e.,
+                existing data will be preserved unless they're overwritten by
+                incoming keys). If False, all existing data is dropped first.
+            kwargs: Data values or arrays; keys are the names of the
+                quantities. All inputs to __init__ are valid.
+        """
+        if not incremental:
+            self.known_vars = {}
+        self.known_vars.update(kwargs)
+
+    def _get_system(self, stat):
+        # Retrieve a system of equations capable of solving for desired stat.
+        known = set([k for k, v in self.known_vars.items() if v is not None])
+
+        # get system from cache if available
+        cached = self._system_cache.get(stat, {})
+        for k, system in cached.items():
+            if known.issuperset(k):
+                return system
+
+        # otherwise try to get a sufficient system
+        exprs = select_expressions(target=stat, known_vars=known,
+                                   inputs=self._inputs)
+        system = [exp.sympy for exp in exprs]
+
+        # update the cache
+        if system:
+            free_syms = set().union(*[exp.symbols for exp in exprs])
+            set_key = frozenset([s.name for s in free_syms])
+            self._system_cache[stat][set_key] = system
+
+        return system
 
     def to_dataset(self, estimate='g', **kwargs):
         y = self.get(estimate)
@@ -115,11 +155,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
         if stat in self.known_vars:
             return self.known_vars[stat]
 
-        known = set([k for k, v in self.known_vars.items() if v is not None])
-
-        system = select_expressions(target=stat, known_vars=known,
-                                    inputs=self._inputs)
-        system = [exp.sympy for exp in system]
+        system = self._get_system(stat)
         result = solve_system(system, self.known_vars)
 
         if result is None and error:
