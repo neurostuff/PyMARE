@@ -9,21 +9,19 @@ from pymare.effectsizes import (OneSampleEffectSizeConverter, solve_system,
 @pytest.fixture(scope='module')
 def data():
     return {
-        'y1': np.array([4, 2]),
-        'v1': np.array([1, 9]),
+        'm1': np.array([4, 2]),
+        'sd1': np.sqrt(np.array([1, 9])),
         'n1': np.array([12, 15]),
-        'y2': np.array([5, 2.5]),
-        'v2': np.array([4, 16]),
+        'm2': np.array([5, 2.5]),
+        'sd2': np.sqrt(np.array([4, 16])),
         'n2': np.array([12, 16]),
-        'z': np.array([1.96, -2.58]),
-        'p': np.array([0.05, 0.99])
     }
 
 
 def test_EffectSizeConverter_smoke_test(data):
-    esc = OneSampleEffectSizeConverter(y=data['y1'], v=data['v1'], n=data['n1'])
-    assert set(esc.known_vars.keys()) == {'y', 'v', 'n'}
-    assert esc.get_d().shape == data['y1'].shape
+    esc = OneSampleEffectSizeConverter(m=data['m1'], sd=data['sd1'], n=data['n1'])
+    assert set(esc.known_vars.keys()) == {'m', 'sd', 'n'}
+    assert esc.get_d().shape == data['m1'].shape
     assert not {'d', 'sd'} - set(esc.known_vars.keys())
 
     esc = TwoSampleEffectSizeConverter(**data)
@@ -49,14 +47,14 @@ def test_EffectSizeConverter_to_dataset(data):
 def test_2d_array_conversion():
     shape = (10, 2)
     data = {
-        'y': np.random.randint(10, size=shape),
-        'v': np.random.randint(1, 10, size=shape),
+        'm': np.random.randint(10, size=shape),
+        'sd': np.random.randint(1, 10, size=shape),
         'n': np.ones(shape) * 40
     }
     esc = OneSampleEffectSizeConverter(**data)
 
-    sd = esc.get_sd()
-    assert np.array_equal(sd, np.sqrt(data['v']))
+    sd = esc.get_d()
+    assert np.array_equal(sd, data['m'] / data['sd'])
 
     # smoke test other parameters to make sure all generated numpy funcs can
     # handle 2d inputs.
