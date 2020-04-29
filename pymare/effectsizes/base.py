@@ -116,7 +116,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
 
         # otherwise try to get a sufficient system
         exprs = select_expressions(target=stat, known_vars=known,
-                                   inputs=self._inputs)
+                                   types=self._types)
         system = [exp.sympy for exp in exprs]
 
         # update the cache
@@ -196,7 +196,7 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
         a vector of point estimates as `y` and a scalar for the variances `v`.
         The lengths of all inputs must match.
     """
-    _inputs = 1
+    _types = 1
 
     def __init__(self, data=None, **kwargs):
         
@@ -237,7 +237,7 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
         paired inputs are from independent samples. Paired-sampled comparisons
         are not supported (use the OneSampleEffectSizeConverter instead).
     """
-    _inputs = 2
+    _types = 2
 
     def __init__(self, data=None, **kwargs):
 
