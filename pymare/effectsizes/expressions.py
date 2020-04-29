@@ -11,18 +11,11 @@ _locals = {}
 exec_('from sympy.stats import *', _locals)
 
 
-# Common to one-sample and two-sample procedures
-_common_expressions = [
-    ('p - cdf(Normal("normal", 0, 1))(z)',),
-]
-
 _one_sample_expressions = [
     ('sd - sqrt(v)',),
     ('se - sd / sqrt(n)',),
-    ('t - y / se', "One-sample t-test"),
-    ('d - y / sd', "Cohen's d (one-sample)"),
-    ('d - t / sqrt(n)', "Cohen's d (from t)"),
-    ('g - d * j', "Hedges' g"),
+    ('d - y / sd', "Cohen's d (one-sample)",),
+    ('g - d * j', "Hedges' g",),
     # TODO: we currently use Hedges' approximation instead of original J
     # function because the gamma function slows solving down considerably and
     # breaks numpy during lambdification. Need to fix/improve this.
@@ -36,12 +29,9 @@ _one_sample_expressions = [
 
 
 _two_sample_expressions = [
-    ('t - (y1 - y2) / sqrt(v1 / n1 + v2 / n2)',
-     "Two-sample t-test (unequal variances)"),
     ('sd - sqrt((v1 * (n1 - 1) + v2 * (n2 - 1)) / (n1 + n2 - 2))',
      "Pooled standard deviation (Cohen version)"),
     ('d - (y1 - y2) / sd', "Cohen's d (two-sample)"),
-    ('d - t * sqrt(1 / n1 + 1 / n2)', "Cohen's d (two-sample from t)"),
     ('g - d * j', "Hedges' g"),
     ('j - (1 - (3 / (4 * (n1 + n2) - 9)))',
      "Approximate correction factor for Hedges' g"),
@@ -71,12 +61,10 @@ class Expression:
 
 def _construct_sets():
     # Process 1-sample expression
-    one_samp = _common_expressions + _one_sample_expressions
-    one_samp = [Expression(*exp, inputs=1) for exp in one_samp]
+    one_samp = [Expression(*exp, inputs=1) for exp in _one_sample_expressions]
 
     # Process 2-sample expressions
-    two_samp = _common_expressions + _two_sample_expressions
-    two_samp = [Expression(*exp, inputs=2) for exp in two_samp]
+    two_samp = [Expression(*exp, inputs=2) for exp in _two_sample_expressions]
     for exp in _one_sample_expressions:
         for n in ['1', '2']:
             eq = re.sub(r"(\b(p|d|t|y|n|sd|se|g|j|v)\b)",

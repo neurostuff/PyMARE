@@ -11,6 +11,9 @@ from .expressions import select_expressions
 from pymare import Dataset
 
 
+SYMPY_MODULES = ['numpy', 'scipy']
+
+
 def solve_system(system, known_vars=None):
     """Solve and evaluate a system of SymPy equations given known inputs.
     
@@ -69,7 +72,7 @@ def solve_system(system, known_vars=None):
         free = sol.free_symbols
         if (not (free - dummies) and not
                 (len(free) == 1 and list(free)[0].name.strip('_') == name)):
-            func = lambdify(dummy_list, sol, ['numpy', 'scipy'])
+            func = lambdify(dummy_list, sol, modules=SYMPY_MODULES)
             results[name] = func(*data_args)
 
     return results
