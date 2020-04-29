@@ -127,9 +127,9 @@ class EffectSizeConverter(metaclass=ABCMeta):
 
         return system
 
-    def to_dataset(self, estimate='g', **kwargs):
-        y = self.get(estimate)
-        v = self.get('v_{}'.format(estimate), error=False)
+    def to_dataset(self, measure='g', **kwargs):
+        y = self.get(measure)
+        v = self.get('v_{}'.format(measure), error=False)
         try:
             n = self.get('n')
         except:
@@ -162,6 +162,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
         result = solve_system(system, self.known_vars)
 
         if result is None and error:
+            known = list(self.known_vars.keys())
             raise ValueError("Unable to solve for statistic '{}' given the "
                              "known quantities ({}).".format(stat, known))
 
@@ -181,14 +182,11 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
             values must be floats, 1d ndarrays, or any iterable that can be
             converted to an ndarray. All variables must have the same length.
             Allowable variables currently include:
-            * y: Point estimate with unbounded distributions--most commonly,
-                study- or experiment-level estimates of means.
-            * v: Sampling variance of the mean.
-            * sd: Sample standard deviation.
-            * n: Sample size.
-            * se: Standard error of the mean.
-            * d: Cohen's d.
-            * g: Hedges' g.
+            * m: Mean
+            * sd: Standard deviation
+            * n: Sample size
+            * d: Cohen's d
+            * g: Hedges' g
 
     Notes:
         All input variables are assumed to reflect study- or analysis-level
@@ -220,12 +218,9 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
             converted to an ndarray. All variables must have the same length.
             All variables must be passed in pairs. Allowable variables
             currently include:
-            * y1, y2: Point estimates with unbounded distributions--most
-                commonly, study- or experiment-level estimates of means.
-            * v1, v2: Sampling variances of the means.
-            * sd1, sd2: Sample standard deviations.
-            * n1, n2: Sample sizes.
-            * sem1, sem2: Standard errors of the means.
+            * m1, m2: Means for groups 1 and 2
+            * sd1, sd2: Standard deviations for groups 1 and 2
+            * n1, n2: Sample sizes for groups 1 and 2
 
     Notes:
         All input variables are assumed to reflect study- or analysis-level
@@ -247,13 +242,13 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
 
         # Validate that all inputs were passed in pairs
         var_names = set([v.strip('[12]') for v in kwargs.keys()])
-        pair_vars = var_names - {'t', 'z', 'd', 'p'}
+        pair_vars = var_names - {'d'}
         for var in pair_vars:
             name1, name2 = '%s1' % var, '%s2' % var
             var1, var2 = kwargs.get(name1), kwargs.get(name2)
             if (var1 is None) != (var2 is None):
                 raise ValueError(
                     "Input variable '{}' must be provided in pairs; please "
-                    "provide both {} and {} (or neither)." % (var, q1, q2))
+                    "provide both {} and {} (or neither).".format(var, q1, q2))
 
         super().__init__(**kwargs)
