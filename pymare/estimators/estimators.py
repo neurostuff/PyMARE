@@ -75,8 +75,8 @@ class WeightedLeastSquares(BaseEstimator):
         https://doi.org/10.1002/sim.650
 
     Args:
-        tau2 (float, optional): Assumed/known value of tau^2. Must be >= 0.
-            Defaults to 0.
+        tau2 (float or 1-D array, optional): Assumed/known value of tau^2. Must
+            be >= 0. Defaults to 0.
 
     Notes:
         This estimator accepts 2-D inputs for y and v--i.e., it can produce
@@ -95,8 +95,7 @@ class WeightedLeastSquares(BaseEstimator):
         # numpy >= 1.8 inverts stacked matrices along the first N - 2 dims
         precision = np.linalg.pinv(wX_cov)
         pWX = np.einsum('ipk,ipq->iqk', wX, precision)
-        beta = np.einsum('ipk,ik->ip', pWX, y.T).squeeze()
-
+        beta = np.einsum('ipk,ik->ip', pWX, y.T).T
         return {'beta': beta, 'tau2': self.tau2}
 
 
@@ -112,20 +111,38 @@ class DerSimonianLaird(BaseEstimator):
         Kosmidis, I., Guolo, A., & Varin, C. (2017). Improving the accuracy of
         likelihood-based inference in meta-analysis and meta-regression.
         Biometrika, 104(2), 489–496. https://doi.org/10.1093/biomet/asx001
+
+    Notes:
+        This estimator accepts 2-D inputs for y and v--i.e., it can produce
+        estimates simultaneously for multiple independent sets of y/v values
+        (use the 2nd dimension for the parallel iterates). The X matrix must be
+        identical for all iterates.
     """
     def _fit(self, y, v, X):
         k, p = X.shape
-        beta_wls = WeightedLeastSquares(0.)._fit(y, v, X)['beta'][:, None]
-        # Cochrane's Q
+
+        # Estimate initial betas with WLS
         w = 1. / v
-        w_sum = w.sum()
-        Q = (w * (y - X.dot(beta_wls)) ** 2)
-        Q = Q.sum()
+        
+        # Einsum indices: k = studies, p = predictors, i = parallel iterates
+        wX = np.einsum('kp,ki->ipk', X, w)
+        wX_cov = wX.dot(X)
+        # numpy >= 1.8 inverts stacked matrices along the first N - 2 dims
+        precision = np.linalg.pinv(wX_cov)
+        pwX = np.einsum('ipk,ipq->iqk', wX, precision)
+        beta_wls = np.einsum('ipk,ik->ip', pwX, y.T).T
+
+        # Cochrane's Q
+        w_sum = w.sum(0)
+        Q = (w * (y - X.dot(beta_wls)) ** 2).sum(0)
+
         # D-L estimate of tau^2
-        precision = np.linalg.pinv((X * w).T.dot(X))
-        A = w_sum - np.trace((precision.dot((X * w**2).T)).dot(X))
+        Xw2 = np.einsum('kp,ki->ipk', X, w**2)
+        pXw2 = np.einsum('ipk,ipq->iqk', Xw2, precision)
+        A = w_sum - np.trace(pXw2.dot(X), axis1=1, axis2=2)
         tau_dl = (Q - (k - p)) / A
-        tau_dl = np.max([0., tau_dl])
+        tau_dl = np.maximum(0., tau_dl)
+
         # Re-estimate beta with tau^2 estimate
         beta_dl = WeightedLeastSquares(tau_dl)._fit(y, v, X)['beta'].ravel()
         return {'beta': beta_dl, 'tau2': tau_dl}
