@@ -11,14 +11,14 @@ def test_weighted_least_squares_estimator(dataset):
     est = WeightedLeastSquares().fit(dataset)
     results = est.summary()
     beta, tau2 = results['beta']['est'], results['tau2']['est']
-    assert np.allclose(beta, [-0.2725, 0.6935], atol=1e-4)
+    assert np.allclose(beta.ravel(), [-0.2725, 0.6935], atol=1e-4)
     assert tau2 == 0.
 
     # With non-zero tau^2
     est = WeightedLeastSquares(8.).fit(dataset)
     results = est.summary()
     beta, tau2 = results['beta']['est'], results['tau2']['est']
-    assert np.allclose(beta, [-0.1071, 0.7657], atol=1e-4)
+    assert np.allclose(beta.ravel(), [-0.1071, 0.7657], atol=1e-4)
     assert tau2 == 8.
 
 
@@ -68,7 +68,7 @@ def test_sample_size_based_maximum_likelihood_estimator(dataset_n):
     sigma2 = results['sigma2']['est']
     tau2 = results['tau2']['est']
     assert np.allclose(beta, [-2.0951], atol=1e-4)
-    assert np.allclose(sigma2, 12.777, atol=1e-4)
+    assert np.allclose(sigma2, 12.777, atol=1e-3)
     assert np.allclose(tau2, 2.8268, atol=1e-4)
 
 
@@ -80,5 +80,5 @@ def test_sample_size_based_restricted_maximum_likelihood_estimator(dataset_n):
     sigma2 = results['sigma2']['est']
     tau2 = results['tau2']['est']
     assert np.allclose(beta, [-2.1071], atol=1e-4)
-    assert np.allclose(sigma2, 13.048, atol=1e-4)
+    assert np.allclose(sigma2, 13.048, atol=1e-3)
     assert np.allclose(tau2, 3.2177, atol=1e-4)
