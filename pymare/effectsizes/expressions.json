@@ -7,6 +7,13 @@
         "description": "Hedges' g"
     },
     {
+        "expression": "sd - sqrt(n) * sqrt(v)",
+        "types": [
+            0
+        ],
+        "description": "sd from sampling variance and n"
+    },
+    {
         "expression": "d - m / sd",
         "types": [
             1
