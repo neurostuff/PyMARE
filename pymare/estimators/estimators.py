@@ -6,6 +6,7 @@ from inspect import getfullargspec
 import numpy as np
 from scipy.optimize import minimize, Bounds
 
+from ..stats import weighted_least_squares
 from ..results import MetaRegressionResults, BayesianMetaRegressionResults
 
 
@@ -88,14 +89,7 @@ class WeightedLeastSquares(BaseEstimator):
         self.tau2 = tau2
 
     def _fit(self, y, v, X):
-        w = 1. / (v + self.tau2)
-        # Einsum indices: k = studies, p = predictors, i = parallel iterates
-        wX = np.einsum('kp,ki->ipk', X, w)
-        wX_cov = wX.dot(X)
-        # numpy >= 1.8 inverts stacked matrices along the first N - 2 dims
-        precision = np.linalg.pinv(wX_cov)
-        pWX = np.einsum('ipk,ipq->iqk', wX, precision)
-        beta = np.einsum('ipk,ik->ip', pWX, y.T).T
+        beta = weighted_least_squares(y, v, X, self.tau2)
         return {'beta': beta, 'tau2': self.tau2}
 
 
@@ -144,7 +138,7 @@ class DerSimonianLaird(BaseEstimator):
         tau_dl = np.maximum(0., tau_dl)
 
         # Re-estimate beta with tau^2 estimate
-        beta_dl = WeightedLeastSquares(tau_dl)._fit(y, v, X)['beta'].ravel()
+        beta_dl = WeightedLeastSquares(tau_dl)._fit(y, v, X)['beta']
         return {'beta': beta_dl, 'tau2': tau_dl}
 
 

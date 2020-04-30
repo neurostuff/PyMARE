@@ -5,6 +5,24 @@ import scipy.stats as ss
 from scipy.optimize import minimize, Bounds
 
 
+def weighted_least_squares(y, v, X, tau2=0):
+    """2-D weighted least squares."""
+
+    # Estimate initial betas with WLS
+    w = 1. / (v + tau2)
+
+    # Einsum indices: k = studies, p = predictors, i = parallel iterates
+    wX = np.einsum('kp,ki->ipk', X, w)
+    wX_cov = wX.dot(X)
+
+    # numpy >= 1.8 inverts stacked matrices along the first N - 2 dims
+    precision = np.linalg.pinv(wX_cov)
+    pwX = np.einsum('ipk,ipq->iqk', wX, precision)
+    beta = np.einsum('ipk,ik->ip', pwX, y.T).T
+
+    return beta
+
+
 def ensure_2d(arr):
     """Ensure the passed array has 2 dimensions."""
     if arr is None:
@@ -72,9 +90,8 @@ def q_gen(y, v, X, tau2):
     Returns:
         A float giving the value of Cochran's Q-statistic.
     """
-    if tau2 < 0:
+    if np.any(tau2 < 0):
         raise ValueError("Value of tau^2 must be >= 0.")
+    beta = weighted_least_squares(y, v, X, tau2)
     w = 1. / (v + tau2)
-    precision = np.linalg.pinv((X * w).T.dot(X))
-    beta = (precision.dot(X.T) * w.T).dot(y)
     return (w * (y - X.dot(beta)) ** 2).sum()
