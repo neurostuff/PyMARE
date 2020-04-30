@@ -77,14 +77,26 @@ class WeightedLeastSquares(BaseEstimator):
     Args:
         tau2 (float, optional): Assumed/known value of tau^2. Must be >= 0.
             Defaults to 0.
+
+    Notes:
+        This estimator accepts 2-D inputs for y and v--i.e., it can produce
+        estimates simultaneously for multiple independent sets of y/v values
+        (use the 2nd dimension for the parallel iterates). The X matrix must be
+        identical for all iterates.
     """
     def __init__(self, tau2=0.):
         self.tau2 = tau2
 
     def _fit(self, y, v, X):
         w = 1. / (v + self.tau2)
-        precision = np.linalg.pinv((X * w).T.dot(X))
-        beta = (precision.dot(X.T) * w.T).dot(y).ravel()
+        # Einsum indices: k = studies, p = predictors, i = parallel iterates
+        wX = np.einsum('kp,ki->ipk', X, w)
+        wX_cov = wX.dot(X)
+        # numpy >= 1.8 inverts stacked matrices along the first N - 2 dims
+        precision = np.linalg.pinv(wX_cov)
+        pWX = np.einsum('ipk,ipq->iqk', wX, precision)
+        beta = np.einsum('ipk,ik->ip', pWX, y.T).squeeze()
+
         return {'beta': beta, 'tau2': self.tau2}
 
 
@@ -157,6 +169,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         The ML and REML solutions are obtained via SciPy's scalar function
         minimizer (scipy.optimize.minimize). Parameters to minimize() can be
         passed in as keyword arguments.
+
     References:
         DerSimonian, R., & Laird, N. (1986). Meta-analysis in clinical trials.
         Controlled clinical trials, 7(3), 177-188.
