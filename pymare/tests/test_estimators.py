@@ -27,8 +27,23 @@ def test_dersimonian_laird_estimator(dataset):
     est = DerSimonianLaird().fit(dataset)
     results = est.summary()
     beta, tau2 = results['beta']['est'], results['tau2']['est']
-    assert np.allclose(beta, [-0.1070, 0.7664], atol=1e-4)
+    assert np.allclose(beta.ravel(), [-0.1070, 0.7664], atol=1e-4)
     assert np.allclose(tau2, 8.3627, atol=1e-4)
+
+
+def test_2d_DL_estimator(dataset_2d):
+    results = DerSimonianLaird().fit(dataset_2d).summary()
+    beta, tau2 = results['beta']['est'], results['tau2']['est']
+    assert beta.shape == (2, 3)
+
+    # First and third sets are identical to previous DL test; second set is
+    # randomly different.
+    assert np.allclose(beta[:, 0], [-0.1070, 0.7664], atol=1e-4)
+    assert np.allclose(tau2[0], 8.3627, atol=1e-4)
+    assert not np.allclose(beta[:, 1], [-0.1070, 0.7664], atol=1e-4)
+    assert not np.allclose(tau2[1], 8.3627, atol=1e-4)
+    assert np.allclose(beta[:, 2], [-0.1070, 0.7664], atol=1e-4)
+    assert np.allclose(tau2[2], 8.3627, atol=1e-4)
 
 
 def test_hedges_estimator(dataset):
