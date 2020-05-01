@@ -119,10 +119,19 @@ def meta_regression(y=None, v=None, X=None, n=None, data=None, X_names=None,
         depending on the specified method ('Stan' will return the latter; all
         other methods return the former).
     """
-    if data is None or not isinstance(data, Dataset):
+    # if data is None or not isinstance(data, Dataset):
+    if data is None or not data.__class__.__name__ == 'Dataset':
         data = Dataset(y, v, X, n, data, X_names, add_intercept)
 
     method = method.lower()
+
+    # Only some methods can handle parallel inputs
+    y_shp = data.y.shape[1]
+    if y_shp > 1 and method not in set(['wls', 'dl', 'he']):
+        raise ValueError(
+            'y argument has dimensions {}; currently only the DL, HE, and WLS '
+            'estimators can handle parallel inputs (i.e., 2nd dim > 1).'
+            .format(y_shp))
 
     if method in ['ml', 'reml']:
         if v is not None:
