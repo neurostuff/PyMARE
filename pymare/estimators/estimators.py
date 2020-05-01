@@ -4,7 +4,7 @@ from abc import ABCMeta, abstractmethod
 from inspect import getfullargspec
 
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import minimize, Bounds
 
 from ..results import MetaRegressionResults, BayesianMetaRegressionResults
 
@@ -47,12 +47,19 @@ class BaseEstimator(metaclass=ABCMeta):
         n_args = len(spec.args) - n_kw - 1
         for i, name in enumerate(spec.args[1:]):
             if i >= n_args:
-                kwargs[name] = getattr(dataset, name, spec.defaults[i-n_args])
+                kwargs[name] = getattr(dataset, name, spec.defaults[i - n_args])
             else:
                 kwargs[name] = getattr(dataset, name)
+        self.params_ = self._fit(**kwargs)
+        self.dataset_ = dataset
+        return self
 
-        results = self._fit(**kwargs)
-        return self._result_cls(results, dataset, self)
+    def summary(self):
+        if not hasattr(self, 'params_'):
+            name = self.__class__.__name__
+            raise ValueError("This {} instance hasn't been fitted yet. Please "
+                             "call fit() before summary().".format(name))
+        return self._result_cls(self.params_, self.dataset_, self)
 
 
 class WeightedLeastSquares(BaseEstimator):
@@ -61,6 +68,11 @@ class WeightedLeastSquares(BaseEstimator):
     Provides the weighted least-squares estimate of the fixed effects given
     known/assumed between-study variance tau^2. When tau^2 = 0 (default), the
     model is the standard inverse-weighted fixed-effects meta-regression.
+
+    References:
+        Brockwell, S. E., & Gordon, I. R. (2001). A comparison of statistical
+        methods for meta-analysis. Statistics in Medicine, 20(6), 825–840.
+        https://doi.org/10.1002/sim.650
 
     Args:
         tau2 (float, optional): Assumed/known value of tau^2. Must be >= 0.
@@ -85,6 +97,9 @@ class DerSimonianLaird(BaseEstimator):
     References:
         DerSimonian, R., & Laird, N. (1986). Meta-analysis in clinical trials.
         Controlled clinical trials, 7(3), 177-188.
+        Kosmidis, I., Guolo, A., & Varin, C. (2017). Improving the accuracy of
+        likelihood-based inference in meta-analysis and meta-regression.
+        Biometrika, 104(2), 489–496. https://doi.org/10.1093/biomet/asx001
     """
     def _fit(self, y, v, X):
         k, p = X.shape
@@ -96,8 +111,8 @@ class DerSimonianLaird(BaseEstimator):
         Q = Q.sum()
         # D-L estimate of tau^2
         precision = np.linalg.pinv((X * w).T.dot(X))
-        A = w_sum - np.trace(X.dot(precision.dot(X.T) * (w**2).T))
-        tau_dl = (Q - k + p) / A
+        A = w_sum - np.trace((precision.dot((X * w**2).T)).dot(X))
+        tau_dl = (Q - (k - p)) / A
         tau_dl = np.max([0., tau_dl])
         # Re-estimate beta with tau^2 estimate
         beta_dl = WeightedLeastSquares(tau_dl)._fit(y, v, X)['beta'].ravel()
@@ -142,6 +157,12 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         The ML and REML solutions are obtained via SciPy's scalar function
         minimizer (scipy.optimize.minimize). Parameters to minimize() can be
         passed in as keyword arguments.
+    References:
+        DerSimonian, R., & Laird, N. (1986). Meta-analysis in clinical trials.
+        Controlled clinical trials, 7(3), 177-188.
+        Kosmidis, I., Guolo, A., & Varin, C. (2017). Improving the accuracy of
+        likelihood-based inference in meta-analysis and meta-regression.
+        Biometrika, 104(2), 489–496. https://doi.org/10.1093/biomet/asx001
     """
 
     def __init__(self, method='ml', **kwargs):
@@ -159,7 +180,14 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         tau2 = est_DL['tau2']
 
         theta_init = np.r_[beta.ravel(), tau2]
-        res = minimize(self._nll_func, theta_init, (y, v, X), **self.kwargs).x
+
+        lb = np.ones(len(theta_init)) * -np.inf
+        ub = -lb
+        lb[-1] = 0.  # bound only the variance
+        bds = Bounds(lb, ub, keep_feasible=True)
+
+        res = minimize(self._nll_func, theta_init, (y, v, X), bounds=bds,
+                       **self.kwargs).x
         beta, tau = res[:-1], float(res[-1])
         tau = np.max([tau, 0])
         return {'beta': beta, 'tau2': tau}
@@ -204,6 +232,12 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         The ML and REML solutions are obtained via SciPy's scalar function
         minimizer (scipy.optimize.minimize). Parameters to minimize() can be
         passed in as keyword arguments.
+
+    References:
+        Sangnawakij, P., Böhning, D., Niwitpong, S. A., Adams, S., Stanton, M., 
+        & Holling, H. (2019). Meta-analysis without study-specific variance 
+        information: Heterogeneity case. Statistical Methods in Medical Research, 
+        28(1), 196–210. https://doi.org/10.1177/0962280217718867    
     """
 
     def __init__(self, method='ml', **kwargs):
@@ -215,12 +249,26 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         self.kwargs = kwargs
 
     def _fit(self, y, n, X):
+        if n.std() < np.sqrt(np.finfo(float).eps):
+            raise ValueError("Sample size-based likelihood estimator cannot "
+                             "work with all-equal sample sizes.")
+        if n.std() < n.mean() / 10:
+            raise Warning("Sample sizes are too close, sample size-based "
+                          "likelihood estimator may fail.")
         # set tau^2 to 0 and compute starting values
         tau2 = 0.
-        beta = WeightedLeastSquares(tau2=tau2)._fit(y, n, X)['beta']
-        sigma = ((y - X.dot(beta))**2 * n).mean()
+        k, p = X.shape
+        beta = WeightedLeastSquares(tau2=tau2)._fit(y, n, X)['beta'][:, None]
+        sigma = ((y - X.dot(beta))**2 * n).sum() / (k - p)
         theta_init = np.r_[beta.ravel(), sigma, tau2]
-        res = minimize(self._nll_func, theta_init, (y, n, X), **self.kwargs).x
+
+        lb = np.ones(len(theta_init)) * -np.inf
+        ub = -lb
+        lb[-2:] = 0.  # bound only the variances
+        bds = Bounds(lb, ub, keep_feasible=True)
+
+        res = minimize(self._nll_func, theta_init, (y, n, X), bounds=bds,
+                       **self.kwargs).x
         beta, sigma, tau = res[:-2], float(res[-2]), float(res[-1])
         tau = np.max([tau, 0])
         return {'beta': beta, 'sigma2': sigma, 'tau2': tau}

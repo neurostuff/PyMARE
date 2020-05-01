@@ -1,6 +1,10 @@
 # PyMARE: Python Meta-Analysis & Regression Engine
 A Python library for mixed-effects meta-regression (including meta-analysis).
 
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![CircleCI](https://circleci.com/gh/neurostuff/PyMARE.svg?style=shield)](https://circleci.com/gh/neurostuff/PyMARE)
+[![Codecov](https://codecov.io/gh/neurostuff/PyMARE/branch/master/graph/badge.svg)](https://codecov.io/gh/neurostuff/pymare)
+
 **PyMARE should be considered pre-alpha software, and the API is under active development. Expect things to break.**
 
 ## Quickstart
@@ -46,10 +50,12 @@ from pymare.estimators import LikelihoodBased
 
 # A handy container we can pass to any estimator
 dataset = Dataset(y, v, X)
-# Estimator class for all likelihood-based methods
-estimator = LikelihoodBased(method='REML')
+# Estimator class for likelihood-based methods when variances are known
+estimator = VarianceBasedLikelihoodEstimator(method='REML')
 # All estimators accept a `Dataset` instance as the first argument to `.fit()`
-result = estimator.fit(dataset)
+estimator.fit(dataset)
+# Post-fitting we can obtain a MetaRegressionResults instance via .summary()
+results = estimator.summary()
 # Print summary of results as a pandas DataFrame
 print(result.to_df())
 ```
