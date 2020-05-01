@@ -14,7 +14,9 @@ from .stats import q_profile
 
 def _compute_beta_stats(beta, v, X, tau2, alpha=0.05):
     w = 1. / (v + tau2)
-    se = np.sqrt(np.diag(np.linalg.pinv((X * w).T.dot(X))))
+    XwX = np.multiply.outer(w.sum(0), X.T.dot(X))
+    XwX_inv = np.linalg.pinv(XwX)
+    se = np.sqrt(np.diagonal(XwX_inv, axis1=1, axis2=2)).T
     z_se = ss.norm.ppf(1 - alpha / 2)
     z = beta / se
 
@@ -64,11 +66,16 @@ class MetaRegressionResults:
     def to_df(self):
         """Return a pandas DataFrame summarizing results."""
 
-        fixed = self.params['beta'].copy()
+        if self.params['beta']['est'].shape[1] > 1:
+            raise ValueError("More than one set of results found! A summary "
+                             "table cannot be displayed for multidimensional "
+                             "results.")
+        fixed = {k: v.squeeze() for (k, v) in self.params['beta'].items()}
         fixed['name'] = self.dataset.X_names
         fixed = pd.DataFrame(fixed)
 
-        tau2 = pd.DataFrame(pd.Series(self.params['tau2'])).T
+        tau2 = {k: v.squeeze() for (k, v) in self.params['tau2'].items()}
+        tau2 = pd.DataFrame(pd.Series(tau2)).T
         tau2['name'] = 'tau^2'
 
         df = pd.concat([fixed, tau2], axis=0, sort=False, ignore_index=True)
@@ -106,8 +113,8 @@ class MetaRegressionResults:
         fixed_stats = _compute_beta_stats(beta, v, X, tau2, alpha)
         self.params['beta'].update(fixed_stats)
 
-        # CIs for tau^2 via Q-Profile method
-        if 'tau2' in self.params:
+        # CIs for tau^2 via Q-Profile method (for 1-D data only)
+        if 'tau2' in self.params and self.dataset.y.shape[1] == 1:
             ci = q_profile(self.dataset.y, v, X, alpha)
             self.params['tau2'].update(ci)
 
