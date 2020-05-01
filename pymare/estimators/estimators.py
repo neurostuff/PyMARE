@@ -117,8 +117,13 @@ class DerSimonianLaird(BaseEstimator):
 
         # Estimate initial betas with WLS
         w = 1. / v
-        
-        # Einsum indices: k = studies, p = predictors, i = parallel iterates
+
+        # NOTE: we could replace the WLS code below with a call to
+        # weighted_least_squares, but we need to reuse the precision matrix
+        # later, so we reproduce the code here for efficiency.
+
+        # Einsum indices: k = studies, p = predictors, i = parallel iterates.
+        # q is a dummy for 2nd p when p x p ovariance matrix inputs are passed.
         wX = np.einsum('kp,ki->ipk', X, w)
         wX_cov = wX.dot(X)
         # numpy >= 1.8 inverts stacked matrices along the first N - 2 dims
@@ -138,7 +143,7 @@ class DerSimonianLaird(BaseEstimator):
         tau_dl = np.maximum(0., tau_dl)
 
         # Re-estimate beta with tau^2 estimate
-        beta_dl = WeightedLeastSquares(tau_dl)._fit(y, v, X)['beta']
+        beta_dl = weighted_least_squares(y, v, X, tau2=tau_dl)
         return {'beta': beta_dl, 'tau2': tau_dl}
 
 
@@ -150,16 +155,21 @@ class Hedges(BaseEstimator):
 
     References:
         Hedges LV, Olkin I. 1985. Statistical Methods for Meta‐Analysis.
+
+    Notes:
+        This estimator accepts 2-D inputs for y and v--i.e., it can produce
+        estimates simultaneously for multiple independent sets of y/v values
+        (use the 2nd dimension for the parallel iterates). The X matrix must be
+        identical for all iterates.
     """
     def _fit(self, y, v, X):
-        k, p = X.shape
-        precision = np.linalg.pinv(X.T.dot(X))
-        beta = precision.dot(X.T).dot(y).ravel()
-        mse = ((y.ravel() - X.dot(beta)) ** 2).sum() / (k - p)
-        tau_ho = mse - v.sum() / k
-        tau_ho = max([0, tau_ho])
+        k, p = X.shape[:2]
+        beta = weighted_least_squares(y, np.ones_like(y), X)
+        mse = ((y - X.dot(beta)) ** 2).sum(0) / (k - p)
+        tau_ho = mse - v.sum(0) / k
+        tau_ho = np.maximum(0, tau_ho)
         # Estimate beta with tau^2 estimate
-        beta_ho = WeightedLeastSquares(tau_ho)._fit(y, v, X)['beta'].ravel()
+        beta_ho = weighted_least_squares(y, v, X, tau2=tau_ho)
         return {'beta': beta_ho, 'tau2': tau_ho}
 
 

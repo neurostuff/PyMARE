@@ -1,5 +1,4 @@
 import numpy as np
-
 from pymare.estimators import (WeightedLeastSquares, DerSimonianLaird,
                                VarianceBasedLikelihoodEstimator,
                                SampleSizeBasedLikelihoodEstimator,
@@ -53,8 +52,23 @@ def test_hedges_estimator(dataset):
     est = Hedges().fit(dataset)
     results = est.summary()
     beta, tau2 = results['beta']['est'], results['tau2']['est']
-    assert np.allclose(beta, [-0.1066, 0.7704], atol=1e-4)
+    assert np.allclose(beta.ravel(), [-0.1066, 0.7704], atol=1e-4)
     assert np.allclose(tau2, 11.3881, atol=1e-4)
+
+
+def test_2d_hedges(dataset_2d):
+    results = Hedges().fit(dataset_2d).summary()
+    beta, tau2 = results['beta']['est'], results['tau2']['est']
+    assert beta.shape == (2, 3)
+
+    # First and third sets are identical to single dim test; second set is
+    # randomly different.
+    assert np.allclose(beta[:, 0], [-0.1066, 0.7704], atol=1e-4)
+    assert np.allclose(tau2[0], 11.3881, atol=1e-4)
+    assert not np.allclose(beta[:, 1], [-0.1070, 0.7664], atol=1e-4)
+    assert not np.allclose(tau2[1], 8.3627, atol=1e-4)
+    assert np.allclose(beta[:, 2], [-0.1066, 0.7704], atol=1e-4)
+    assert np.allclose(tau2[2], 11.3881, atol=1e-4)
 
 
 def test_variance_based_maximum_likelihood_estimator(dataset):
