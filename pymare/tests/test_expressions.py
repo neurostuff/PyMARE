@@ -17,39 +17,30 @@ def test_Expression_init():
     exp = Expression("x / 4 * y")
     assert exp.symbols == _symbol_set('x', 'y')
     assert exp.description is None
-    assert exp.inputs is None
+    assert exp.type == 0
 
     exp = Expression("x + y - cos(z)", "Test expression", 1)
     assert exp.symbols == _symbol_set('x', 'y', 'z')
     assert exp.description == "Test expression"
-    assert exp.inputs == 1
+    assert exp.type == 1
 
 
 def test_select_expressions():
-    exps = select_expressions('t', {'d', 'n'})
+    exps = select_expressions('sd', {'d', 'm'})
     assert len(exps) == 1
-    assert exps[0].symbols == _symbol_set('t', 'd', 'n')
+    assert exps[0].symbols == _symbol_set('sd', 'd', 'm')
 
-    assert select_expressions('t', {'d'}) is None
+    assert select_expressions('v', {'d'}) is None
 
-    exps = select_expressions('g', known_vars={'y', 'n', 'v'})
+    exps = select_expressions('g', known_vars={'m', 'n', 'v'})
     assert len(exps) == 4
-    targets = {'j - 1 + 3/(4*n - 5)', 'sd - sqrt(v)', '-d*j + g', 'd - y/sd'}
+    targets = {'j - 1 + 3/(4*n - 5)', '-sqrt(n)*sqrt(v) + sd',
+               '-d*j + g', 'd - m/sd'}
     assert set([str(e.sympy) for e in exps]) == targets
 
-    # For 2-sample test, need n2 as well
-    assert select_expressions('t', {'d', 'n'}, 2) is None
+    assert select_expressions('v', {'d', 'n'}, 2) is None
 
-    exps = select_expressions('t', {'d', 'n1', 'n2'}, 2)
-    assert len(exps) == 1
-    assert exps[0].symbols == _symbol_set('t', 'd', 'n1', 'n2')
-
-    exps = select_expressions('g', {'y1', 'y2', 'n1', 'n2', 'v1', 'v2'}, inputs=2)
-    assert len(exps) == 4
-    targets = ['sd - sqrt((v1*(n1 - 1) + v2*(n2 - 1))/(n1 + n2 - 2))',
-               'd - (y1 - y2)/sd', '-d*j + g',
-               'j - 1 + 3/(4*n1 + 4*n2 - 9)']
-    assert set([str(e.sympy) for e in exps]) == set(targets)
-
-    exps = select_expressions('p', {'z'})
-    assert len(exps) == 1
+    exps = select_expressions('d', {'m1', 'm2', 'sd1', 'sd2', 'n1', 'n2'}, 2)
+    assert len(exps) == 2
+    target = _symbol_set('d', 'm1', 'm2', 'sd')
+    assert (exps[0].symbols == target or exps[1].symbols == target)

@@ -19,14 +19,14 @@ class Expression:
     Args:
         expr (str): String representation of the mathematical expression.
         description (str, optional): Optional text description of expression.
-        types (bool, optional): Indicates whether the expression applies
+        type (int, optional): Indicates whether the expression applies
             in the one-sample case (1), two-sample case (2), or both (0).
     """
-    def __init__(self, expression, description=None, types=None):
+    def __init__(self, expression, description=None, type=0):
         self.expr = expression
         self.description = description
-        self.types = set(types)
         self.sympy = sympify(expression, locals=_locals)
+        self.type = type
         self.symbols = self.sympy.free_symbols
 
 
@@ -38,8 +38,8 @@ def _load_expressions():
         expr = Expression(**expr)
         expressions.append(expr)
 
-    one_samp = [e for e in expressions if {0, 1} & e.types]
-    two_samp = [e for e in expressions if {0, 2} & e.types]
+    one_samp = [e for e in expressions if e.type in {0, 1}]
+    two_samp = [e for e in expressions if e.type in {0, 2}]
 
     return one_samp, two_samp
 
@@ -48,14 +48,14 @@ def _load_expressions():
 one_sample_expressions, two_sample_expressions = _load_expressions()
 
 
-def select_expressions(target, known_vars, types=1):
+def select_expressions(target, known_vars, type=1):
     """Select a ~minimal system of expressions needed to solve for the target.
 
     Args:
         target (str): The named statistic to solve for ('t', 'd', 'g', etc.).
         known_vars (set): A set of strings giving the names of the known
             variables.
-        types (None, int): Restricts the system to expressions that apply in
+        type (int): Restricts the system to expressions that apply in
             the one-sample case (1), two-sample case (2), or both (None).
 
     Returns:
@@ -64,7 +64,7 @@ def select_expressions(target, known_vars, types=1):
 
     exp_dict = defaultdict(list)
 
-    exprs = one_sample_expressions if types == 1 else two_sample_expressions
+    exprs = one_sample_expressions if type == 1 else two_sample_expressions
 
     # make sure target exists before going any further
     all_symbols = set().union(*[e.symbols for e in exprs])
