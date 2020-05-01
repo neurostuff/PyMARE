@@ -38,7 +38,7 @@ def test_mrr_compute_stats(results):
     assert set(results['beta'].keys()) == {'z', 'p', 'se', 'ci_l', 'ci_u', 'est'}
     assert np.all(results['beta']['ci_u'] > results['beta']['ci_l'])
     for val in results['beta'].values():
-        assert val.shape == (2,)
+        assert val.shape == (2, 1)
 
 
 def test_mrr_to_df(results):
