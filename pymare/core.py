@@ -125,22 +125,14 @@ def meta_regression(y=None, v=None, X=None, n=None, data=None, X_names=None,
 
     method = method.lower()
 
-    # Only some methods can handle parallel inputs
-    y_shp = data.y.shape[1]
-    if y_shp > 1 and method not in set(['wls', 'dl', 'he']):
-        raise ValueError(
-            'y argument has dimensions {}; currently only the DL, HE, and WLS '
-            'estimators can handle parallel inputs (i.e., 2nd dim > 1).'
-            .format(y_shp))
-
     if method in ['ml', 'reml']:
         if v is not None:
             est_cls = partial(VarianceBasedLikelihoodEstimator, method=method)
         elif n is not None:
             est_cls = partial(SampleSizeBasedLikelihoodEstimator, method=method)
         else:
-            raise ValueError("If method is ML or REML, one of `variances` or "
-                             "`sample sizes` must be passed!")
+            raise ValueError("If method is ML or REML, one of `v` or `n` must "
+                             "be passed!")
     else:
         est_cls = {
             'dl': DerSimonianLaird,

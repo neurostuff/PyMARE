@@ -2,6 +2,7 @@
 
 from abc import ABCMeta, abstractmethod
 from inspect import getfullargspec
+from warnings import warn
 
 import numpy as np
 from scipy.optimize import minimize, Bounds
@@ -14,6 +15,10 @@ class BaseEstimator(metaclass=ABCMeta):
 
     # default results container
     _result_cls = MetaRegressionResults
+    # Set True for estimators that efficiently handle parallel datasets. All
+    # inputs will then be passed as-is to the estimator. If False, the 2nd dim
+    # of y/v inputs will be naively looped over and the results concatenated.
+    _2d_vectorized = False
 
     @abstractmethod
     def _fit(self):
@@ -51,7 +56,33 @@ class BaseEstimator(metaclass=ABCMeta):
                 kwargs[name] = getattr(dataset, name, spec.defaults[i - n_args])
             else:
                 kwargs[name] = getattr(dataset, name)
-        self.params_ = self._fit(**kwargs)
+
+        # For estimators with vectorized handling of 2nd dim, pass inputs as-is
+        n_iter = dataset.y.shape[1]
+        if self._2d_vectorized or n_iter == 1:
+            self.params_ = self._fit(**kwargs)
+        # Otherwise loop over 2nd dim of y and v, and concatenate results
+        else:
+            if n_iter > 10:
+                warn("Input contains {} parallel datasets (in 2nd dim of y and"
+                     " v). The selected estimator will loop over datasets"
+                     " naively, and this may be slow for large numbers of "
+                     "datasets. Consider using the DL, HE, or WLS estimators, "
+                     "which handle parallel datasets more efficiently."
+                     .format(n_iter))
+            param_dicts = []
+            for i in range(n_iter):
+                iter_kwargs = {k: v for (k, v) in kwargs.items()
+                            if k not in {'y', 'v'}}
+                iter_kwargs['y'] = kwargs['y'][:, i, None]
+                if 'v' in kwargs:
+                    iter_kwargs['v'] = kwargs['v'][:, i, None]
+                param_dicts.append(self._fit(**iter_kwargs))
+            params = {}
+            for k in param_dicts[0]:
+                params[k] = np.vstack([pd[k] for pd in param_dicts]).T.squeeze()
+            self.params_ = params
+
         self.dataset_ = dataset
         return self
 
@@ -85,6 +116,8 @@ class WeightedLeastSquares(BaseEstimator):
         (use the 2nd dimension for the parallel iterates). The X matrix must be
         identical for all iterates.
     """
+    _2d_vectorized = True
+
     def __init__(self, tau2=0.):
         self.tau2 = tau2
 
@@ -112,6 +145,8 @@ class DerSimonianLaird(BaseEstimator):
         (use the 2nd dimension for the parallel iterates). The X matrix must be
         identical for all iterates.
     """
+    _2d_vectorized = True
+
     def _fit(self, y, v, X):
         k, p = X.shape
 
@@ -162,6 +197,8 @@ class Hedges(BaseEstimator):
         (use the 2nd dimension for the parallel iterates). The X matrix must be
         identical for all iterates.
     """
+    _2d_vectorized = True
+
     def _fit(self, y, v, X):
         k, p = X.shape[:2]
         beta = weighted_least_squares(y, np.ones_like(y), X)

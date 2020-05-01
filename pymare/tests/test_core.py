@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 import pandas as pd
 
 from pymare import Dataset, meta_regression
@@ -45,9 +44,3 @@ def test_meta_regression_2(dataset_n):
     assert df.shape == (2, 7)
     assert np.isnan(df.iloc[1]['z-score'])
     assert df['ci_0.025'][1] == 0
-
-
-def test_2d_fails(dataset_2d):
-    # 2-d analysis isn't possible for most estimators.
-    with pytest.raises(ValueError, match='y argument has dimensions'):
-        meta_regression(data=dataset_2d, method='ML')
