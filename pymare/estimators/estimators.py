@@ -80,7 +80,7 @@ class BaseEstimator(metaclass=ABCMeta):
                 param_dicts.append(self._fit(**iter_kwargs))
             params = {}
             for k in param_dicts[0]:
-                params[k] = np.vstack([pd[k] for pd in param_dicts]).T.squeeze()
+                params[k] = np.hstack([pd[k] for pd in param_dicts]).squeeze()
             self.params_ = params
 
         self.dataset_ = dataset
@@ -261,7 +261,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
                        **self.kwargs).x
         beta, tau = res[:-1], float(res[-1])
         tau = np.max([tau, 0])
-        return {'beta': beta, 'tau2': tau}
+        return {'beta': beta[:, None], 'tau2': tau}
 
     def _ml_nll(self, theta, y, v, X):
         """ ML negative log-likelihood for meta-regression model. """

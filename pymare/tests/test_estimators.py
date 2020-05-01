@@ -80,7 +80,7 @@ def test_variance_based_maximum_likelihood_estimator(dataset):
     est = VarianceBasedLikelihoodEstimator(method='ML').fit(dataset)
     results = est.summary()
     beta, tau2 = results['beta']['est'], results['tau2']['est']
-    assert np.allclose(beta, [-0.1072, 0.7653], atol=1e-4)
+    assert np.allclose(beta.ravel(), [-0.1072, 0.7653], atol=1e-4)
     assert np.allclose(tau2, 7.7649, atol=1e-4)
 
 
@@ -89,7 +89,7 @@ def test_variance_based_restricted_maximum_likelihood_estimator(dataset):
     est = VarianceBasedLikelihoodEstimator(method='REML').fit(dataset)
     results = est.summary()
     beta, tau2 = results['beta']['est'], results['tau2']['est']
-    assert np.allclose(beta, [-0.1066, 0.7700], atol=1e-4)
+    assert np.allclose(beta.ravel(), [-0.1066, 0.7700], atol=1e-4)
     assert np.allclose(tau2, 10.9499, atol=1e-4)
 
 

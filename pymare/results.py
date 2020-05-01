@@ -66,10 +66,13 @@ class MetaRegressionResults:
     def to_df(self):
         """Return a pandas DataFrame summarizing results."""
 
-        if self.params['beta']['est'].shape[1] > 1:
+        # TODO: Ensure that all parameters are stored in same way throughout
+        # the package. At present some are 1-d and some are 2-d.
+        b_shape = self.params['beta']['est'].shape
+        if len(b_shape) > 1 and b_shape[1] > 1:
             raise ValueError("More than one set of results found! A summary "
                              "table cannot be displayed for multidimensional "
-                             "results.")
+                             "results at the moment.")
         fixed = {k: v.squeeze() for (k, v) in self.params['beta'].items()}
         fixed['name'] = self.dataset.X_names
         fixed = pd.DataFrame(fixed)
