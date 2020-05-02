@@ -1,5 +1,5 @@
 from .core import Dataset, meta_regression
-from .effectsizes import (OneSampleEffectSizeConverter,
+from .effectsize import (OneSampleEffectSizeConverter,
                           TwoSampleEffectSizeConverter)
 
 __all__ = [

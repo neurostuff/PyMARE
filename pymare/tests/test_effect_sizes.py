@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 import pandas as pd
 
-from pymare.effectsizes import (OneSampleEffectSizeConverter, solve_system,
+from pymare.effectsize import (OneSampleEffectSizeConverter, solve_system,
                                 select_expressions, TwoSampleEffectSizeConverter)
 
 

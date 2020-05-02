@@ -2,7 +2,7 @@ import pytest
 from sympy.core.sympify import SympifyError
 from sympy import Symbol
 
-from pymare.effectsizes.expressions import Expression, select_expressions
+from pymare.effectsize.expressions import Expression, select_expressions
 
 
 def _symbol_set(*args):
