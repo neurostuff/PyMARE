@@ -138,24 +138,14 @@ class DerSimonianLaird(BaseEstimator):
         # Estimate initial betas with WLS
         w = 1. / v
 
-        # NOTE: we could replace the WLS code below with a call to
-        # weighted_least_squares, but we need to reuse the precision matrix
-        # later, so we reproduce the code here for efficiency.
-
-        # Einsum indices: k = studies, p = predictors, i = parallel iterates.
-        # q is a dummy for 2nd p when p x p ovariance matrix inputs are passed.
-        wX = np.einsum('kp,ki->ipk', X, w)
-        wX_cov = wX.dot(X)
-        # numpy >= 1.8 inverts stacked matrices along the first N - 2 dims
-        precision = np.linalg.pinv(wX_cov)
-        pwX = np.einsum('ipk,ipq->iqk', wX, precision)
-        beta_wls = np.einsum('ipk,ik->ip', pwX, y.T).T
+        beta_wls, precision = weighted_least_squares(y, v, X, return_cov=True)
 
         # Cochrane's Q
         w_sum = w.sum(0)
         Q = (w * (y - X.dot(beta_wls)) ** 2).sum(0)
 
-        # D-L estimate of tau^2
+        # Einsum indices: k = studies, p = predictors, i = parallel iterates.
+        # q is a dummy for 2nd p when p x p ovariance matrix inputs are passed.
         Xw2 = np.einsum('kp,ki->ipk', X, w**2)
         pXw2 = np.einsum('ipk,ipq->iqk', Xw2, precision)
         A = w_sum - np.trace(pXw2.dot(X), axis1=1, axis2=2)
