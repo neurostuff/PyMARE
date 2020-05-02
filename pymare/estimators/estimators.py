@@ -31,21 +31,6 @@ class BaseEstimator(metaclass=ABCMeta):
         # * X (predictors)
         pass
 
-    def accepts_dataset(self, dataset):
-        """ Returns whether current class can fit the passed Dataset.
-
-        Args:
-            dataset (Dataset): A Dataset instance
-
-        Returns:
-            A boolean.
-        """
-        args = getfullargspec(self._fit)[0][1:]
-        for name in args:
-            if getattr(dataset, name) is None:
-                return False
-        return True
-
     def fit(self, dataset):
         kwargs = {}
         spec = getfullargspec(self._fit)
