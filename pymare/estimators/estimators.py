@@ -107,8 +107,9 @@ class WeightedLeastSquares(BaseEstimator):
         self.tau2 = tau2
 
     def _fit(self, y, v, X):
-        beta = weighted_least_squares(y, v, X, self.tau2)
-        return {'beta': beta, 'tau2': self.tau2}
+        beta, inv_cov = weighted_least_squares(y, v, X, self.tau2,
+                                               return_cov=True)
+        return {'beta': beta, 'tau2': self.tau2, 'inv_cov': inv_cov}
 
 
 class DerSimonianLaird(BaseEstimator):
@@ -138,7 +139,7 @@ class DerSimonianLaird(BaseEstimator):
         # Estimate initial betas with WLS
         w = 1. / v
 
-        beta_wls, precision = weighted_least_squares(y, v, X, return_cov=True)
+        beta_wls, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
 
         # Cochrane's Q
         w_sum = w.sum(0)
@@ -147,14 +148,14 @@ class DerSimonianLaird(BaseEstimator):
         # Einsum indices: k = studies, p = predictors, i = parallel iterates.
         # q is a dummy for 2nd p when p x p ovariance matrix inputs are passed.
         Xw2 = np.einsum('kp,ki->ipk', X, w**2)
-        pXw2 = np.einsum('ipk,ipq->iqk', Xw2, precision)
+        pXw2 = np.einsum('ipk,ipq->iqk', Xw2, inv_cov)
         A = w_sum - np.trace(pXw2.dot(X), axis1=1, axis2=2)
         tau_dl = (Q - (k - p)) / A
         tau_dl = np.maximum(0., tau_dl)
 
         # Re-estimate beta with tau^2 estimate
         beta_dl = weighted_least_squares(y, v, X, tau2=tau_dl)
-        return {'beta': beta_dl, 'tau2': tau_dl}
+        return {'beta': beta_dl, 'tau2': tau_dl, 'inv_cov': inv_cov}
 
 
 class Hedges(BaseEstimator):
@@ -176,13 +177,14 @@ class Hedges(BaseEstimator):
 
     def _fit(self, y, v, X):
         k, p = X.shape[:2]
-        beta = weighted_least_squares(y, np.ones_like(y), X)
+        _unit_v = np.ones_like(y)
+        beta, inv_cov = weighted_least_squares(y, _unit_v, X, return_cov=True)
         mse = ((y - X.dot(beta)) ** 2).sum(0) / (k - p)
         tau_ho = mse - v.sum(0) / k
         tau_ho = np.maximum(0, tau_ho)
         # Estimate beta with tau^2 estimate
         beta_ho = weighted_least_squares(y, v, X, tau2=tau_ho)
-        return {'beta': beta_ho, 'tau2': tau_ho}
+        return {'beta': beta_ho, 'tau2': tau_ho, 'inv_cov': inv_cov}
 
 
 class VarianceBasedLikelihoodEstimator(BaseEstimator):
@@ -233,10 +235,12 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         bds = Bounds(lb, ub, keep_feasible=True)
 
         res = minimize(self._nll_func, theta_init, (y, v, X), bounds=bds,
-                       **self.kwargs).x
-        beta, tau = res[:-1], float(res[-1])
+                       **self.kwargs)
+        # use hessian as an approximation of the covariance matrix
+        inv_cov = np.linalg.pinv(res.hess_inv.todense())
+        beta, tau = res.x[:-1], float(res.x[-1])
         tau = np.max([tau, 0])
-        return {'beta': beta[:, None], 'tau2': tau}
+        return {'beta': beta[:, None], 'tau2': tau, 'inv_cov': inv_cov}
 
     def _ml_nll(self, theta, y, v, X):
         """ ML negative log-likelihood for meta-regression model. """
@@ -314,10 +318,12 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         bds = Bounds(lb, ub, keep_feasible=True)
 
         res = minimize(self._nll_func, theta_init, (y, n, X), bounds=bds,
-                       **self.kwargs).x
-        beta, sigma, tau = res[:-2], float(res[-2]), float(res[-1])
+                       **self.kwargs)
+        # use hessian as an approximation of the covariance matrix
+        inv_cov = np.linalg.pinv(res.hess_inv.todense())
+        beta, sigma, tau = res.x[:-2], float(res.x[-2]), float(res.x[-1])
         tau = np.max([tau, 0])
-        return {'beta': beta, 'sigma2': sigma, 'tau2': tau}
+        return {'beta': beta, 'sigma2': sigma, 'tau2': tau, 'inv_cov': inv_cov}
 
     def _ml_nll(self, theta, y, n, X):
         """ ML negative log-likelihood for meta-regression model. """
