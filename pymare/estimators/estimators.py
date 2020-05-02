@@ -237,7 +237,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         res = minimize(self._nll_func, theta_init, (y, v, X), bounds=bds,
                        **self.kwargs)
         # use hessian as an approximation of the covariance matrix
-        inv_cov = np.linalg.pinv(res.hess_inv.todense())
+        inv_cov = np.linalg.pinv(res.hess_inv.todense()[:-1, :-1])
         beta, tau = res.x[:-1], float(res.x[-1])
         tau = np.max([tau, 0])
         return {'beta': beta[:, None], 'tau2': tau, 'inv_cov': inv_cov}
@@ -320,7 +320,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         res = minimize(self._nll_func, theta_init, (y, n, X), bounds=bds,
                        **self.kwargs)
         # use hessian as an approximation of the covariance matrix
-        inv_cov = np.linalg.pinv(res.hess_inv.todense())
+        inv_cov = np.linalg.pinv(res.hess_inv.todense()[:-2, :-2])
         beta, sigma, tau = res.x[:-2], float(res.x[-2]), float(res.x[-1])
         tau = np.max([tau, 0])
         return {'beta': beta, 'sigma2': sigma, 'tau2': tau, 'inv_cov': inv_cov}
