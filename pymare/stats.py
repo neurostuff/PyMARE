@@ -5,22 +5,36 @@ import scipy.stats as ss
 from scipy.optimize import minimize, Bounds
 
 
-def weighted_least_squares(y, v, X, tau2=0):
-    """2-D weighted least squares."""
+def weighted_least_squares(y, v, X, tau2=0., return_cov=False):
+    """2-D weighted least squares.
+
+    Args:
+        y (NDArray): 2-d array of estimates (studies x parallel datasets)
+        v (NDArray): 2-d array of sampling variances
+        X (NDArray): Fixed effect design matrix
+        tau2 (float): tau^2 estimate to use for weights
+        return_cov (bool): Whether or not to return the inverse cov matrix
+
+    Returns:
+        If return_cov is True, returns both fixed parameter estimates and the
+        inverse covariance matrix; if False, only the parameter estimates.
+    """
 
     # Estimate initial betas with WLS
     w = 1. / (v + tau2)
 
     # Einsum indices: k = studies, p = predictors, i = parallel iterates
     wX = np.einsum('kp,ki->ipk', X, w)
-    wX_cov = wX.dot(X)
+    cov = wX.dot(X)
 
-    # numpy >= 1.8 inverts stacked matrices along the first N - 2 dims
-    precision = np.linalg.pinv(wX_cov)
+    # numpy >= 1.8 inverts stacked matrices along the first N - 2 dims, so we
+    # can vectorize computation along the second dimension (parallel datasets)
+    precision = np.linalg.pinv(cov)
+
     pwX = np.einsum('ipk,ipq->iqk', wX, precision)
     beta = np.einsum('ipk,ik->ip', pwX, y.T).T
 
-    return beta
+    return (beta, precision) if return_cov else beta
 
 
 def ensure_2d(arr):
