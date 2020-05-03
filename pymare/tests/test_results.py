@@ -30,6 +30,17 @@ def test_meta_regression_results_init_1d(fitted_estimator):
     assert results.tau2.shape == (1,)
 
 
+def test_meta_regression_results_init_2d(dataset_2d):
+    est = VarianceBasedLikelihoodEstimator()
+    est.fit(dataset_2d)
+    results = MetaRegressionResults(est, est.dataset_, est.params_['beta'],
+                                    est.params_['inv_cov'], est.params_['tau2'])
+    assert isinstance(est.summary(), MetaRegressionResults)
+    assert results.fe_params.shape == (2, 3)
+    assert results.fe_cov.shape == (2, 2, 3)
+    assert results.tau2.shape == (3,)
+
+
 def test_mrr_compute_stats(results):
     results.compute_stats()
     assert set(results['beta'].keys()) == {'z', 'p', 'se', 'ci_l', 'ci_u', 'est'}

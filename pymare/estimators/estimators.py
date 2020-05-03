@@ -63,7 +63,7 @@ class BaseEstimator(metaclass=ABCMeta):
                 param_dicts.append(self._fit(**iter_kwargs))
             params = {}
             for k in param_dicts[0]:
-                params[k] = np.hstack([pd[k] for pd in param_dicts]).squeeze()
+                params[k] = np.stack([pd[k].squeeze() for pd in param_dicts], axis=-1)
             self.params_ = params
 
         self.dataset_ = dataset
