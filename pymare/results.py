@@ -1,4 +1,5 @@
 """Tools for representing and manipulating meta-regression results."""
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
@@ -10,23 +11,6 @@ except:
     az = None
 
 from .stats import q_profile
-
-
-def _compute_beta_stats(beta, v, X, tau2, alpha=0.05):
-    w = 1. / (v + tau2)
-    XwX = np.multiply.outer(w.sum(0), X.T.dot(X))
-    XwX_inv = np.linalg.pinv(XwX)
-    se = np.sqrt(np.diagonal(XwX_inv, axis1=1, axis2=2)).T
-    z_se = ss.norm.ppf(1 - alpha / 2)
-    z = beta / se
-
-    return {
-        'se': se,
-        'ci_l': beta - z_se * se,
-        'ci_u': beta + z_se * se,
-        'z': z,
-        'p': 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
-    }
 
 
 class MetaRegressionResults:
@@ -44,18 +28,31 @@ class MetaRegressionResults:
         alpha (float, optional): alpha value defining the coverage of the CIs,
             where width = 1 - alpha. Defaults to 0.05.
     """
-    def __init__(self, params, dataset, estimator=None, ci_method='QP',
-                 alpha=0.05):
-        self.params = {name: {'est': val} for name, val in params.items()}
-        self.dataset = dataset
+    def __init__(self, estimator, dataset, fe_params, fe_cov, tau2):
         self.estimator = estimator
-        self.ci_method = ci_method
-        self.alpha = alpha
-        self.compute_stats()
+        self.dataset = dataset
+        self.fe_params = fe_params
+        self.fe_cov = fe_cov
+        self.tau2 = tau2
 
-    def __getitem__(self, key):
-        """Provides item-based access to parameter results."""
-        return self.params[key]
+    @property
+    @lru_cache(maxsize=1)
+    def fe_se(self):
+        cov = np.atleast_3d(self.fe_cov) # 3rd dim is for parallel datasets
+        return np.sqrt(np.diagonal(cov)).T
+
+    @lru_cache(maxsize=16)
+    def get_fe_stats(self, alpha=0.05):
+        beta, se = self.fe_params, self.fe_se
+        z_se = ss.norm.ppf(1 - alpha / 2)
+        z = beta / se
+        return {
+            'se': se,
+            'ci_l': beta - z_se * se,
+            'ci_u': beta + z_se * se,
+            'z': z,
+            'p': 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
+        }
 
     def summary(self):
         pass
@@ -63,63 +60,55 @@ class MetaRegressionResults:
     def plot(self):
         pass
 
-    def to_df(self):
+    def to_df(self, alpha=0.05, fixed=True, random=True):
         """Return a pandas DataFrame summarizing results."""
-
-        # TODO: Ensure that all parameters are stored in same way throughout
-        # the package. At present some are 1-d and some are 2-d.
-        b_shape = self.params['beta']['est'].shape
+        b_shape = self.fe_params.shape
         if len(b_shape) > 1 and b_shape[1] > 1:
             raise ValueError("More than one set of results found! A summary "
                              "table cannot be displayed for multidimensional "
                              "results at the moment.")
-        fixed = {k: v.squeeze() for (k, v) in self.params['beta'].items()}
-        fixed['name'] = self.dataset.X_names
-        fixed = pd.DataFrame(fixed)
-
-        tau2 = {k: v.squeeze() for (k, v) in self.params['tau2'].items()}
-        tau2 = pd.DataFrame(pd.Series(tau2)).T
-        tau2['name'] = 'tau^2'
-
-        df = pd.concat([fixed, tau2], axis=0, sort=False, ignore_index=True)
+        fe_stats = self.get_fe_stats(alpha).items()
+        df = pd.DataFrame({k: v.ravel() for k, v in fe_stats})
+        df['name'] = self.dataset.X_names
+        df['est'] = self.fe_params
         df = df.loc[:, ['name', 'est', 'se', 'z', 'p', 'ci_l', 'ci_u']]
-        ci_l = 'ci_{:.6g}'.format(self.alpha / 2)
-        ci_u = 'ci_{:.6g}'.format(1 - self.alpha / 2)
+        ci_l = 'ci_{:.6g}'.format(alpha / 2)
+        ci_u = 'ci_{:.6g}'.format(1 - alpha / 2)
         df.columns = ['name', 'estimate', 'se', 'z-score', 'p-val', ci_l, ci_u]
 
         return df
 
-    def compute_stats(self, ci_method=None, alpha=None):
-        """Compute post-estimation stats (SE and CI).
+    # def compute_stats(self, ci_method=None, alpha=None):
+    #     """Compute post-estimation stats (SE and CI).
 
-        Args:
-            ci_method (str): The method to use when generating confidence
-                intervals for tau^2. Currently only 'QP' (Q-Profile) is
-                supported.
-            alpha (float, optional): alpha value defining the coverage of the
-                CIs, where width = 1 - alpha. Defaults to 0.05.
-        """
-        if alpha is not None:
-            self.alpha = alpha
-        if ci_method is not None:
-            self.ci_method = ci_method
+    #     Args:
+    #         ci_method (str): The method to use when generating confidence
+    #             intervals for tau^2. Currently only 'QP' (Q-Profile) is
+    #             supported.
+    #         alpha (float, optional): alpha value defining the coverage of the
+    #             CIs, where width = 1 - alpha. Defaults to 0.05.
+    #     """
+    #     if alpha is not None:
+    #         self.alpha = alpha
+    #     if ci_method is not None:
+    #         self.ci_method = ci_method
 
-        v, X = self.dataset.v, self.dataset.X
-        beta = self.params['beta']['est']
-        alpha = self.alpha
-        # for estimators that don't need variances, we use the estimated sigma
-        if v is None:
-            v = self.params.get('sigma', {'est': 0})['est'] / self.dataset.n
-        tau2 = self.params.get('tau2', {'est': 0})['est']
+    #     v, X = self.dataset.v, self.dataset.X
+    #     beta = self.params['beta']['est']
+    #     alpha = self.alpha
+    #     # for estimators that don't need variances, we use the estimated sigma
+    #     if v is None:
+    #         v = self.params.get('sigma', {'est': 0})['est'] / self.dataset.n
+    #     tau2 = self.params.get('tau2', {'est': 0})['est']
 
-        # Stats for fixed effects
-        fixed_stats = _compute_beta_stats(beta, v, X, tau2, alpha)
-        self.params['beta'].update(fixed_stats)
+    #     # Stats for fixed effects
+    #     fixed_stats = _compute_beta_stats(beta, v, X, tau2, alpha)
+    #     self.params['beta'].update(fixed_stats)
 
-        # CIs for tau^2 via Q-Profile method (for 1-D data only)
-        if 'tau2' in self.params and self.dataset.y.shape[1] == 1:
-            ci = q_profile(self.dataset.y, v, X, alpha)
-            self.params['tau2'].update(ci)
+    #     # CIs for tau^2 via Q-Profile method (for 1-D data only)
+    #     if 'tau2' in self.params and self.dataset.y.shape[1] == 1:
+    #         ci = q_profile(self.dataset.y, v, X, alpha)
+    #         self.params['tau2'].update(ci)
 
 
 class BayesianMetaRegressionResults:

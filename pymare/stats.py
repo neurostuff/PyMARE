@@ -29,9 +29,9 @@ def weighted_least_squares(y, v, X, tau2=0., return_cov=False):
 
     # numpy >= 1.8 inverts stacked matrices along the first N - 2 dims, so we
     # can vectorize computation along the second dimension (parallel datasets)
-    precision = np.linalg.pinv(cov)
+    precision = np.linalg.pinv(cov).T
 
-    pwX = np.einsum('ipk,ipq->iqk', wX, precision)
+    pwX = np.einsum('ipk,qpi->iqk', wX, precision)
     beta = np.einsum('ipk,ik->ip', pwX, y.T).T
 
     return (beta, precision) if return_cov else beta

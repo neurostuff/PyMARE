@@ -11,14 +11,14 @@ from pymare.estimators import (WeightedLeastSquares, DerSimonianLaird,
 
 @pytest.fixture
 def fitted_estimator(dataset):
-    est = DerSimonianLaird()
+    # est = DerSimonianLaird()
+    est = VarianceBasedLikelihoodEstimator()
     return est.fit(dataset)
 
 
 @pytest.fixture
 def results(fitted_estimator):
-    est = fitted_estimator
-    return MetaRegressionResults(est.params_, est.dataset_, est)
+    return fitted_estimator.summary()
 
 
 def test_meta_regression_results_init(fitted_estimator):

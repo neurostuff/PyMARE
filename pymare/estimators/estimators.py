@@ -13,8 +13,6 @@ from ..results import MetaRegressionResults, BayesianMetaRegressionResults
 
 class BaseEstimator(metaclass=ABCMeta):
 
-    # default results container
-    _result_cls = MetaRegressionResults
     # Set True for estimators that efficiently handle parallel datasets. All
     # inputs will then be passed as-is to the estimator. If False, the 2nd dim
     # of y/v inputs will be naively looped over and the results concatenated.
@@ -76,7 +74,9 @@ class BaseEstimator(metaclass=ABCMeta):
             name = self.__class__.__name__
             raise ValueError("This {} instance hasn't been fitted yet. Please "
                              "call fit() before summary().".format(name))
-        return self._result_cls(self.params_, self.dataset_, self)
+        p = self.params_
+        return MetaRegressionResults(self, self.dataset_, p['beta'],
+                                     p['inv_cov'], p['tau2'])
 
 
 class WeightedLeastSquares(BaseEstimator):
@@ -148,13 +148,14 @@ class DerSimonianLaird(BaseEstimator):
         # Einsum indices: k = studies, p = predictors, i = parallel iterates.
         # q is a dummy for 2nd p when p x p ovariance matrix inputs are passed.
         Xw2 = np.einsum('kp,ki->ipk', X, w**2)
-        pXw2 = np.einsum('ipk,ipq->iqk', Xw2, inv_cov)
+        pXw2 = np.einsum('ipk,qpi->iqk', Xw2, inv_cov)
         A = w_sum - np.trace(pXw2.dot(X), axis1=1, axis2=2)
         tau_dl = (Q - (k - p)) / A
         tau_dl = np.maximum(0., tau_dl)
 
         # Re-estimate beta with tau^2 estimate
-        beta_dl = weighted_least_squares(y, v, X, tau2=tau_dl)
+        beta_dl, inv_cov = weighted_least_squares(y, v, X, tau2=tau_dl,
+                                                  return_cov=True)
         return {'beta': beta_dl, 'tau2': tau_dl, 'inv_cov': inv_cov}
 
 
@@ -236,10 +237,9 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 
         res = minimize(self._nll_func, theta_init, (y, v, X), bounds=bds,
                        **self.kwargs)
-        # use hessian as an approximation of the covariance matrix
-        inv_cov = np.linalg.pinv(res.hess_inv.todense()[:-1, :-1])
         beta, tau = res.x[:-1], float(res.x[-1])
         tau = np.max([tau, 0])
+        _, inv_cov = weighted_least_squares(y, v, X, tau, True)
         return {'beta': beta[:, None], 'tau2': tau, 'inv_cov': inv_cov}
 
     def _ml_nll(self, theta, y, v, X):
@@ -308,7 +308,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         # set tau^2 to 0 and compute starting values
         tau2 = 0.
         k, p = X.shape
-        beta = WeightedLeastSquares(tau2=tau2)._fit(y, n, X)['beta'][:, None]
+        beta = weighted_least_squares(y, n, X, tau2)
         sigma = ((y - X.dot(beta))**2 * n).sum() / (k - p)
         theta_init = np.r_[beta.ravel(), sigma, tau2]
 
@@ -319,11 +319,11 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
 
         res = minimize(self._nll_func, theta_init, (y, n, X), bounds=bds,
                        **self.kwargs)
-        # use hessian as an approximation of the covariance matrix
-        inv_cov = np.linalg.pinv(res.hess_inv.todense()[:-2, :-2])
         beta, sigma, tau = res.x[:-2], float(res.x[-2]), float(res.x[-1])
         tau = np.max([tau, 0])
-        return {'beta': beta, 'sigma2': sigma, 'tau2': tau, 'inv_cov': inv_cov}
+        _, inv_cov = weighted_least_squares(y, sigma / n, X, tau, True)
+        return {'beta': beta[:, None], 'sigma2': sigma, 'tau2': tau,
+                'inv_cov': inv_cov}
 
     def _ml_nll(self, theta, y, n, X):
         """ ML negative log-likelihood for meta-regression model. """
