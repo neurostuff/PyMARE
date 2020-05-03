@@ -1,5 +1,6 @@
 """Tools for representing and manipulating meta-regression results."""
 from functools import lru_cache
+from warnings import warn
 
 import numpy as np
 import pandas as pd
@@ -54,6 +55,44 @@ class MetaRegressionResults:
             'p': 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
         }
 
+    @lru_cache(maxsize=16)
+    def get_re_stats(self, method='QP', alpha=0.05):
+        if method == 'QP':
+            n_iters = self.tau2.shape[1]
+            if len(n_iters > 10):
+                warn("Method 'QP' is not parallelized; it may take a while to "
+                     "compute CIs for {} parallel tau^2 values.".format(n_iters))
+
+            # For sample size-based estimator, use sigma2/n instead of
+            # sampling variances. TODO: find a solution than reaching
+            # into the estimator's stored params, as this could fail if the
+            # estimator has been applied to a different dataset.
+            if self.dataset.v is None:
+                v = self.estimator.params_['sigma2'] / self.dataset.n
+            else:
+                v = self.dataset.v
+
+            cis = []
+            for i in range(n_iters):
+                args = {
+                    'y': self.dataset.y[:, i],
+                    'v': v[:, i],
+                    'X': self.dataset.X,
+                    'alpha': alpha,
+                }
+                q_cis = q_profile(**args)
+                cis.append(q_cis)
+
+        else:
+            raise ValueError("Invalid CI method '{}'; currently only 'QP' is "
+                             "available.".format(method))
+
+        return {
+            'tau^2': self.tau2,
+            'ci_l': np.array([ci['ci_l'] for ci in cis])[:, None],
+            'ci_u': np.array([ci['ci_u'] for ci in cis])[:, None]
+        }
+
     def summary(self):
         pass
 
@@ -77,38 +116,6 @@ class MetaRegressionResults:
         df.columns = ['name', 'estimate', 'se', 'z-score', 'p-val', ci_l, ci_u]
 
         return df
-
-    # def compute_stats(self, ci_method=None, alpha=None):
-    #     """Compute post-estimation stats (SE and CI).
-
-    #     Args:
-    #         ci_method (str): The method to use when generating confidence
-    #             intervals for tau^2. Currently only 'QP' (Q-Profile) is
-    #             supported.
-    #         alpha (float, optional): alpha value defining the coverage of the
-    #             CIs, where width = 1 - alpha. Defaults to 0.05.
-    #     """
-    #     if alpha is not None:
-    #         self.alpha = alpha
-    #     if ci_method is not None:
-    #         self.ci_method = ci_method
-
-    #     v, X = self.dataset.v, self.dataset.X
-    #     beta = self.params['beta']['est']
-    #     alpha = self.alpha
-    #     # for estimators that don't need variances, we use the estimated sigma
-    #     if v is None:
-    #         v = self.params.get('sigma', {'est': 0})['est'] / self.dataset.n
-    #     tau2 = self.params.get('tau2', {'est': 0})['est']
-
-    #     # Stats for fixed effects
-    #     fixed_stats = _compute_beta_stats(beta, v, X, tau2, alpha)
-    #     self.params['beta'].update(fixed_stats)
-
-    #     # CIs for tau^2 via Q-Profile method (for 1-D data only)
-    #     if 'tau2' in self.params and self.dataset.y.shape[1] == 1:
-    #         ci = q_profile(self.dataset.y, v, X, alpha)
-    #         self.params['tau2'].update(ci)
 
 
 class BayesianMetaRegressionResults:
