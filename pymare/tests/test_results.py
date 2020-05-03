@@ -11,8 +11,7 @@ from pymare.estimators import (WeightedLeastSquares, DerSimonianLaird,
 
 @pytest.fixture
 def fitted_estimator(dataset):
-    # est = DerSimonianLaird()
-    est = VarianceBasedLikelihoodEstimator()
+    est = DerSimonianLaird()
     return est.fit(dataset)
 
 
@@ -21,16 +20,14 @@ def results(fitted_estimator):
     return fitted_estimator.summary()
 
 
-def test_meta_regression_results_init(fitted_estimator):
+def test_meta_regression_results_init_1d(fitted_estimator):
     est = fitted_estimator
-    results = MetaRegressionResults(est.params_, est.dataset_, est)
-    assert set(results.params.keys()) == {'beta', 'tau2'}
-    assert results.params['tau2'] == results['tau2'] # test __getitem__
-    assert np.array_equal(results.params['beta']['est'], est.params_['beta'])
-    assert results.dataset == est.dataset_
-    assert results.estimator == est
-    assert results.ci_method == 'QP'
-    assert results.alpha == 0.05
+    results = MetaRegressionResults(est, est.dataset_, est.params_['beta'],
+                                    est.params_['inv_cov'], est.params_['tau2'])
+    assert isinstance(est.summary(), MetaRegressionResults)
+    assert results.fe_params.shape == (2, 1)
+    assert results.fe_cov.shape == (2, 2, 1)
+    assert results.tau2.shape == (1,)
 
 
 def test_mrr_compute_stats(results):
