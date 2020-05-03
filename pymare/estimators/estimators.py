@@ -444,3 +444,10 @@ class StanMetaRegression(BaseEstimator):
 
         self.result_ = self.model.sampling(data=data, **self.sampling_kwargs)
         return self.result_
+
+    def summary(self, ci=95):
+        if self.result_ is None:
+            name = self.__class__.__name__
+            raise ValueError("This {} instance hasn't been fitted yet. Please "
+                             "call fit() before summary().".format(name))
+        return BayesianMetaRegressionResults(self.result_, self.dataset_, ci)

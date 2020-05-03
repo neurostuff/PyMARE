@@ -4,7 +4,7 @@ from pymare.estimators import StanMetaRegression
 
 
 def test_stan_estimator(dataset):
-    # no ground truth here, so we use sanity checks and rough bounnds
+    # no ground truth here, so we use sanity checks and rough bounds
     est = StanMetaRegression(iter=2500).fit(dataset)
     results = est.summary()
     assert 'BayesianMetaRegressionResults' == results.__class__.__name__
