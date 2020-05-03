@@ -1,0 +1,57 @@
+[
+    {
+        "expression": "g - d * j",
+        "type": 0,
+        "description": "Hedges' g"
+    },
+    {
+        "expression": "sd - sqrt(n) * sqrt(v)",
+        "type": 0,
+        "description": "sd from sampling variance and n"
+    },
+    {
+        "expression": "d - m / sd",
+        "type": 1,
+        "description": "Cohen's d (one-sample)"
+    },
+    {
+        "expression": "j - (1 - (3 / (4 * (n - 1) - 1)))",
+        "type": 1,
+        "description": "Approximate correction factor for Hedges' g"
+    },
+    {
+        "expression": "v_d - ((n - 1)/(n - 3)) * (1 / n + d**2) - d**2 / j**2 * n",
+        "type": 1,
+        "description": "Variance of Cohen's d"
+    },
+    {
+        "expression": "v_g - ((n - 1)/(n - 3)) * j**2 * (1 / n + d**2) - d**2",
+        "type": 1,
+        "description": "Variance of Hedges' g"
+    },
+    {
+        "expression": "sd - sqrt((sd1**2 * (n1 - 1) + sd2**2 * (n2 - 1)) / (n1 + n2 - 2))",
+        "type": 2,
+        "description": "Pooled standard deviation (Cohen version)"
+    },
+    {
+        "expression": "d - (m1 - m2) / sd",
+        "type": 2,
+        "description": "Cohen's d (two-sample)"
+    },
+    {
+        "expression": "j - (1 - (3 / (4 * (n1 + n2) - 9)))",
+        "type": 2,
+        "description": "Approximate correction factor for Hedges' g"
+    },
+    {
+        "expression": "v_d - ((n1 + n2)/(n1 * n2) + d**2 / 2 * (n1 + n2 - 2))",
+        "type": 2,
+        "description": "Variance of Cohen's d"
+    },
+    {
+        "expression": "v_g - j**2 * v_d",
+        "type": 2,
+        "description": "Variance of Hedges' g"
+    }
+]

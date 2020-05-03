@@ -1,7 +1,10 @@
 from .core import Dataset, meta_regression
-from .effectsizes import EffectSizeConverter
+from .effectsize import (OneSampleEffectSizeConverter,
+                          TwoSampleEffectSizeConverter)
 
 __all__ = [
     'Dataset',
-    'meta_regression'
+    'meta_regression',
+    'OneSampleEffectSizeConverter',
+    'TwoSampleEffectSizeConverter'
 ]

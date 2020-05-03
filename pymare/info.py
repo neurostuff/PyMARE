@@ -34,9 +34,10 @@ DOWNLOAD_URL = (
         name=PACKAGENAME, ver=VERSION))
 
 REQUIRES = [
-    'numpy',
+    'numpy>=1.8.0',
     'scipy',
-    'pandas'
+    'pandas',
+    'sympy'
 ]
 
 STAN_REQUIRES = [

@@ -2,17 +2,21 @@
 
 from abc import ABCMeta, abstractmethod
 from inspect import getfullargspec
+from warnings import warn
 
 import numpy as np
 from scipy.optimize import minimize, Bounds
 
+from ..stats import weighted_least_squares
 from ..results import MetaRegressionResults, BayesianMetaRegressionResults
 
 
 class BaseEstimator(metaclass=ABCMeta):
 
-    # default results container
-    _result_cls = MetaRegressionResults
+    # Set True for estimators that efficiently handle parallel datasets. All
+    # inputs will then be passed as-is to the estimator. If False, the 2nd dim
+    # of y/v inputs will be naively looped over and the results concatenated.
+    _2d_vectorized = False
 
     @abstractmethod
     def _fit(self):
@@ -25,21 +29,6 @@ class BaseEstimator(metaclass=ABCMeta):
         # * X (predictors)
         pass
 
-    def accepts_dataset(self, dataset):
-        """ Returns whether current class can fit the passed Dataset.
-
-        Args:
-            dataset (Dataset): A Dataset instance
-
-        Returns:
-            A boolean.
-        """
-        args = getfullargspec(self._fit)[0][1:]
-        for name in args:
-            if getattr(dataset, name) is None:
-                return False
-        return True
-
     def fit(self, dataset):
         kwargs = {}
         spec = getfullargspec(self._fit)
@@ -50,7 +39,33 @@ class BaseEstimator(metaclass=ABCMeta):
                 kwargs[name] = getattr(dataset, name, spec.defaults[i - n_args])
             else:
                 kwargs[name] = getattr(dataset, name)
-        self.params_ = self._fit(**kwargs)
+
+        # For estimators with vectorized handling of 2nd dim, pass inputs as-is
+        n_iter = dataset.y.shape[1]
+        if self._2d_vectorized or n_iter == 1:
+            self.params_ = self._fit(**kwargs)
+        # Otherwise loop over 2nd dim of y and v, and concatenate results
+        else:
+            if n_iter > 10:
+                warn("Input contains {} parallel datasets (in 2nd dim of y and"
+                     " v). The selected estimator will loop over datasets"
+                     " naively, and this may be slow for large numbers of "
+                     "datasets. Consider using the DL, HE, or WLS estimators, "
+                     "which handle parallel datasets more efficiently."
+                     .format(n_iter))
+            param_dicts = []
+            for i in range(n_iter):
+                iter_kwargs = {k: v for (k, v) in kwargs.items()
+                            if k not in {'y', 'v'}}
+                iter_kwargs['y'] = kwargs['y'][:, i, None]
+                if 'v' in kwargs:
+                    iter_kwargs['v'] = kwargs['v'][:, i, None]
+                param_dicts.append(self._fit(**iter_kwargs))
+            params = {}
+            for k in param_dicts[0]:
+                params[k] = np.stack([pd[k].squeeze() for pd in param_dicts], axis=-1)
+            self.params_ = params
+
         self.dataset_ = dataset
         return self
 
@@ -59,7 +74,9 @@ class BaseEstimator(metaclass=ABCMeta):
             name = self.__class__.__name__
             raise ValueError("This {} instance hasn't been fitted yet. Please "
                              "call fit() before summary().".format(name))
-        return self._result_cls(self.params_, self.dataset_, self)
+        p = self.params_
+        return MetaRegressionResults(self, self.dataset_, p['beta'],
+                                     p['inv_cov'], p['tau2'])
 
 
 class WeightedLeastSquares(BaseEstimator):
@@ -75,17 +92,24 @@ class WeightedLeastSquares(BaseEstimator):
         https://doi.org/10.1002/sim.650
 
     Args:
-        tau2 (float, optional): Assumed/known value of tau^2. Must be >= 0.
-            Defaults to 0.
+        tau2 (float or 1-D array, optional): Assumed/known value of tau^2. Must
+            be >= 0. Defaults to 0.
+
+    Notes:
+        This estimator accepts 2-D inputs for y and v--i.e., it can produce
+        estimates simultaneously for multiple independent sets of y/v values
+        (use the 2nd dimension for the parallel iterates). The X matrix must be
+        identical for all iterates.
     """
+    _2d_vectorized = True
+
     def __init__(self, tau2=0.):
         self.tau2 = tau2
 
     def _fit(self, y, v, X):
-        w = 1. / (v + self.tau2)
-        precision = np.linalg.pinv((X * w).T.dot(X))
-        beta = (precision.dot(X.T) * w.T).dot(y).ravel()
-        return {'beta': beta, 'tau2': self.tau2}
+        beta, inv_cov = weighted_least_squares(y, v, X, self.tau2,
+                                               return_cov=True)
+        return {'beta': beta, 'tau2': self.tau2, 'inv_cov': inv_cov}
 
 
 class DerSimonianLaird(BaseEstimator):
@@ -100,23 +124,39 @@ class DerSimonianLaird(BaseEstimator):
         Kosmidis, I., Guolo, A., & Varin, C. (2017). Improving the accuracy of
         likelihood-based inference in meta-analysis and meta-regression.
         Biometrika, 104(2), 489–496. https://doi.org/10.1093/biomet/asx001
+
+    Notes:
+        This estimator accepts 2-D inputs for y and v--i.e., it can produce
+        estimates simultaneously for multiple independent sets of y/v values
+        (use the 2nd dimension for the parallel iterates). The X matrix must be
+        identical for all iterates.
     """
+    _2d_vectorized = True
+
     def _fit(self, y, v, X):
         k, p = X.shape
-        beta_wls = WeightedLeastSquares(0.)._fit(y, v, X)['beta'][:, None]
-        # Cochrane's Q
+
+        # Estimate initial betas with WLS
         w = 1. / v
-        w_sum = w.sum()
-        Q = (w * (y - X.dot(beta_wls)) ** 2)
-        Q = Q.sum()
-        # D-L estimate of tau^2
-        precision = np.linalg.pinv((X * w).T.dot(X))
-        A = w_sum - np.trace((precision.dot((X * w**2).T)).dot(X))
+
+        beta_wls, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
+
+        # Cochrane's Q
+        w_sum = w.sum(0)
+        Q = (w * (y - X.dot(beta_wls)) ** 2).sum(0)
+
+        # Einsum indices: k = studies, p = predictors, i = parallel iterates.
+        # q is a dummy for 2nd p when p x p ovariance matrix inputs are passed.
+        Xw2 = np.einsum('kp,ki->ipk', X, w**2)
+        pXw2 = np.einsum('ipk,qpi->iqk', Xw2, inv_cov)
+        A = w_sum - np.trace(pXw2.dot(X), axis1=1, axis2=2)
         tau_dl = (Q - (k - p)) / A
-        tau_dl = np.max([0., tau_dl])
+        tau_dl = np.maximum(0., tau_dl)
+
         # Re-estimate beta with tau^2 estimate
-        beta_dl = WeightedLeastSquares(tau_dl)._fit(y, v, X)['beta'].ravel()
-        return {'beta': beta_dl, 'tau2': tau_dl}
+        beta_dl, inv_cov = weighted_least_squares(y, v, X, tau2=tau_dl,
+                                                  return_cov=True)
+        return {'beta': beta_dl, 'tau2': tau_dl, 'inv_cov': inv_cov}
 
 
 class Hedges(BaseEstimator):
@@ -127,17 +167,25 @@ class Hedges(BaseEstimator):
 
     References:
         Hedges LV, Olkin I. 1985. Statistical Methods for Meta‐Analysis.
+
+    Notes:
+        This estimator accepts 2-D inputs for y and v--i.e., it can produce
+        estimates simultaneously for multiple independent sets of y/v values
+        (use the 2nd dimension for the parallel iterates). The X matrix must be
+        identical for all iterates.
     """
+    _2d_vectorized = True
+
     def _fit(self, y, v, X):
-        k, p = X.shape
-        precision = np.linalg.pinv(X.T.dot(X))
-        beta = precision.dot(X.T).dot(y).ravel()
-        mse = ((y.ravel() - X.dot(beta)) ** 2).sum() / (k - p)
-        tau_ho = mse - v.sum() / k
-        tau_ho = max([0, tau_ho])
+        k, p = X.shape[:2]
+        _unit_v = np.ones_like(y)
+        beta, inv_cov = weighted_least_squares(y, _unit_v, X, return_cov=True)
+        mse = ((y - X.dot(beta)) ** 2).sum(0) / (k - p)
+        tau_ho = mse - v.sum(0) / k
+        tau_ho = np.maximum(0, tau_ho)
         # Estimate beta with tau^2 estimate
-        beta_ho = WeightedLeastSquares(tau_ho)._fit(y, v, X)['beta'].ravel()
-        return {'beta': beta_ho, 'tau2': tau_ho}
+        beta_ho = weighted_least_squares(y, v, X, tau2=tau_ho)
+        return {'beta': beta_ho, 'tau2': tau_ho, 'inv_cov': inv_cov}
 
 
 class VarianceBasedLikelihoodEstimator(BaseEstimator):
@@ -157,6 +205,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         The ML and REML solutions are obtained via SciPy's scalar function
         minimizer (scipy.optimize.minimize). Parameters to minimize() can be
         passed in as keyword arguments.
+
     References:
         DerSimonian, R., & Laird, N. (1986). Meta-analysis in clinical trials.
         Controlled clinical trials, 7(3), 177-188.
@@ -187,10 +236,11 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         bds = Bounds(lb, ub, keep_feasible=True)
 
         res = minimize(self._nll_func, theta_init, (y, v, X), bounds=bds,
-                       **self.kwargs).x
-        beta, tau = res[:-1], float(res[-1])
+                       **self.kwargs)
+        beta, tau = res.x[:-1], float(res.x[-1])
         tau = np.max([tau, 0])
-        return {'beta': beta, 'tau2': tau}
+        _, inv_cov = weighted_least_squares(y, v, X, tau, True)
+        return {'beta': beta[:, None], 'tau2': tau, 'inv_cov': inv_cov}
 
     def _ml_nll(self, theta, y, v, X):
         """ ML negative log-likelihood for meta-regression model. """
@@ -258,7 +308,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         # set tau^2 to 0 and compute starting values
         tau2 = 0.
         k, p = X.shape
-        beta = WeightedLeastSquares(tau2=tau2)._fit(y, n, X)['beta'][:, None]
+        beta = weighted_least_squares(y, n, X, tau2)
         sigma = ((y - X.dot(beta))**2 * n).sum() / (k - p)
         theta_init = np.r_[beta.ravel(), sigma, tau2]
 
@@ -268,10 +318,12 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         bds = Bounds(lb, ub, keep_feasible=True)
 
         res = minimize(self._nll_func, theta_init, (y, n, X), bounds=bds,
-                       **self.kwargs).x
-        beta, sigma, tau = res[:-2], float(res[-2]), float(res[-1])
+                       **self.kwargs)
+        beta, sigma, tau = res.x[:-2], float(res.x[-2]), float(res.x[-1])
         tau = np.max([tau, 0])
-        return {'beta': beta, 'sigma2': sigma, 'tau2': tau}
+        _, inv_cov = weighted_least_squares(y, sigma / n, X, tau, True)
+        return {'beta': beta[:, None], 'sigma2': sigma, 'tau2': tau,
+                'inv_cov': inv_cov}
 
     def _ml_nll(self, theta, y, n, X):
         """ ML negative log-likelihood for meta-regression model. """
@@ -392,3 +444,10 @@ class StanMetaRegression(BaseEstimator):
 
         self.result_ = self.model.sampling(data=data, **self.sampling_kwargs)
         return self.result_
+
+    def summary(self, ci=95):
+        if self.result_ is None:
+            name = self.__class__.__name__
+            raise ValueError("This {} instance hasn't been fitted yet. Please "
+                             "call fit() before summary().".format(name))
+        return BayesianMetaRegressionResults(self.result_, self.dataset_, ci)

@@ -46,7 +46,7 @@ Alternatively, we can achieve the same outcome using PyMARE's object-oriented AP
 ```python
 
 from pymare import Dataset
-from pymare.estimators import LikelihoodBased
+from pymare.estimators import VarianceBasedLikelihoodEstimator
 
 # A handy container we can pass to any estimator
 dataset = Dataset(y, v, X)

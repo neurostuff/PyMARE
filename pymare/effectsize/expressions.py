@@ -1,8 +1,11 @@
 """Statistical expressions."""
 from collections import defaultdict
 from itertools import chain
+import re
+import json
+from pathlib import Path
 
-from sympy import sympify
+from sympy import sympify, Symbol
 from sympy.core.compatibility import exec_
 
 
@@ -16,63 +19,43 @@ class Expression:
     Args:
         expr (str): String representation of the mathematical expression.
         description (str, optional): Optional text description of expression.
-        inputs (bool, optional): Indicates whether the expression applies
-            in the one-sample case (1), two-sample case (2), or both
-            (None).
-        metric (str, optional): Name of metric for which this expression
-            applies. Defaults to None (all inputs with unlabeled metricss).
+        type (int, optional): Indicates whether the expression applies
+            in the one-sample case (1), two-sample case (2), or both (0).
     """
-    def __init__(self, expr, description=None, inputs=None, metric=None):
-        self.expr = expr
+    def __init__(self, expression, description=None, type=0):
+        self.expr = expression
         self.description = description
-        self.inputs = inputs
-        self.metric = metric
-
-        self.sympy = sympify(expr, locals=_locals)
+        self.sympy = sympify(expression, locals=_locals)
+        self.type = type
         self.symbols = self.sympy.free_symbols
 
 
-EXPRESSIONS = [
+def _load_expressions():
+    expressions = []
+    path = Path(__file__).parent / 'expressions.json'
+    expr_list = json.load(open(path, 'r'))
+    for expr in expr_list:
+        expr = Expression(**expr)
+        expressions.append(expr)
 
-    # Common to one-sample and two-sample procedures
-    Expression('sd - sqrt(v)'),
-    Expression('sem - sd / sqrt(n)'),
-    Expression('p - cdf(Normal("normal", 0, 1))(z)'),
+    one_samp = [e for e in expressions if e.type in {0, 1}]
+    two_samp = [e for e in expressions if e.type in {0, 2}]
 
-    # One-sample procedures
-    Expression('t - y / sem', "One-sample t-test", inputs=1),
-    Expression('d - y / sd', "Cohen's d (one sample)", inputs=1),
-    Expression('d - t / sqrt(n)', "Cohen's d (from t)", inputs=1),
-    Expression('g - d * j', "Hedges' g"),
-    # TODO: we currently use Hedges' approximation instead of original J
-    # function because the gamma function slows solving down considerably and
-    # breaks numpy during lambdification. Need to fix/improve this.
-    Expression('j - (1 - (3 / (4 * (n - 1) - 1)))',
-               "Approximate correction factor for Hedges' g", inputs=1),
-
-    # Two-sample procedures
-    Expression('sd2 - sqrt(v2)', inputs=2),
-    Expression('t - (y - y2) / sqrt(v / n + v2 / n2)',
-               "Two-sample t-test (unequal variances)", inputs=2),
-    Expression('sd_pooled - sqrt((v * (n - 1) + v2 * (n2 - 1)) / (n + n2 - 2))',
-               "Pooled standard deviation (Cohen version)", inputs=2),
-    Expression('d - (y - y2) / sd_pooled', "Cohen's d (two-sample)",
-               inputs=2),
-    Expression('d - t * sqrt(1 / n + 1 / n2)', "Cohen's d (two-sample from t)",
-               inputs=2),
-    Expression('j - (1 - (3 / (4 * (n + n2) - 9)))',
-               "Approximate correction factor for Hedges' g", inputs=2)
-]
+    return one_samp, two_samp
 
 
-def select_expressions(target, known_vars, inputs=1):
+# Construct the 1-sample and 2-sample expression sets at import time
+one_sample_expressions, two_sample_expressions = _load_expressions()
+
+
+def select_expressions(target, known_vars, type=1):
     """Select a ~minimal system of expressions needed to solve for the target.
 
     Args:
         target (str): The named statistic to solve for ('t', 'd', 'g', etc.).
         known_vars (set): A set of strings giving the names of the known
             variables.
-        inputs (None, int): Restricts the system to expressions that apply in
+        type (int): Restricts the system to expressions that apply in
             the one-sample case (1), two-sample case (2), or both (None).
 
     Returns:
@@ -81,18 +64,21 @@ def select_expressions(target, known_vars, inputs=1):
 
     exp_dict = defaultdict(list)
 
-    for exp in EXPRESSIONS:
-        if exp.inputs is not None and exp.inputs != inputs:
-            continue
+    exprs = one_sample_expressions if type == 1 else two_sample_expressions
+
+    # make sure target exists before going any further
+    all_symbols = set().union(*[e.symbols for e in exprs])
+    if Symbol(target) not in all_symbols:
+        raise ValueError("Target symbol '{}' cannot be found in any of the "
+                         "known expressions).".format(target))
+
+    for exp in exprs:
         for sym in exp.symbols:
             if sym not in known_vars:
                 exp_dict[sym.name].append(exp)
 
     def df_search(sym, exprs, known, visited):
         """Recursively select expressions needed to solve for sym."""
-
-        if sym not in exp_dict:
-            return None
 
         results = []
 
