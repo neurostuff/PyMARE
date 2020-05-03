@@ -65,9 +65,9 @@ class MetaRegressionResults:
                      "compute CIs for {} parallel tau^2 values.".format(n_iters))
 
             # For sample size-based estimator, use sigma2/n instead of
-            # sampling variances. TODO: find a solution than reaching
+            # sampling variances. TODO: find a better solution than reaching
             # into the estimator's stored params, as this could fail if the
-            # estimator has been applied to a different dataset.
+            # estimator has been applied to a different dataset in interim.
             if self.dataset.v is None:
                 v = self.estimator.params_['sigma2'] / self.dataset.n
             else:
@@ -90,15 +90,9 @@ class MetaRegressionResults:
 
         return {
             'tau^2': self.tau2,
-            'ci_l': np.array([ci['ci_l'] for ci in cis])[:, None],
-            'ci_u': np.array([ci['ci_u'] for ci in cis])[:, None]
+            'ci_l': np.array([ci['ci_l'] for ci in cis]),
+            'ci_u': np.array([ci['ci_u'] for ci in cis])
         }
-
-    def summary(self):
-        pass
-
-    def plot(self):
-        pass
 
     def to_df(self, alpha=0.05, fixed=True, random=True):
         """Return a pandas DataFrame summarizing results."""

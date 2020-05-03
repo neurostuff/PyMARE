@@ -63,10 +63,10 @@ def test_mrr_get_re_stats(results_2d):
     stats = results_2d.get_re_stats()
     assert isinstance(stats, dict)
     assert set(stats.keys()) == {'tau^2', 'ci_l', 'ci_u'}
-    assert stats['tau^2'].shape == (3,)
+    assert stats['tau^2'].shape == stats['ci_u'].shape == (3,)
     assert round(stats['tau^2'][2], 4) == 7.7649
-    assert round(stats['ci_l'][2, 0], 4) == 3.8076
-    assert round(stats['ci_u'][2, 0], 2) == 59.61
+    assert round(stats['ci_l'][2], 4) == 3.8076
+    assert round(stats['ci_u'][2], 2) == 59.61
 
 
 def test_mrr_to_df(results):
