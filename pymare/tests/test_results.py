@@ -20,6 +20,12 @@ def results(fitted_estimator):
     return fitted_estimator.summary()
 
 
+@pytest.fixture
+def results_2d(fitted_estimator, dataset_2d):
+    est = VarianceBasedLikelihoodEstimator()
+    return est.fit(dataset_2d).summary()
+
+
 def test_meta_regression_results_init_1d(fitted_estimator):
     est = fitted_estimator
     results = MetaRegressionResults(est, est.dataset_, est.params_['beta'],
@@ -30,23 +36,19 @@ def test_meta_regression_results_init_1d(fitted_estimator):
     assert results.tau2.shape == (1,)
 
 
-def test_meta_regression_results_init_2d(dataset_2d):
-    est = VarianceBasedLikelihoodEstimator()
-    est.fit(dataset_2d)
-    results = MetaRegressionResults(est, est.dataset_, est.params_['beta'],
-                                    est.params_['inv_cov'], est.params_['tau2'])
-    assert isinstance(est.summary(), MetaRegressionResults)
-    assert results.fe_params.shape == (2, 3)
-    assert results.fe_cov.shape == (2, 2, 3)
-    assert results.tau2.shape == (3,)
+def test_meta_regression_results_init_2d(results_2d):
+    assert isinstance(results_2d, MetaRegressionResults)
+    assert results_2d.fe_params.shape == (2, 3)
+    assert results_2d.fe_cov.shape == (2, 2, 3)
+    assert results_2d.tau2.shape == (3,)
 
 
-def test_mrr_compute_stats(results):
-    results.compute_stats()
-    assert set(results['beta'].keys()) == {'z', 'p', 'se', 'ci_l', 'ci_u', 'est'}
-    assert np.all(results['beta']['ci_u'] > results['beta']['ci_l'])
-    for val in results['beta'].values():
-        assert val.shape == (2, 1)
+def test_mrr_fe_se(results, results_2d):
+    se_1d, se_2d = results.fe_se, results_2d.fe_se
+    assert se_1d.shape == (2, 1)
+    assert se_2d.shape == (2, 3)
+    assert np.allclose(se_1d.T, [2.6512, 0.9857], atol=1e-4)
+    assert np.allclose(se_2d[:, 0].T, [2.5656, 0.9538], atol=1e-4)
 
 
 def test_mrr_to_df(results):
