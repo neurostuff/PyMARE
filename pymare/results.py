@@ -48,6 +48,7 @@ class MetaRegressionResults:
         z_se = ss.norm.ppf(1 - alpha / 2)
         z = beta / se
         return {
+            'est': beta,
             'se': se,
             'ci_l': beta - z_se * se,
             'ci_u': beta + z_se * se,
@@ -109,7 +110,6 @@ class MetaRegressionResults:
         fe_stats = self.get_fe_stats(alpha).items()
         df = pd.DataFrame({k: v.ravel() for k, v in fe_stats})
         df['name'] = self.dataset.X_names
-        df['est'] = self.fe_params
         df = df.loc[:, ['name', 'est', 'se', 'z', 'p', 'ci_l', 'ci_u']]
         ci_l = 'ci_{:.6g}'.format(alpha / 2)
         ci_u = 'ci_{:.6g}'.format(1 - alpha / 2)

@@ -51,6 +51,14 @@ def test_mrr_fe_se(results, results_2d):
     assert np.allclose(se_2d[:, 0].T, [2.5656, 0.9538], atol=1e-4)
 
 
+def test_mrr_get_fe_stats(results):
+    stats = results.get_fe_stats()
+    assert isinstance(stats, dict)
+    assert set(stats.keys()) == {'est', 'se', 'ci_l', 'ci_u', 'z', 'p'}
+    assert np.allclose(stats['ci_l'].T, [-5.3033, -1.1655], atol=1e-4)
+    assert np.allclose(stats['p'].T, [0.9678, 0.4369], atol=1e-4)
+
+
 def test_mrr_to_df(results):
     df = results.to_df()
     assert df.shape == (3, 7)
