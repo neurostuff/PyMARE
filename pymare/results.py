@@ -59,8 +59,8 @@ class MetaRegressionResults:
     @lru_cache(maxsize=16)
     def get_re_stats(self, method='QP', alpha=0.05):
         if method == 'QP':
-            n_iters = self.tau2.shape[1]
-            if len(n_iters > 10):
+            n_iters = len(self.tau2)
+            if n_iters > 10:
                 warn("Method 'QP' is not parallelized; it may take a while to "
                      "compute CIs for {} parallel tau^2 values.".format(n_iters))
 

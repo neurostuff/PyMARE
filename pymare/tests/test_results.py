@@ -59,6 +59,16 @@ def test_mrr_get_fe_stats(results):
     assert np.allclose(stats['p'].T, [0.9678, 0.4369], atol=1e-4)
 
 
+def test_mrr_get_re_stats(results_2d):
+    stats = results_2d.get_re_stats()
+    assert isinstance(stats, dict)
+    assert set(stats.keys()) == {'tau^2', 'ci_l', 'ci_u'}
+    assert stats['tau^2'].shape == (3,)
+    assert round(stats['tau^2'][2], 4) == 7.7649
+    assert round(stats['ci_l'][2, 0], 4) == 3.8076
+    assert round(stats['ci_u'][2, 0], 2) == 59.61
+
+
 def test_mrr_to_df(results):
     df = results.to_df()
     assert df.shape == (3, 7)
