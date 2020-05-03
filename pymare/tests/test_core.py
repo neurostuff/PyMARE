@@ -32,15 +32,13 @@ def test_dataset_init_from_df(variables):
 
 def test_meta_regression_1(variables):
     results = meta_regression(*variables, X_names=['my_cov'], method='REML')
-    beta, tau2 = results['beta']['est'], results['tau2']['est']
+    beta, tau2 = results.fe_params, results.tau2
     assert np.allclose(beta.ravel(), [-0.1066, 0.7700], atol=1e-4)
     assert np.allclose(tau2, 10.9499, atol=1e-4)
     df = results.to_df()
-    assert set(df['name']) == {'my_cov', 'intercept', 'tau^2'}
+    assert set(df['name']) == {'my_cov', 'intercept'}
 
 def test_meta_regression_2(dataset_n):
     y, n = dataset_n.y, dataset_n.n
     df = meta_regression(y=y, n=n).to_df()
-    assert df.shape == (2, 7)
-    assert np.isnan(df.iloc[1]['z-score'])
-    assert df['ci_0.025'][1] == 0
+    assert df.shape == (1, 7)

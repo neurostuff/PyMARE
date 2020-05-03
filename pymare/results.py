@@ -94,7 +94,7 @@ class MetaRegressionResults:
             'ci_u': np.array([ci['ci_u'] for ci in cis])
         }
 
-    def to_df(self, alpha=0.05, fixed=True, random=True):
+    def to_df(self, alpha=0.05):
         """Return a pandas DataFrame summarizing results."""
         b_shape = self.fe_params.shape
         if len(b_shape) > 1 and b_shape[1] > 1:
@@ -108,7 +108,6 @@ class MetaRegressionResults:
         ci_l = 'ci_{:.6g}'.format(alpha / 2)
         ci_u = 'ci_{:.6g}'.format(1 - alpha / 2)
         df.columns = ['name', 'estimate', 'se', 'z-score', 'p-val', ci_l, ci_u]
-
         return df
 
 

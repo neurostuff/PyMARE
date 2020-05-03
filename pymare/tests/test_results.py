@@ -71,8 +71,10 @@ def test_mrr_get_re_stats(results_2d):
 
 def test_mrr_to_df(results):
     df = results.to_df()
-    assert df.shape == (3, 7)
-    assert np.isnan(df.iloc[:, 1:].values.ravel()).sum() == 3
+    assert df.shape == (2, 7)
+    col_names = {'estimate', 'p-val', 'z-score', 'ci_0.025', 'ci_0.975', 'se', 'name'}
+    assert set(df.columns) == col_names
+    assert np.allclose(df['p-val'].values, [0.9678, 0.4369], atol=1e-4)
 
 
 def test_estimator_summary(dataset):
