@@ -112,7 +112,7 @@ class MetaRegressionResults:
         df = df.loc[:, ['name', 'est', 'se', 'z', 'p', 'ci_l', 'ci_u']]
         ci_l = 'ci_{:.6g}'.format(alpha / 2)
         ci_u = 'ci_{:.6g}'.format(1 - alpha / 2)
-        df.columns = ['name', 'estimate', 'se', 'z-score', 'p-val', ci_l, ci_u]
+        df.columns = ['name', 'estimate', 'se', 'z-score', 'p-value', ci_l, ci_u]
         return df
 
 
@@ -205,6 +205,22 @@ class PermutationTestResults:
         self.tau2_p = tau2_p
         self.n_perm = n_perm
         self.exact = exact
+
+    def to_df(self, alpha=0.05):
+        """Export permutation test results as a pandas DF.
+
+        Args:
+            alpha (float): The alpha value to use for confidence intervals.
+
+        Returns:
+            A pandas DataFrame that adds a 'p-value (perm.)' column to the
+            standard fixed effect result table obtained when calling to_df()
+            on a MetaRegressionResults instance.
+        """
+        df = self.results.to_df(alpha)
+        p_ind = list(df.columns).index('p-value')
+        df.insert(p_ind + 1, 'p-value (perm.)', self.fe_p)
+        return df
 
 
 class BayesianMetaRegressionResults:
