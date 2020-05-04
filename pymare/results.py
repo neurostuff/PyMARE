@@ -37,14 +37,13 @@ class MetaRegressionResults:
         self.fe_cov = fe_cov
         self.tau2 = tau2
 
-    def permutation_test(self, n_perm=1000, alpha=0.05):
+    def permutation_test(self, n_perm=1000):
         """Run permutation test.
 
         Args:
             n_perm (int):Number of permutations to generate. The actual number
                 used may be smaller in the event of an exact test (see below),
                 but will never be larger.
-            alpha (float): Alpha level to use for confidence intervals.
 
         Returns:
             An instance of class PermutationTestResults.
@@ -61,8 +60,12 @@ class MetaRegressionResults:
         n_obs, n_datasets = self.dataset.y.shape
         has_mods = self.dataset.X.shape[1] > 1
 
-        stats = self.get_fe_stats()
-        p = np.zeros_like(self.fe_params)
+        fe_stats = self.get_fe_stats()
+        re_stats = self.get_re_stats()
+
+        # create results arrays
+        fe_p = np.zeros_like(self.fe_params)
+        tau_p = np.zeros((n_datasets,))
 
         # Calculate # of permutations and determine whether to use exact test
         if has_mods:
@@ -104,11 +107,12 @@ class MetaRegressionResults:
 
             params = self.estimator._fit(y=y_perm, v=v_perm, X=self.dataset.X)
 
-            p[:, i] = (stats['est'] < np.abs(params['beta'])).mean(1)
+            fe_p[:, i] = (fe_stats['est'] < np.abs(params['beta'])).mean(1)
+            tau_p[i] = (re_stats['tau^2'] < np.abs(params['tau2'])).mean()
 
         # p-values can't be smaller than 1/n_perm
-        p = np.maximum(1/n_perm, p)
-
+        fe_p = np.maximum(1/n_perm, fe_p)
+        tau_p = np.maximum(1/n_perm, tau_p)
 
     @property
     @lru_cache(maxsize=1)
