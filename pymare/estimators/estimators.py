@@ -80,8 +80,8 @@ class BaseEstimator(metaclass=ABCMeta):
 
         Notes:
             This is equivalent to directly accessing `dataset.v` when variances
-            are present, but affords estimators that don't use variances in
-            estimation a way of computing an estimate for downstream use.
+            are present, but affords a way of estimating v from sample size (n)
+            for any estimator that implicitly estimate a sigma^2 parameter.
         """
         if dataset.v is not None:
             return dataset.v
@@ -289,7 +289,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 
 class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     """ Likelihood-based estimator for estimates with known sample sizes but
-    unknown variances.
+    unknown sampling variances.
 
     Iteratively estimates the between-subject variance tau^2 and fixed effect
     betas using the specified likelihood-based estimator (ML or REML).
@@ -306,9 +306,10 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
             minimizer.
 
     Notes:
-        The ML and REML solutions are obtained via SciPy's scalar function
-        minimizer (scipy.optimize.minimize). Parameters to minimize() can be
-        passed in as keyword arguments.
+        Homogeneity of sigma^2 across studies is assumed. The ML and REML
+        solutions are obtained via SciPy's scalar function minimizer
+        (scipy.optimize.minimize). Parameters to minimize() can be passed in as
+        keyword arguments.
 
     References:
         Sangnawakij, P., Böhning, D., Niwitpong, S. A., Adams, S., Stanton, M., 
