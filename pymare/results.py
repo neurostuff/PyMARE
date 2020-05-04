@@ -1,6 +1,7 @@
 """Tools for representing and manipulating meta-regression results."""
 from functools import lru_cache
 from warnings import warn
+import itertools
 
 import numpy as np
 import pandas as pd
@@ -35,6 +36,79 @@ class MetaRegressionResults:
         self.fe_params = fe_params
         self.fe_cov = fe_cov
         self.tau2 = tau2
+
+    def permutation_test(self, n_perm=1000, alpha=0.05):
+        """Run permutation test.
+
+        Args:
+            n_perm (int):Number of permutations to generate. The actual number
+                used may be smaller in the event of an exact test (see below),
+                but will never be larger.
+            alpha (float): Alpha level to use for confidence intervals.
+
+        Returns:
+            An instance of class PermutationTestResults.
+
+        Notes:
+            If the number of possible permutations is smaller than n_perm, an
+            exact test will be conducted. Otherwise an approximate test will be
+            conducted by randomly shuffling the outcomes n_perm times (or, for
+            intercept-only models, by randomly flipping their signs). Note that
+            for closed-form estimators (e.g., 'DL' and 'HE'), permuted datasets
+            are estimated in parallel. This means that one can often set very
+            high n_perm values (e.g., 100k) with little performance degradation.
+        """
+        n_obs, n_datasets = self.dataset.y.shape
+        has_mods = self.dataset.X.shape[1] > 1
+
+        stats = self.get_fe_stats()
+        p = np.zeros_like(self.fe_params)
+
+        # Calculate # of permutations and determine whether to use exact test
+        if has_mods:
+            n_exact = np.math.factorial(n_obs)
+        else:
+            n_exact = 2**n_obs
+            if n_exact < n_perm:
+                perms = np.array(itertools.product([-1, 1], repeat=n_obs)).T
+
+        exact = n_exact < n_perm
+        if exact:
+            n_perm = n_exact
+
+        # Loop over parallel datasets
+        for i in range(n_datasets):
+
+            y = self.dataset.y[:, i]
+            v = self.dataset.v[:, i]
+            y_perm = np.repeat(y[:, None], n_perm, axis=1)
+            v_perm = np.repeat(v[:, None], n_perm, axis=1)
+
+            if has_mods:
+                if exact:
+                    perms = itertools.permutations(range(n_obs))
+                    for j, inds in enumerate(perms):
+                        inds = np.array(inds)
+                        y_perm[:, j] = y[inds]
+                        v_perm[:, j] = v[inds]
+                else:
+                    for j in range(n_perm):
+                        np.random.shuffle(y_perm[:, j])
+                        np.random.shuffle(v_perm[:, j])
+            else:
+                if exact:
+                    y_perm *= perms
+                else:
+                    signs = np.random.choice(np.array([-1, 1]), (n_obs, n_perm))
+                    y_perm *= signs
+
+            params = self.estimator._fit(y=y_perm, v=v_perm, X=self.dataset.X)
+
+            p[:, i] = (stats['est'] < np.abs(params['beta'])).mean(1)
+
+        # p-values can't be smaller than 1/n_perm
+        p = np.maximum(1/n_perm, p)
+
 
     @property
     @lru_cache(maxsize=1)
