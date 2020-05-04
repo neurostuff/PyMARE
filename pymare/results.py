@@ -37,83 +37,6 @@ class MetaRegressionResults:
         self.fe_cov = fe_cov
         self.tau2 = tau2
 
-    def permutation_test(self, n_perm=1000):
-        """Run permutation test.
-
-        Args:
-            n_perm (int):Number of permutations to generate. The actual number
-                used may be smaller in the event of an exact test (see below),
-                but will never be larger.
-
-        Returns:
-            An instance of class PermutationTestResults.
-
-        Notes:
-            If the number of possible permutations is smaller than n_perm, an
-            exact test will be conducted. Otherwise an approximate test will be
-            conducted by randomly shuffling the outcomes n_perm times (or, for
-            intercept-only models, by randomly flipping their signs). Note that
-            for closed-form estimators (e.g., 'DL' and 'HE'), permuted datasets
-            are estimated in parallel. This means that one can often set very
-            high n_perm values (e.g., 100k) with little performance degradation.
-        """
-        n_obs, n_datasets = self.dataset.y.shape
-        has_mods = self.dataset.X.shape[1] > 1
-
-        fe_stats = self.get_fe_stats()
-        re_stats = self.get_re_stats()
-
-        # create results arrays
-        fe_p = np.zeros_like(self.fe_params)
-        tau_p = np.zeros((n_datasets,))
-
-        # Calculate # of permutations and determine whether to use exact test
-        if has_mods:
-            n_exact = np.math.factorial(n_obs)
-        else:
-            n_exact = 2**n_obs
-            if n_exact < n_perm:
-                perms = np.array(itertools.product([-1, 1], repeat=n_obs)).T
-
-        exact = n_exact < n_perm
-        if exact:
-            n_perm = n_exact
-
-        # Loop over parallel datasets
-        for i in range(n_datasets):
-
-            y = self.dataset.y[:, i]
-            v = self.dataset.v[:, i]
-            y_perm = np.repeat(y[:, None], n_perm, axis=1)
-            v_perm = np.repeat(v[:, None], n_perm, axis=1)
-
-            if has_mods:
-                if exact:
-                    perms = itertools.permutations(range(n_obs))
-                    for j, inds in enumerate(perms):
-                        inds = np.array(inds)
-                        y_perm[:, j] = y[inds]
-                        v_perm[:, j] = v[inds]
-                else:
-                    for j in range(n_perm):
-                        np.random.shuffle(y_perm[:, j])
-                        np.random.shuffle(v_perm[:, j])
-            else:
-                if exact:
-                    y_perm *= perms
-                else:
-                    signs = np.random.choice(np.array([-1, 1]), (n_obs, n_perm))
-                    y_perm *= signs
-
-            params = self.estimator._fit(y=y_perm, v=v_perm, X=self.dataset.X)
-
-            fe_p[:, i] = (fe_stats['est'] < np.abs(params['beta'])).mean(1)
-            tau_p[i] = (re_stats['tau^2'] < np.abs(params['tau2'])).mean()
-
-        # p-values can't be smaller than 1/n_perm
-        fe_p = np.maximum(1/n_perm, fe_p)
-        tau_p = np.maximum(1/n_perm, tau_p)
-
     @property
     @lru_cache(maxsize=1)
     def fe_se(self):
@@ -122,10 +45,12 @@ class MetaRegressionResults:
 
     @lru_cache(maxsize=16)
     def get_fe_stats(self, alpha=0.05):
+
         beta, se = self.fe_params, self.fe_se
         z_se = ss.norm.ppf(1 - alpha / 2)
         z = beta / se
-        return {
+
+        stats = {
             'est': beta,
             'se': se,
             'ci_l': beta - z_se * se,
@@ -133,6 +58,8 @@ class MetaRegressionResults:
             'z': z,
             'p': 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
         }
+
+        return stats
 
     @lru_cache(maxsize=16)
     def get_re_stats(self, method='QP', alpha=0.05):
@@ -173,7 +100,7 @@ class MetaRegressionResults:
         }
 
     def to_df(self, alpha=0.05):
-        """Return a pandas DataFrame summarizing results."""
+        """Return a pandas DataFrame summarizing fixed effect results."""
         b_shape = self.fe_params.shape
         if len(b_shape) > 1 and b_shape[1] > 1:
             raise ValueError("More than one set of results found! A summary "
@@ -187,6 +114,97 @@ class MetaRegressionResults:
         ci_u = 'ci_{:.6g}'.format(1 - alpha / 2)
         df.columns = ['name', 'estimate', 'se', 'z-score', 'p-val', ci_l, ci_u]
         return df
+
+
+def permutation_test(results, n_perm=1000):
+    """Run permutation test on a MetaRegressionResults instane.
+
+    Args:
+        results (MetaRegressionResults): The results object to test.
+        n_perm (int):Number of permutations to generate. The actual number
+            used may be smaller in the event of an exact test (see below),
+            but will never be larger.
+
+    Returns:
+        An instance of class PermutationTestResults.
+
+    Notes:
+        If the number of possible permutations is smaller than n_perm, an
+        exact test will be conducted. Otherwise an approximate test will be
+        conducted by randomly shuffling the outcomes n_perm times (or, for
+        intercept-only models, by randomly flipping their signs). Note that
+        for closed-form estimators (e.g., 'DL' and 'HE'), permuted datasets
+        are estimated in parallel. This means that one can often set very
+        high n_perm values (e.g., 100k) with little performance degradation.
+    """
+    n_obs, n_datasets = results.dataset.y.shape
+    has_mods = results.dataset.X.shape[1] > 1
+
+    fe_stats = results.get_fe_stats()
+    re_stats = results.get_re_stats()
+
+    # create results arrays
+    fe_p = np.zeros_like(results.fe_params)
+    tau_p = np.zeros((n_datasets,))
+
+    # Calculate # of permutations and determine whether to use exact test
+    if has_mods:
+        n_exact = np.math.factorial(n_obs)
+    else:
+        n_exact = 2**n_obs
+        if n_exact < n_perm:
+            perms = np.array(itertools.product([-1, 1], repeat=n_obs)).T
+
+    exact = n_exact < n_perm
+    if exact:
+        n_perm = n_exact
+
+    # Loop over parallel datasets
+    for i in range(n_datasets):
+
+        y = results.dataset.y[:, i]
+        v = results.dataset.v[:, i]
+        y_perm = np.repeat(y[:, None], n_perm, axis=1)
+        v_perm = np.repeat(v[:, None], n_perm, axis=1)
+
+        if has_mods:
+            if exact:
+                perms = itertools.permutations(range(n_obs))
+                for j, inds in enumerate(perms):
+                    inds = np.array(inds)
+                    y_perm[:, j] = y[inds]
+                    v_perm[:, j] = v[inds]
+            else:
+                for j in range(n_perm):
+                    np.random.shuffle(y_perm[:, j])
+                    np.random.shuffle(v_perm[:, j])
+        else:
+            if exact:
+                y_perm *= perms
+            else:
+                signs = np.random.choice(np.array([-1, 1]), (n_obs, n_perm))
+                y_perm *= signs
+
+        params = results.estimator._fit(y=y_perm, v=v_perm, X=results.dataset.X)
+
+        fe_p[:, i] = (fe_stats['est'] < np.abs(params['beta'])).mean(1)
+        tau_p[i] = (re_stats['tau^2'] < np.abs(params['tau2'])).mean()
+
+    # p-values can't be smaller than 1/n_perm
+    fe_p = np.maximum(1/n_perm, fe_p)
+    tau_p = np.maximum(1/n_perm, tau_p)
+
+    return PermutationTestResults(results, fe_p, tau_p, n_perm, exact)
+
+
+class PermutationTestResults:
+    """Lightweight container to hold and display permutation test results."""
+    def __init__(self, results, fe_p, tau2_p, n_perm, exact=False):
+        self.results = results
+        self.fe_p = fe_p
+        self.tau2_p = tau2_p
+        self.n_perm = n_perm
+        self.exact = exact
 
 
 class BayesianMetaRegressionResults:
