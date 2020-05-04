@@ -69,14 +69,8 @@ class MetaRegressionResults:
                 warn("Method 'QP' is not parallelized; it may take a while to "
                      "compute CIs for {} parallel tau^2 values.".format(n_iters))
 
-            # For sample size-based estimator, use sigma2/n instead of
-            # sampling variances. TODO: find a better solution than reaching
-            # into the estimator's stored params, as this could fail if the
-            # estimator has been applied to a different dataset in interim.
-            if self.dataset.v is None:
-                v = self.estimator.params_['sigma2'] / self.dataset.n
-            else:
-                v = self.dataset.v
+            # Make sure we have an estimate of v if it wasn't observed
+            v = self.estimator.get_v(self.dataset)
 
             cis = []
             for i in range(n_iters):
@@ -117,7 +111,7 @@ class MetaRegressionResults:
 
 
 def permutation_test(results, n_perm=1000):
-    """Run permutation test on a MetaRegressionResults instane.
+    """Run permutation test on a MetaRegressionResults instance.
 
     Args:
         results (MetaRegressionResults): The results object to test.
@@ -163,7 +157,7 @@ def permutation_test(results, n_perm=1000):
     for i in range(n_datasets):
 
         y = results.dataset.y[:, i]
-        v = results.dataset.v[:, i]
+        v = results.estimator.get_v(results.dataset)[:, i]
         y_perm = np.repeat(y[:, None], n_perm, axis=1)
         v_perm = np.repeat(v[:, None], n_perm, axis=1)
 

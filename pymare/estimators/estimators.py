@@ -69,6 +69,33 @@ class BaseEstimator(metaclass=ABCMeta):
         self.dataset_ = dataset
         return self
 
+    def get_v(self, dataset):
+        """Get the variances, or an estimate thereof, from the given Dataset.
+
+        Args:
+            dataset (Dataset): The dataset to use to retrieve/estimate v.
+
+        Returns:
+            A 2-d NDArray.
+
+        Notes:
+            This is equivalent to directly accessing `dataset.v` when variances
+            are present, but affords estimators that don't use variances in
+            estimation a way of computing an estimate for downstream use.
+        """
+        if dataset.v is not None:
+            return dataset.v
+        # Estimate sampling variances from sigma^2 and n if available.
+        if dataset.n is None:
+            raise ValueError("Dataset does not contain sampling variances (v),"
+                             " and no estimate of v is possible without sample"
+                             " sizes (n).")
+        if 'sigma2' not in self.params_:
+            raise ValueError("Dataset does not contain sampling variances (v),"
+                             " and no estimate of v is possible because no "
+                             "sigma^2 parameter was found.")
+        return self.params_['sigma2'] / dataset.n
+
     def summary(self):
         if not hasattr(self, 'params_'):
             name = self.__class__.__name__
