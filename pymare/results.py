@@ -147,7 +147,7 @@ def permutation_test(results, n_perm=1000):
     else:
         n_exact = 2**n_obs
         if n_exact < n_perm:
-            perms = np.array(itertools.product([-1, 1], repeat=n_obs)).T
+            perms = np.array(list(itertools.product([-1, 1], repeat=n_obs))).T
 
     exact = n_exact < n_perm
     if exact:
@@ -181,8 +181,11 @@ def permutation_test(results, n_perm=1000):
 
         params = results.estimator._fit(y=y_perm, v=v_perm, X=results.dataset.X)
 
-        fe_p[:, i] = (fe_stats['est'] < np.abs(params['beta'])).mean(1)
-        tau_p[i] = (re_stats['tau^2'] < np.abs(params['tau2'])).mean()
+        fe_obs = fe_stats['est'][:, i]
+        if fe_obs.ndim == 1:
+            fe_obs = fe_obs[:, None]
+        fe_p[:, i] = (fe_obs < np.abs(params['beta'])).mean(1)
+        tau_p[i] = (re_stats['tau^2'][i] < np.abs(params['tau2'])).mean()
 
     # p-values can't be smaller than 1/n_perm
     fe_p = np.maximum(1/n_perm, fe_p)
