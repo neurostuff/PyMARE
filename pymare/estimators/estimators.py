@@ -26,15 +26,18 @@ def _loopable(wrapped, instance, args, kwargs):
                 .format(n_iter))
     param_dicts = []
     for i in range(n_iter):
-        iter_kwargs = {k: v for (k, v) in kwargs.items()
-                    if k not in {'y', 'v'}}
+        iter_kwargs = {'X': kwargs['X']}
         iter_kwargs['y'] = kwargs['y'][:, i, None]
         if 'v' in kwargs:
             iter_kwargs['v'] = kwargs['v'][:, i, None]
+        if 'n' in kwargs:
+            n = kwargs['n'][:, i, None] if kwargs['n'].shape[1] > 1 else kwargs['n']
+            iter_kwargs['n'] = n
         param_dicts.append(wrapped(**iter_kwargs))
     params = {}
     for k in param_dicts[0]:
-        params[k] = np.stack([pd[k] for pd in param_dicts], axis=-1).squeeze()
+        concat = np.stack([pd[k].squeeze() for pd in param_dicts], axis=-1)
+        params[k] = np.atleast_2d(concat)
     return params
 
 
@@ -349,7 +352,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         beta, sigma, tau = res.x[:-2], float(res.x[-2]), float(res.x[-1])
         tau = np.max([tau, 0])
         _, inv_cov = weighted_least_squares(y, sigma / n, X, tau, True)
-        return {'beta': beta[:, None], 'sigma2': sigma, 'tau2': tau,
+        return {'beta': beta[:, None], 'sigma2': np.array(sigma), 'tau2': tau,
                 'inv_cov': inv_cov}
 
     def _ml_nll(self, theta, y, n, X):

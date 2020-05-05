@@ -2,6 +2,7 @@
 from functools import lru_cache
 from warnings import warn
 import itertools
+from inspect import getfullargspec
 
 import numpy as np
 import pandas as pd
@@ -64,7 +65,7 @@ class MetaRegressionResults:
     @lru_cache(maxsize=16)
     def get_re_stats(self, method='QP', alpha=0.05):
         if method == 'QP':
-            n_iters = len(self.tau2)
+            n_iters = np.atleast_2d(self.tau2).shape[1]
             if n_iters > 10:
                 warn("Method 'QP' is not parallelized; it may take a while to "
                      "compute CIs for {} parallel tau^2 values.".format(n_iters))
@@ -157,8 +158,12 @@ def permutation_test(results, n_perm=1000):
     for i in range(n_datasets):
 
         y = results.dataset.y[:, i]
-        v = results.estimator.get_v(results.dataset)[:, i]
         y_perm = np.repeat(y[:, None], n_perm, axis=1)
+
+        # for v, we might actually be working with n, depending on estimator
+        has_v = 'v' in getfullargspec(results.estimator._fit).args[1:]
+        v = results.dataset.v[:, i] if has_v else results.dataset.n[:, i]
+
         v_perm = np.repeat(v[:, None], n_perm, axis=1)
 
         if has_mods:
@@ -179,7 +184,10 @@ def permutation_test(results, n_perm=1000):
                 signs = np.random.choice(np.array([-1, 1]), (n_obs, n_perm))
                 y_perm *= signs
 
-        params = results.estimator._fit(y=y_perm, v=v_perm, X=results.dataset.X)
+        # Pass parameters, remembering that v may actually be n
+        kwargs = {'y': y_perm, 'X': results.dataset.X}
+        kwargs['v' if has_v else 'n'] = v_perm
+        params = results.estimator._fit(**kwargs)
 
         fe_obs = fe_stats['est'][:, i]
         if fe_obs.ndim == 1:

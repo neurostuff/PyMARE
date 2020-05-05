@@ -41,7 +41,7 @@ def test_meta_regression_results_init_2d(results_2d):
     assert isinstance(results_2d, MetaRegressionResults)
     assert results_2d.fe_params.shape == (2, 3)
     assert results_2d.fe_cov.shape == (2, 2, 3)
-    assert results_2d.tau2.shape == (3,)
+    assert results_2d.tau2.shape == (1, 3)
 
 
 def test_mrr_fe_se(results, results_2d):
@@ -64,8 +64,9 @@ def test_mrr_get_re_stats(results_2d):
     stats = results_2d.get_re_stats()
     assert isinstance(stats, dict)
     assert set(stats.keys()) == {'tau^2', 'ci_l', 'ci_u'}
-    assert stats['tau^2'].shape == stats['ci_u'].shape == (3,)
-    assert round(stats['tau^2'][2], 4) == 7.7649
+    assert stats['tau^2'].shape == (1, 3)
+    assert stats['ci_u'].shape == (3,)
+    assert round(stats['tau^2'][0, 2], 4) == 7.7649
     assert round(stats['ci_l'][2], 4) == 3.8076
     assert round(stats['ci_u'][2], 2) == 59.61
 
@@ -115,6 +116,16 @@ def test_exact_perm_test_1d_no_mods():
     pmr = permutation_test(results, 867)
     assert pmr.n_perm == 16
     assert pmr.exact
+    assert isinstance(pmr.results, MetaRegressionResults)
+    assert pmr.fe_p.shape == (1, 1)
+    assert pmr.tau2_p.shape == (1,)
+
+
+def test_approx_perm_test_with_n_based_estimator(dataset_n):
+    results = SampleSizeBasedLikelihoodEstimator().fit(dataset_n).summary()
+    pmr = permutation_test(results, 100)
+    assert pmr.n_perm == 100
+    assert not pmr.exact
     assert isinstance(pmr.results, MetaRegressionResults)
     assert pmr.fe_p.shape == (1, 1)
     assert pmr.tau2_p.shape == (1,)

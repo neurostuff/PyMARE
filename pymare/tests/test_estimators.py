@@ -122,15 +122,15 @@ def test_2d_looping(dataset_2d):
     results = est.summary()
     beta, tau2 = results.fe_params, results.tau2
     assert beta.shape == (2, 3)
-    assert tau2.shape == (3,)
+    assert tau2.shape == (1, 3)
 
     # First and third sets are identical to single dim test; 2nd is different
     assert np.allclose(beta[:, 0], [-0.1072, 0.7653], atol=1e-4)
-    assert np.allclose(tau2[0], 7.7649, atol=1e-4)
+    assert np.allclose(tau2[0, 0], 7.7649, atol=1e-4)
     assert not np.allclose(beta[:, 1], [-0.1072, 0.7653], atol=1e-4)
-    assert not np.allclose(tau2[1], 7.7649, atol=1e-4)
+    assert not np.allclose(tau2[0, 1], 7.7649, atol=1e-4)
     assert np.allclose(beta[:, 2], [-0.1072, 0.7653], atol=1e-4)
-    assert np.allclose(tau2[2], 7.7649, atol=1e-4)
+    assert np.allclose(tau2[0, 2], 7.7649, atol=1e-4)
 
 
 def test_2d_loop_warning(dataset_2d):
