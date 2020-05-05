@@ -30,17 +30,16 @@ def test_select_expressions():
     assert len(exps) == 1
     assert exps[0].symbols == _symbol_set('sd', 'd', 'm')
 
-    assert select_expressions('v', {'d'}) is None
+    assert select_expressions('v_d', {'d'}) is None
 
-    exps = select_expressions('g', known_vars={'m', 'n', 'v'})
-    assert len(exps) == 4
-    targets = {'j - 1 + 3/(4*n - 5)', '-sqrt(n)*sqrt(v) + sd',
-               '-d*j + g', 'd - m/sd'}
+    exps = select_expressions('sm', known_vars={'m', 'n', 'sd'})
+    assert len(exps) == 3
+    targets = {'j - 1 + 3/(4*n - 5)', '-d*j + sm', 'd - m/sd'}
     assert set([str(e.sympy) for e in exps]) == targets
 
-    assert select_expressions('v', {'d', 'n'}, 2) is None
+    assert select_expressions('v_d', {'d', 'n'}, 2) is None
 
     exps = select_expressions('d', {'m1', 'm2', 'sd1', 'sd2', 'n1', 'n2'}, 2)
     assert len(exps) == 2
-    target = _symbol_set('d', 'm1', 'm2', 'sd')
+    target = _symbol_set('d', 'm1', 'm2', 'sdp')
     assert (exps[0].symbols == target or exps[1].symbols == target)
