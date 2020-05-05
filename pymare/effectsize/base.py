@@ -82,10 +82,13 @@ class EffectSizeConverter(metaclass=ABCMeta):
     """Base class for effect size converters."""
     def __init__(self, data=None, **kwargs):
 
+        kwargs = {k: v for k, v in kwargs.items() if v is not None}
+
         # Pull DF columns into kwargs, giving the latter precedence
         if data is not None:
             df_cols = {col: data.loc[:, col].values for col in data.columns}
-            kwargs = dict(**df_cols, **kwargs)
+            df_cols.update(kwargs)
+            kwargs = df_cols
 
         # Do any subclass-specific validation
         kwargs = self._validate(kwargs)
@@ -140,7 +143,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
         return system
 
     def to_dataset(self, measure, **kwargs):
-
+        measure = measure.lower()
         y = self.get(measure)
         v = self.get('v_{}'.format(measure), error=False)
         try:
@@ -153,7 +156,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
         """Compute and return values for the specified statistic, if possible.
 
         Args:
-            stat (str): The name of the statistic to compute (e.g., 'd', 'g').
+            stat (str): The name of the quantity to retrieve.
             error (bool): Specifies behavior in the event that the requested
                 quantity cannot be computed. If True (default), raises an
                 exception. If False, returns None.
@@ -168,6 +171,8 @@ class EffectSizeConverter(metaclass=ABCMeta):
             quantities; any change to input data require initialization of a
             new instance.
         """
+        stat = stat.lower()
+
         if stat in self.known_vars:
             return self.known_vars[stat]
 
@@ -212,7 +217,7 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
         super().__init__(data, m=m, sd=sd, n=n, r=r, **kwargs)
 
     def to_dataset(self, measure='RM', **kwargs):
-        super().to_dataset(measure, **kwargs)
+        return super().to_dataset(measure, **kwargs)
 
 
 class TwoSampleEffectSizeConverter(EffectSizeConverter):
@@ -246,7 +251,8 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
 
     def __init__(self, data=None, m1=None, m2=None, sd1=None, sd2=None,
                  n1=None, n2=None, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(data, m1=m1, m2=m2, sd1=sd1, sd2=sd2, n1=n1, n2=n2,
+                         **kwargs)
 
     def _validate(self, kwargs):
         # Validate that all inputs were passed in pairs
@@ -263,4 +269,4 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
         return kwargs
 
     def to_dataset(self, measure='SMD', **kwargs):
-        super().to_dataset(measure, **kwargs)
+        return super().to_dataset(measure, **kwargs)

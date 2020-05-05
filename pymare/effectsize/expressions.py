@@ -38,8 +38,8 @@ def _load_expressions():
         expr = Expression(**expr)
         expressions.append(expr)
 
-    one_samp = [e for e in expressions if e.type in {0, 1}]
-    two_samp = [e for e in expressions if e.type in {0, 2}]
+    one_samp = [e for e in expressions if e.type == 1]
+    two_samp = [e for e in expressions if e.type == 2]
 
     return one_samp, two_samp
 
