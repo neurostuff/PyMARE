@@ -37,7 +37,8 @@ REQUIRES = [
     'numpy>=1.8.0',
     'scipy',
     'pandas',
-    'sympy'
+    'sympy',
+    'wrapt'
 ]
 
 STAN_REQUIRES = [
