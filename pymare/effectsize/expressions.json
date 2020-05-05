@@ -35,7 +35,7 @@
         "description": "Variance of standardized mean"
     },
     {
-        "expression": "zr - atan(r)",
+        "expression": "zr - atanh(r)",
         "type": 1,
         "description": "Fisher r-to-z transformed correlation coefficient"
     },
