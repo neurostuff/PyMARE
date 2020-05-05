@@ -139,7 +139,8 @@ class EffectSizeConverter(metaclass=ABCMeta):
 
         return system
 
-    def to_dataset(self, measure='g', **kwargs):
+    def to_dataset(self, measure, **kwargs):
+
         y = self.get(measure)
         v = self.get('v_{}'.format(measure), error=False)
         try:
@@ -210,6 +211,9 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
     def __init__(self, data=None, m=None, sd=None, n=None, r=None, **kwargs):
         super().__init__(data, m=m, sd=sd, n=n, r=r, **kwargs)
 
+    def to_dataset(self, measure='RM', **kwargs):
+        super().to_dataset(measure, **kwargs)
+
 
 class TwoSampleEffectSizeConverter(EffectSizeConverter):
     """Effect size converter for two-sample comparisons.
@@ -240,7 +244,8 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
     """
     _type = 2
 
-    def __init__(self, data=None, **kwargs):
+    def __init__(self, data=None, m1=None, m2=None, sd1=None, sd2=None,
+                 n1=None, n2=None, **kwargs):
         super().__init__(**kwargs)
 
     def _validate(self, kwargs):
@@ -256,3 +261,6 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
                     "provide both {} and {} (or neither)."
                     .format(var, name1, name2))
         return kwargs
+
+    def to_dataset(self, measure='SMD', **kwargs):
+        super().to_dataset(measure, **kwargs)
