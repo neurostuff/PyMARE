@@ -101,7 +101,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
 
         self.known_vars = {}
         self._system_cache = defaultdict(dict)
-        self.set_data(**kwargs)
+        self.update_data(**kwargs)
 
     def _validate(self, kwargs):
         return kwargs
@@ -111,7 +111,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
             stat = key.replace('get_', '')
             return partial(self.get, stat=stat)
 
-    def set_data(self, incremental=False, **kwargs):
+    def update_data(self, incremental=False, **kwargs):
         """Update instance data.
 
         Args:
@@ -174,10 +174,10 @@ class EffectSizeConverter(metaclass=ABCMeta):
             successfully computed.
 
         Notes:
-            All values computed via to() are internally cached. Do not try to
-            update the instance's known values directly and then recompute
-            quantities; any change to input data require initialization of a
-            new instance.
+            All values computed via get() are internally cached. Do not try to
+            update the instance's known values directly; any change to input
+            data require either initialization of a new instance, or a call to
+            update_data().
         """
         stat = stat.lower()
 
@@ -226,6 +226,32 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
         super().__init__(data, m=m, sd=sd, n=n, r=r, **kwargs)
 
     def to_dataset(self, measure='RM', **kwargs):
+        """Get a Pymare Dataset with y and v mapped to the specified measure.
+
+        Args:
+            measure (str): The measure to map to the Dataset's y and v
+                attributes (where y is the desired measure, and v is its 
+                variance). Valid values include:
+                    * 'RM': Raw mean of the group.
+                    * 'SM': Standardized mean. This is often called Hedges g.
+                      (one-sample), or equivalently, Cohen's one-sample d with
+                      a bias correction applied.
+                    * 'D': Cohen's d. Note that no bias correction is applied
+                      (use 'SM' instead).
+                    * 'R': Raw correlation coefficient.
+                    * 'ZR': Fisher z-transformed correlation coefficient.
+            kwargs: Optional keyword arguments to pass onto the Dataset
+                initializer. Provides a way of supplementing the generated y
+                and v arrays with additional arguments (e.g., X, X_names, n).
+                See pymare.Dataset docs for details.
+
+        Returns:
+            A pymare.Dataset instance.
+
+        Notes:
+            Measures 'RM', 'SM', and 'D' require m, sd, and n as inputs.
+            Measures 'R' and 'ZR' require r and n as inputs.
+        """
         return super().to_dataset(measure, **kwargs)
 
 
@@ -278,4 +304,28 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
         return kwargs
 
     def to_dataset(self, measure='SMD', **kwargs):
+        """Get a Pymare Dataset with y and v mapped to the specified measure.
+
+        Args:
+            measure (str): The measure to map to the Dataset's y and v
+                attributes (where y is the desired measure, and v is its 
+                variance). Valid values include:
+                    * 'RMD': Raw mean difference between groups.
+                    * 'SMD': Standardized mean difference between groups. This
+                      is often called Hedges g, or equivalently, Cohen's d with
+                      a bias correction applied.
+                    * 'D': Cohen's d. Note that no bias correction is applied
+                      (use 'SMD' instead).
+            kwargs: Optional keyword arguments to pass onto the Dataset
+                initializer. Provides a way of supplementing the generated y
+                and v arrays with additional arguments (e.g., X, X_names, n).
+                See pymare.Dataset docs for details.
+
+        Returns:
+            A pymare.Dataset instance.
+
+        Notes:
+            All measures require that m1, m2, sd1, sd2, n1, and n2 be passed in
+            as inputs (or be solvable from the passed inputs).
+        """
         return super().to_dataset(measure, **kwargs)
