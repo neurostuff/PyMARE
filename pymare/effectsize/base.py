@@ -5,6 +5,7 @@ from functools import partial
 from abc import ABCMeta
 from collections import defaultdict
 
+import numpy as np
 from sympy import sympify, lambdify, Symbol, solve
 
 from .expressions import select_expressions
@@ -92,6 +93,11 @@ class EffectSizeConverter(metaclass=ABCMeta):
 
         # Do any subclass-specific validation
         kwargs = self._validate(kwargs)
+
+        # Scalars are fine, but lists and tuples break lambdified expressions
+        for k, v in kwargs.items():
+            if isinstance(v, (list, tuple)):
+                kwargs[k] = np.array(v)
 
         self.known_vars = {}
         self._system_cache = defaultdict(dict)
