@@ -18,6 +18,13 @@ def dataset(variables):
 
 
 @pytest.fixture(scope='package')
+def small_dataset_2d(variables):
+    y = np.array([[1.5, 1.9, 2.2], [4, 2, 1]]).T
+    v = np.array([[1, 0.8, 3], [1, 1.5, 1]]).T
+    return Dataset(y, v)
+
+
+@pytest.fixture(scope='package')
 def dataset_2d(variables):
     y, v, X = variables
     y = np.repeat(y, 3, axis=1)

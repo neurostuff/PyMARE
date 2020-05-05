@@ -6,17 +6,42 @@ from warnings import warn
 
 import numpy as np
 from scipy.optimize import minimize, Bounds
+import wrapt
 
 from ..stats import weighted_least_squares
 from ..results import MetaRegressionResults, BayesianMetaRegressionResults
 
 
-class BaseEstimator(metaclass=ABCMeta):
+@wrapt.decorator
+def _loopable(wrapped, instance, args, kwargs):
+    # Decorator for _fit method of Estimator classes to handle naive looping
+    # over the 2nd dimension of y/v/n inputs, and reconstruction of outputs.
+    n_iter = kwargs['y'].shape[1]
+    if n_iter > 10:
+        warn("Input contains {} parallel datasets (in 2nd dim of y and"
+                " v). The selected estimator will loop over datasets"
+                " naively, and this may be slow for large numbers of "
+                "datasets. Consider using the DL, HE, or WLS estimators, "
+                "which handle parallel datasets more efficiently."
+                .format(n_iter))
+    param_dicts = []
+    for i in range(n_iter):
+        iter_kwargs = {'X': kwargs['X']}
+        iter_kwargs['y'] = kwargs['y'][:, i, None]
+        if 'v' in kwargs:
+            iter_kwargs['v'] = kwargs['v'][:, i, None]
+        if 'n' in kwargs:
+            n = kwargs['n'][:, i, None] if kwargs['n'].shape[1] > 1 else kwargs['n']
+            iter_kwargs['n'] = n
+        param_dicts.append(wrapped(**iter_kwargs))
+    params = {}
+    for k in param_dicts[0]:
+        concat = np.stack([pd[k].squeeze() for pd in param_dicts], axis=-1)
+        params[k] = np.atleast_2d(concat)
+    return params
 
-    # Set True for estimators that efficiently handle parallel datasets. All
-    # inputs will then be passed as-is to the estimator. If False, the 2nd dim
-    # of y/v inputs will be naively looped over and the results concatenated.
-    _2d_vectorized = False
+
+class BaseEstimator(metaclass=ABCMeta):
 
     @abstractmethod
     def _fit(self):
@@ -29,45 +54,50 @@ class BaseEstimator(metaclass=ABCMeta):
         # * X (predictors)
         pass
 
-    def fit(self, dataset):
-        kwargs = {}
-        spec = getfullargspec(self._fit)
-        n_kw = len(spec.defaults) if spec.defaults else 0
-        n_args = len(spec.args) - n_kw - 1
-        for i, name in enumerate(spec.args[1:]):
-            if i >= n_args:
-                kwargs[name] = getattr(dataset, name, spec.defaults[i - n_args])
-            else:
-                kwargs[name] = getattr(dataset, name)
+    def fit(self, dataset=None, **kwargs):
 
-        # For estimators with vectorized handling of 2nd dim, pass inputs as-is
-        n_iter = dataset.y.shape[1]
-        if self._2d_vectorized or n_iter == 1:
-            self.params_ = self._fit(**kwargs)
-        # Otherwise loop over 2nd dim of y and v, and concatenate results
-        else:
-            if n_iter > 10:
-                warn("Input contains {} parallel datasets (in 2nd dim of y and"
-                     " v). The selected estimator will loop over datasets"
-                     " naively, and this may be slow for large numbers of "
-                     "datasets. Consider using the DL, HE, or WLS estimators, "
-                     "which handle parallel datasets more efficiently."
-                     .format(n_iter))
-            param_dicts = []
-            for i in range(n_iter):
-                iter_kwargs = {k: v for (k, v) in kwargs.items()
-                            if k not in {'y', 'v'}}
-                iter_kwargs['y'] = kwargs['y'][:, i, None]
-                if 'v' in kwargs:
-                    iter_kwargs['v'] = kwargs['v'][:, i, None]
-                param_dicts.append(self._fit(**iter_kwargs))
-            params = {}
-            for k in param_dicts[0]:
-                params[k] = np.stack([pd[k].squeeze() for pd in param_dicts], axis=-1)
-            self.params_ = params
+        if dataset is not None:
+            kwargs = {}
+            spec = getfullargspec(self._fit)
+            n_kw = len(spec.defaults) if spec.defaults else 0
+            n_args = len(spec.args) - n_kw - 1
+            for i, name in enumerate(spec.args[1:]):
+                if i >= n_args:
+                    kwargs[name] = getattr(dataset, name, spec.defaults[i - n_args])
+                else:
+                    kwargs[name] = getattr(dataset, name)
 
+        self.params_ = self._fit(**kwargs)
         self.dataset_ = dataset
+
         return self
+
+    def get_v(self, dataset):
+        """Get the variances, or an estimate thereof, from the given Dataset.
+
+        Args:
+            dataset (Dataset): The dataset to use to retrieve/estimate v.
+
+        Returns:
+            A 2-d NDArray.
+
+        Notes:
+            This is equivalent to directly accessing `dataset.v` when variances
+            are present, but affords a way of estimating v from sample size (n)
+            for any estimator that implicitly estimate a sigma^2 parameter.
+        """
+        if dataset.v is not None:
+            return dataset.v
+        # Estimate sampling variances from sigma^2 and n if available.
+        if dataset.n is None:
+            raise ValueError("Dataset does not contain sampling variances (v),"
+                             " and no estimate of v is possible without sample"
+                             " sizes (n).")
+        if 'sigma2' not in self.params_:
+            raise ValueError("Dataset does not contain sampling variances (v),"
+                             " and no estimate of v is possible because no "
+                             "sigma^2 parameter was found.")
+        return self.params_['sigma2'] / dataset.n
 
     def summary(self):
         if not hasattr(self, 'params_'):
@@ -101,7 +131,6 @@ class WeightedLeastSquares(BaseEstimator):
         (use the 2nd dimension for the parallel iterates). The X matrix must be
         identical for all iterates.
     """
-    _2d_vectorized = True
 
     def __init__(self, tau2=0.):
         self.tau2 = tau2
@@ -131,7 +160,6 @@ class DerSimonianLaird(BaseEstimator):
         (use the 2nd dimension for the parallel iterates). The X matrix must be
         identical for all iterates.
     """
-    _2d_vectorized = True
 
     def _fit(self, y, v, X):
         k, p = X.shape
@@ -174,7 +202,6 @@ class Hedges(BaseEstimator):
         (use the 2nd dimension for the parallel iterates). The X matrix must be
         identical for all iterates.
     """
-    _2d_vectorized = True
 
     def _fit(self, y, v, X):
         k, p = X.shape[:2]
@@ -222,6 +249,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         self._nll_func = nll_func
         self.kwargs = kwargs
 
+    @_loopable
     def _fit(self, y, v, X):
         # use D-L estimate for initial values
         est_DL = DerSimonianLaird()._fit(y, v, X)
@@ -262,7 +290,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 
 class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     """ Likelihood-based estimator for estimates with known sample sizes but
-    unknown variances.
+    unknown sampling variances.
 
     Iteratively estimates the between-subject variance tau^2 and fixed effect
     betas using the specified likelihood-based estimator (ML or REML).
@@ -279,9 +307,10 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
             minimizer.
 
     Notes:
-        The ML and REML solutions are obtained via SciPy's scalar function
-        minimizer (scipy.optimize.minimize). Parameters to minimize() can be
-        passed in as keyword arguments.
+        Homogeneity of sigma^2 across studies is assumed. The ML and REML
+        solutions are obtained via SciPy's scalar function minimizer
+        (scipy.optimize.minimize). Parameters to minimize() can be passed in as
+        keyword arguments.
 
     References:
         Sangnawakij, P., Böhning, D., Niwitpong, S. A., Adams, S., Stanton, M., 
@@ -298,6 +327,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         self._nll_func = nll_func
         self.kwargs = kwargs
 
+    @_loopable
     def _fit(self, y, n, X):
         if n.std() < np.sqrt(np.finfo(float).eps):
             raise ValueError("Sample size-based likelihood estimator cannot "
@@ -322,7 +352,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         beta, sigma, tau = res.x[:-2], float(res.x[-2]), float(res.x[-1])
         tau = np.max([tau, 0])
         _, inv_cov = weighted_least_squares(y, sigma / n, X, tau, True)
-        return {'beta': beta[:, None], 'sigma2': sigma, 'tau2': tau,
+        return {'beta': beta[:, None], 'sigma2': np.array(sigma), 'tau2': tau,
                 'inv_cov': inv_cov}
 
     def _ml_nll(self, theta, y, n, X):
@@ -400,6 +430,7 @@ class StanMetaRegression(BaseEstimator):
         from pystan import StanModel
         self.model = StanModel(model_code=spec)
 
+    @_loopable
     def _fit(self, y, v, X, groups=None):
         """Run the Stan sampler and return results.
 
