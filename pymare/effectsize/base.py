@@ -132,6 +132,8 @@ class EffectSizeConverter(metaclass=ABCMeta):
         # otherwise try to get a sufficient system
         exprs = select_expressions(target=stat, known_vars=known,
                                    type=self._type)
+        if exprs is None:
+            return None
         system = [exp.sympy for exp in exprs]
 
         # update the cache
@@ -177,9 +179,10 @@ class EffectSizeConverter(metaclass=ABCMeta):
             return self.known_vars[stat]
 
         system = self._get_system(stat)
-        result = solve_system(system, self.known_vars)
+        if system is not None:
+            result = solve_system(system, self.known_vars)
 
-        if result is None and error:
+        if error and (system is None or result is None):
             known = list(self.known_vars.keys())
             raise ValueError("Unable to solve for statistic '{}' given the "
                              "known quantities ({}).".format(stat, known))
