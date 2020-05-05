@@ -80,10 +80,22 @@ def solve_system(system, known_vars=None):
 
 class EffectSizeConverter(metaclass=ABCMeta):
     """Base class for effect size converters."""
-    def __init__(self, **kwargs):
+    def __init__(self, data=None, **kwargs):
+
+        # Pull DF columns into kwargs, giving the latter precedence
+        if data is not None:
+            df_cols = {col: data.loc[:, col].values for col in data.columns}
+            kwargs = dict(**df_cols, **kwargs)
+
+        # Do any subclass-specific validation
+        kwargs = self._validate(kwargs)
+
         self.known_vars = {}
         self._system_cache = defaultdict(dict)
         self.set_data(**kwargs)
+
+    def _validate(self, kwargs):
+        return kwargs
 
     def __getattr__(self, key):
         if key.startswith('get_'):
@@ -171,7 +183,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
 
 
 class OneSampleEffectSizeConverter(EffectSizeConverter):
-    """Effect size converter for one-sample or paired comparisons.
+    """Effect size converter for metric involving a single group/set of scores.
 
     Args:
         data (DataFrame): Optional pandas DataFrame to extract variables from.
@@ -185,24 +197,18 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
             * m: Mean
             * sd: Standard deviation
             * n: Sample size
-            * d: Cohen's d
-            * g: Hedges' g
+            * r: Correlation between two variables
 
     Notes:
         All input variables are assumed to reflect study- or analysis-level
         summaries, and are _not_ individual data points. E.g., do not pass in
-        a vector of point estimates as `y` and a scalar for the variances `v`.
+        a vector of point estimates as `m` and a scalar for the SDs `sd`.
         The lengths of all inputs must match.
     """
     _type = 1
 
-    def __init__(self, data=None, **kwargs):
-        
-        if data is not None:
-            df_cols = {col: data.loc[:, col].values for col in data.columns}
-            kwargs = dict(**df_cols, **kwargs)
-
-        super().__init__(**kwargs)
+    def __init__(self, data=None, m=None, sd=None, n=None, r=None, **kwargs):
+        super().__init__(data, m=m, sd=sd, n=n, r=r, **kwargs)
 
 
 class TwoSampleEffectSizeConverter(EffectSizeConverter):
@@ -225,21 +231,19 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
     Notes:
         All input variables are assumed to reflect study- or analysis-level
         summaries, and are _not_ individual data points. E.g., do not pass in
-        a vector of point estimates as `y1` and a scalar for the variances `v1`.
+        a vector of point estimates as `m1` and a scalar for the SDs `sd1`.
         The lengths of all inputs must match.
 
         When using the TwoSampleEffectSizeConverter, it is assumed that the
-        paired inputs are from independent samples. Paired-sampled comparisons
-        are not supported (use the OneSampleEffectSizeConverter instead).
+        variable pairs are from independent samples. Paired-sampled comparisons
+        are not currently supported.
     """
     _type = 2
 
     def __init__(self, data=None, **kwargs):
+        super().__init__(**kwargs)
 
-        if data is not None:
-            df_cols = {col: data.loc[:, col].values for col in data.columns}
-            kwargs = dict(**df_cols, **kwargs)
-
+    def _validate(self, kwargs):
         # Validate that all inputs were passed in pairs
         var_names = set([v.strip('[12]') for v in kwargs.keys()])
         pair_vars = var_names - {'d'}
@@ -249,6 +253,6 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
             if (var1 is None) != (var2 is None):
                 raise ValueError(
                     "Input variable '{}' must be provided in pairs; please "
-                    "provide both {} and {} (or neither).".format(var, q1, q2))
-
-        super().__init__(**kwargs)
+                    "provide both {} and {} (or neither)."
+                    .format(var, name1, name2))
+        return kwargs
