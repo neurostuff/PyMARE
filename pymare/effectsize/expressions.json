@@ -35,6 +35,16 @@
         "description": "Variance of standardized mean"
     },
     {
+        "expression": "r - r",
+        "type": 1,
+        "description": "Raw correlation coefficient"
+    },
+    {
+        "expression": "v_r - (1 - r**2) / (n - 2)",
+        "type": 1,
+        "description": "Variance of raw correlation coefficient"
+    },
+    {
         "expression": "zr - atanh(r)",
         "type": 1,
         "description": "Fisher r-to-z transformed correlation coefficient"

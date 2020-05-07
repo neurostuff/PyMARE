@@ -86,3 +86,21 @@ def test_convert_r_and_n_to_rz():
     assert np.allclose(ds.y.ravel(), zr)
     assert np.allclose(ds.v.ravel(), v_zr)
     assert ds.n is not None
+
+
+def test_convert_r_to_itself():
+    r=np.array([0.2, 0.16, 0.6])
+    n = np.array((68, 165, 17))
+    esc = OneSampleEffectSizeConverter(r=r)
+    also_r = esc.get_r()
+    assert np.array_equal(r, also_r)
+    # Needs n
+    with pytest.raises(ValueError, match="Unable to solve"):
+        esc.get_v_r()
+    esc = OneSampleEffectSizeConverter(r=r, n=n)
+    v_r = esc.get('V_R')
+    assert np.allclose(v_r, (1 - r**2) / (n - 2))
+    ds = esc.to_dataset(measure="R")
+    assert np.allclose(ds.y.ravel(), r)
+    assert np.allclose(ds.v.ravel(), v_r)
+    assert ds.n is not None
