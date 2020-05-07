@@ -85,11 +85,8 @@ class EffectSizeConverter(metaclass=ABCMeta):
 
         kwargs = {k: v for k, v in kwargs.items() if v is not None}
 
-        # Pull DF columns into kwargs, giving the latter precedence
         if data is not None:
-            df_cols = {col: data.loc[:, col].values for col in data.columns}
-            df_cols.update(kwargs)
-            kwargs = df_cols
+            kwargs = self._collect_variables(data, kwargs)
 
         # Do any subclass-specific validation
         kwargs = self._validate(kwargs)
@@ -102,6 +99,15 @@ class EffectSizeConverter(metaclass=ABCMeta):
         self.known_vars = {}
         self._system_cache = defaultdict(dict)
         self.update_data(**kwargs)
+
+    @staticmethod
+    def _collect_variables(data, kwargs):
+        # consolidate variables from pandas DF and keyword arguments, giving
+        # precedence to the latter.
+        kwargs = kwargs.copy()
+        df_cols = {col: data.loc[:, col].values for col in data.columns}
+        df_cols.update(kwargs)
+        return kwargs
 
     def _validate(self, kwargs):
         return kwargs
