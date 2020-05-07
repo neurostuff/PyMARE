@@ -335,3 +335,129 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
             as inputs (or be solvable from the passed inputs).
         """
         return super().to_dataset(measure, **kwargs)
+
+
+def compute_measure(measure, data=None, comparison='infer', return_type='tuple',
+                    m=None, sd=None, n=None, r=None, m1=None, m2=None,
+                    sd1=None, sd2=None, n1=None, n2=None, **dataset_kwargs):
+    """Wrapper that auto-detects and applies the right converter class.
+
+    Args:
+        measure (str): The desired output effect size measure. Valid values are
+            listed below, with the required named inputs in parentheses:
+            * 'RM' (m, sd, n): Raw mean of the group.
+            * 'SM' (m, sd, n): Standardized mean. This is often called Hedges
+                g. (one-sample), or equivalently, Cohen's one-sample d with a
+                bias correction applied.
+            * 'R' (r, n): Raw correlation coefficient.
+            * 'ZR' (r, n): Fisher z-transformed correlation coefficient.
+            * 'RMD' (m1, m2, sd1, sd2, n1, n2): Raw mean difference between
+                groups.
+            * 'SMD' (m1, m2, sd1, sd2, n1, n2): Standardized mean difference
+                between groups. This is often called Hedges g, or equivalently,
+                Cohen's d with a bias correction applied.
+            * 'D' (m, sd, n, or m1, m2, sd1, sd2, n1, n2): Cohen's d. No bias
+                correction is applied (for that, use 'SM' or 'SMD' instead).
+                Note that 'D' can be either one-sample or two-sample. This is
+                specified in type, or (if type=='infer'), inferred from the
+                passed arguments.
+        data (DataFrame, optional): A pandas DataFrame to extract variables
+            from. Column names must match the names of other args ('m', 'sd',
+            'n2', etc.). If both a DataFrame and keyword arguments are
+            provided, the two will be merged, with variables passed as separate
+            arguments taking precedence over DataFrame columns in the event of
+            a clash.
+        comparison (str, int, optional): The type of originating comparison.
+            This is currently unnecessary, as the type can be deterministically
+            inferred from the input arguments and measure, but may become
+            necessary in future, and provides a way of imposing constraints on
+            code embedded in larger pipelines. Valid values:
+                'infer' (*default): Infer the type of comparison from the input
+                arguments. Currently
+            1: One-group comparison. Must be accompanied by some/all of the
+                following named variables: m, sd, n, r.
+            2: Two-group comparison. Independent samples are assumed. Must be
+                accompanied by some/all of the following named variables: m1,
+                m2, sd1, sd2, n1, n2.
+        return_type (str, optional): Controls what gets returned. Valid values:
+            'tuple': A 2-tuple, where the first element is a 1-d array
+                containing the computed estimates (i.e., y), and the second
+                element is a 1-d array containing the associated sampling
+                variances.
+            'dict': A dictionary with keys 'y' and 'v' that map to the arrays
+                described for 'tuple'.
+            'dataset': A pymare Dataset instance, with y and v attributes set
+                to the corresponding arrays. Note that additional keyword
+                arguments can be passed onto the Dataset init via kwargs.
+            'converter': The EffectSizeConverter class internally initialized
+                to handle the desired computation. The target measures will
+                have already been computed (and hence, cached), and can be
+                retrieved via get_('{measure}') and get_('v_{measure}')
+        dataset_kwargs (optional): Optional keyword arguments passed on to the
+            Dataset initializer. Ignored unless return_type == 'dataset'.
+
+        Returns:
+            A tuple, dict, or pymare.Dataset, depending on `return_type`.
+        """
+
+    var_args = dict(m=m, sd=sd, n=n, r=r, m1=m1, m2=m2, sd1=sd1, sd2=sd2,
+                    n1=n1, n2=n2)
+    var_args = {k: v for k, v in var_args.items() if v is not None}
+
+    if data is not None:
+        var_args = EffectSizeConverter._collect_variables(data, var_args)
+
+    valid_measures = {'RM', 'SM', 'R', 'ZR', 'RMD', 'SMD', 'D'}
+    if measure not in valid_measures:
+        raise ValueError("Invalid measures '{}'; must be one of {}."
+                         .format(measure, valid_measures))
+
+    # Select or infer converter class
+    if comparison == 'infer':
+
+        one_samp_inputs = {'m', 'sd', 'n', 'r'}
+        two_samp_inputs = {'m1', 'm2', 'sd1', 'sd2', 'n1', 'n2'}
+
+        if measure in {'RM', 'SM', 'R', 'ZR'}:
+            comparison = 1
+        elif measure in {'RMD', 'SMD'}:
+            comparison = 2
+        elif measure in {'D'}:
+            arg_set = set(var_args.keys())
+            if (arg_set & one_samp_inputs) and not (arg_set & two_samp_inputs):
+                comparison = 1
+            elif (arg_set & two_samp_inputs) and not (arg_set & one_samp_inputs):
+                comparison = 2
+            else:
+                raise ValueError(
+                    "Requested measure (D) and provided data arguments ({}) "
+                    "are insufficient to determine comparison; either provide"
+                    " data consistent with only one-group or two-group "
+                    "measures, or explicitly set comparison to 1 or 2."
+                    .format(arg_set))
+
+    if comparison == 1:
+        conv_cls = OneSampleEffectSizeConverter
+    elif comparison == 2:
+        conv_cls = TwoSampleEffectSizeConverter
+    else:
+        raise ValueError("Invalid comparison type '{}'! Valid values are "
+                         "'infer', 1, and 2.".format(comparison))
+
+    conv = conv_cls(**var_args)
+    y = conv.get(measure)
+    v = conv.get('v_{}'.format(measure))
+
+    return_type = return_type.lower()
+    if return_type == 'tuple':
+        return (y, v)
+    elif return_type == 'dict':
+        return {'y': y, 'v': v}
+    elif return_type == 'dataset':
+        return conv.to_dataset(measure, **dataset_kwargs)
+    elif return_type == 'converter':
+        return conv
+    else:
+        raise ValueError("Invalid return_type value '{}'. Must be one of "
+                         "'tuple', 'dict', 'dataset', or 'converter'."
+                         .format(return_type))
