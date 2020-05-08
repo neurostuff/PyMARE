@@ -55,7 +55,7 @@
         "description": "Variance of Fisher r-to-z transformed correlation"
     },
     {
-        "expression": "rmd - m1 - m2",
+        "expression": "rmd - (m1 - m2)",
         "type": 2,
         "description": "Raw mean difference"
     },

@@ -62,6 +62,10 @@ def solve_system(system, known_vars=None):
     if not solutions:
         return {}
 
+    # solver will return a dict if there's only one non-dummy expression
+    if isinstance(solutions, dict):
+        solutions = [list(solutions.values())]
+
     # Prepare the dummy list and data args in a fixed order
     dummy_list = list(dummies)
     data_args = [known_vars[var.name.strip('_')] for var in dummy_list]
@@ -107,7 +111,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
         kwargs = kwargs.copy()
         df_cols = {col: data.loc[:, col].values for col in data.columns}
         df_cols.update(kwargs)
-        return kwargs
+        return df_cols
 
     def _validate(self, kwargs):
         return kwargs
