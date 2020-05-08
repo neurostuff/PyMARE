@@ -142,7 +142,8 @@ def permutation_test(results, n_perm=1000):
 
     # create results arrays
     fe_p = np.zeros_like(results.fe_params)
-    tau_p = np.zeros((n_datasets,))
+    rfx = results.tau2 is not None
+    tau_p = np.zeros((n_datasets,)) if rfx else None
 
     # Calculate # of permutations and determine whether to use exact test
     if has_mods:
@@ -195,18 +196,20 @@ def permutation_test(results, n_perm=1000):
         if fe_obs.ndim == 1:
             fe_obs = fe_obs[:, None]
         fe_p[:, i] = (fe_obs < np.abs(params['beta'])).mean(1)
-        tau_p[i] = (re_stats['tau^2'][i] < np.abs(params['tau2'])).mean()
+        if rfx:
+            tau_p[i] = (re_stats['tau^2'][i] < np.abs(params['tau2'])).mean()
 
     # p-values can't be smaller than 1/n_perm
     fe_p = np.maximum(1/n_perm, fe_p)
-    tau_p = np.maximum(1/n_perm, tau_p)
+    if rfx:
+        tau_p = np.maximum(1/n_perm, tau_p)
 
     return PermutationTestResults(results, fe_p, tau_p, n_perm, exact)
 
 
 class PermutationTestResults:
     """Lightweight container to hold and display permutation test results."""
-    def __init__(self, results, fe_p, tau2_p, n_perm, exact=False):
+    def __init__(self, results, n_perm, fe_p, tau2_p=None, exact=False):
         self.results = results
         self.fe_p = fe_p
         self.tau2_p = tau2_p
