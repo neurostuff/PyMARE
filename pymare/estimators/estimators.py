@@ -129,13 +129,17 @@ class WeightedLeastSquares(BaseEstimator):
         This estimator accepts 2-D inputs for y and v--i.e., it can produce
         estimates simultaneously for multiple independent sets of y/v values
         (use the 2nd dimension for the parallel iterates). The X matrix must be
-        identical for all iterates.
+        identical for all iterates. If no v argument is passed to fit(), unit
+        weights will be used, resulting in the ordinary least-squares (OLS)
+        solution.
     """
 
     def __init__(self, tau2=0.):
         self.tau2 = tau2
 
-    def _fit(self, y, v, X):
+    def _fit(self, y, X, v=None):
+        if v is None:
+            v = np.ones.like(y)
         beta, inv_cov = weighted_least_squares(y, v, X, self.tau2,
                                                return_cov=True)
         return {'beta': beta, 'tau2': self.tau2, 'inv_cov': inv_cov}
@@ -164,17 +168,16 @@ class DerSimonianLaird(BaseEstimator):
     def _fit(self, y, v, X):
         k, p = X.shape
 
-        # Estimate initial betas with WLS
-        w = 1. / v
-
+        # Estimate initial betas with WLS, assuming tau^2=0
         beta_wls, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
 
         # Cochrane's Q
+        w = 1. / v
         w_sum = w.sum(0)
         Q = (w * (y - X.dot(beta_wls)) ** 2).sum(0)
 
         # Einsum indices: k = studies, p = predictors, i = parallel iterates.
-        # q is a dummy for 2nd p when p x p ovariance matrix inputs are passed.
+        # q is a dummy for 2nd p when p x p covariance matrix is passed.
         Xw2 = np.einsum('kp,ki->ipk', X, w**2)
         pXw2 = np.einsum('ipk,qpi->iqk', Xw2, inv_cov)
         A = w_sum - np.trace(pXw2.dot(X), axis1=1, axis2=2)
