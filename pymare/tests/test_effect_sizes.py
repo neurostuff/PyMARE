@@ -3,11 +3,23 @@ import numpy as np
 import pandas as pd
 
 from pymare.effectsize import (OneSampleEffectSizeConverter, solve_system,
-                                select_expressions, TwoSampleEffectSizeConverter)
+                               select_expressions, compute_measure,
+                               TwoSampleEffectSizeConverter)
+from pymare import Dataset
 
 
 @pytest.fixture(scope='module')
-def data():
+def one_samp_data():
+    return {
+        'm': np.array([7, 5, 4]),
+        'sd': np.sqrt(np.array([4.2, 1.2, 1.9])),
+        'n': np.array([24, 31, 40]),
+        'r': np.array([0.2, 0.18, 0.3])
+    }
+
+
+@pytest.fixture(scope='module')
+def two_samp_data():
     return {
         'm1': np.array([4, 2]),
         'sd1': np.sqrt(np.array([1, 9])),
@@ -18,7 +30,8 @@ def data():
     }
 
 
-def test_EffectSizeConverter_smoke_test(data):
+def test_EffectSizeConverter_smoke_test(two_samp_data):
+    data = two_samp_data
     esc = OneSampleEffectSizeConverter(m=data['m1'], sd=data['sd1'], n=data['n1'])
     assert set(esc.known_vars.keys()) == {'m', 'sd', 'n'}
     assert esc.get_sm().shape == data['m1'].shape
@@ -37,14 +50,14 @@ def test_esc_implicit_dtype_conversion():
     assert esc.known_vars['m'][1] == 12
 
 
-def test_EffectSizeConverter_from_df(data):
-    df = pd.DataFrame(data)
+def test_EffectSizeConverter_from_df(two_samp_data):
+    df = pd.DataFrame(two_samp_data)
     esc = TwoSampleEffectSizeConverter(df)
     assert np.allclose(esc.get_smd(), np.array([-0.61065, -0.13707]), atol=1e-5)
 
 
-def test_EffectSizeConverter_to_dataset(data):
-    esc = TwoSampleEffectSizeConverter(**data)
+def test_EffectSizeConverter_to_dataset(two_samp_data):
+    esc = TwoSampleEffectSizeConverter(**two_samp_data)
     X = np.array([1, 2])
     dataset = esc.to_dataset(X=X, X_names=['dummy'])
     assert dataset.__class__.__name__ == 'Dataset'
@@ -104,3 +117,54 @@ def test_convert_r_to_itself():
     assert np.allclose(ds.y.ravel(), r)
     assert np.allclose(ds.v.ravel(), v_r)
     assert ds.n is not None
+
+
+def test_compute_measure(one_samp_data, two_samp_data):
+    # Default args
+    base_result = compute_measure('SM',**one_samp_data)
+    assert isinstance(base_result, tuple)
+    assert len(base_result) == 2
+    assert base_result[0].shape == one_samp_data['m'].shape
+
+    # Explicit and correct comparison type
+    result2 = compute_measure('SM', comparison=1, **one_samp_data)
+    assert np.array_equal(np.array(base_result), np.array(result2))
+
+    # Incorrect comparison type fails downstream
+    with pytest.raises(ValueError):
+        compute_measure('SM', comparison=2, **one_samp_data)
+
+    # Ambiguous comparison type
+    with pytest.raises(ValueError, match="Requested measure \(D\)"):
+        compute_measure('D', **one_samp_data, **two_samp_data)
+
+    # Works with explicit comparison type: check for both comparison types
+    result = compute_measure('D', comparison=1, **one_samp_data, **two_samp_data)
+    conv = compute_measure('D', **one_samp_data, return_type='converter')
+    assert isinstance(conv, OneSampleEffectSizeConverter)
+    assert np.array_equal(result[1], conv.get_v_d())
+
+    result = compute_measure('D', comparison=2, **one_samp_data, **two_samp_data)
+    conv = compute_measure('D', **two_samp_data, return_type='converter')
+    assert isinstance(conv, TwoSampleEffectSizeConverter)
+    assert np.array_equal(result[1], conv.get_v_d())
+
+    # Test other return types
+    result = compute_measure('SM', return_type='dict', **one_samp_data)
+    assert np.array_equal(base_result[1], result['v'])
+
+    dset = compute_measure('SM', return_type='dataset', **one_samp_data,
+                           X=[4, 3, 2], X_names=['my_covar'])
+    assert isinstance(dset, Dataset)
+    assert np.array_equal(base_result[1], dset.v.ravel())
+    assert dset.X.shape == (3, 2)
+    assert dset.X_names == ['intercept', 'my_covar']
+
+    # Test with input DataFrame
+    df = pd.DataFrame(two_samp_data)
+    result = compute_measure('RMD', df)
+    assert np.array_equal(result[0], df['m1'].values - df['m2'].values)
+
+    # Override one of the DF columns
+    result = compute_measure('RMD', df, m1=[3, 3])
+    assert not np.array_equal(result[0], df['m1'].values - df['m2'].values)
