@@ -211,14 +211,13 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
             Column names must match the controlled names listed below for
             kwargs. If additional kwargs are provided, they will take
             precedence over the values in the data frame.
+        m (array-like): Means or other continuous estimates
+        sd (array-like): Standard deviations
+        n (array-like): Sample sizes
+        r (array-like): Correlation coefficients
         **kwargs: Optional keyword arguments providing additional inputs. All
             values must be floats, 1d ndarrays, or any iterable that can be
             converted to an ndarray. All variables must have the same length.
-            Allowable variables currently include:
-            * m: Mean
-            * sd: Standard deviation
-            * n: Sample size
-            * r: Correlation between two variables
 
     Notes:
         All input variables are assumed to reflect study- or analysis-level
@@ -269,20 +268,22 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
             Column names must match the controlled names listed below for
             kwargs. If additional kwargs are provided, they will take
             precedence over the values in the data frame.
+        m1 (array-like): Means for group 1
+        m2 (array-like): Means for group 2
+        sd1 (array-like): Standard deviations for group 1
+        sd2 (array-like): Standard deviations for group 2
+        n1 (array-like): Sample sizes for group 1
+        n2 (array-like): Sample sizes for group 2
         **kwargs: Optional keyword arguments providing additional inputs. All
             values must be floats, 1d ndarrays, or any iterable that can be
-            converted to an ndarray. All variables must have the same length.
-            All variables must be passed in pairs. Allowable variables
-            currently include:
-            * m1, m2: Means for groups 1 and 2
-            * sd1, sd2: Standard deviations for groups 1 and 2
-            * n1, n2: Sample sizes for groups 1 and 2
+            converted to an ndarray.
 
     Notes:
         All input variables are assumed to reflect study- or analysis-level
         summaries, and are _not_ individual data points. E.g., do not pass in
         a vector of point estimates as `m1` and a scalar for the SDs `sd1`.
-        The lengths of all inputs must match.
+        The lengths of all inputs must match. All variables must be passed in
+        as pairs (e.g., if m1 is provided, m2 must also be provided).
 
         When using the TwoSampleEffectSizeConverter, it is assumed that the
         variable pairs are from independent samples. Paired-sampled comparisons
@@ -393,6 +394,16 @@ def compute_measure(measure, data=None, comparison='infer', return_type='tuple',
                 to handle the desired computation. The target measures will
                 have already been computed (and hence, cached), and can be
                 retrieved via get_('{measure}') and get_('v_{measure}')
+        m (array-like): Means or other estimates in single-group case
+        sd (array-like): Standard deviations in single-group case
+        n (array-like): Sample sizes in single-group case
+        r (array-like): Correlation coefficients
+        m1 (array-like): Means for group 1
+        m2 (array-like): Means for group 2
+        sd1 (array-like): Standard deviations for group 1
+        sd2 (array-like): Standard deviations for group 2
+        n1 (array-like): Sample sizes for group 1
+        n2 (array-like): Sample sizes for group 2
         dataset_kwargs (optional): Optional keyword arguments passed on to the
             Dataset initializer. Ignored unless return_type == 'dataset'.
 
