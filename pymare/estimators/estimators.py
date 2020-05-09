@@ -105,7 +105,7 @@ class BaseEstimator(metaclass=ABCMeta):
             raise ValueError("This {} instance hasn't been fitted yet. Please "
                              "call fit() before summary().".format(name))
         p = self.params_
-        return MetaRegressionResults(self, self.dataset_, p['beta'],
+        return MetaRegressionResults(self, self.dataset_, p['fe_params'],
                                      p['inv_cov'], p['tau2'])
 
 
@@ -142,7 +142,7 @@ class WeightedLeastSquares(BaseEstimator):
             v = np.ones.like(y)
         beta, inv_cov = weighted_least_squares(y, v, X, self.tau2,
                                                return_cov=True)
-        return {'beta': beta, 'tau2': self.tau2, 'inv_cov': inv_cov}
+        return {'fe_params': beta, 'tau2': self.tau2, 'inv_cov': inv_cov}
 
 
 class DerSimonianLaird(BaseEstimator):
@@ -187,7 +187,7 @@ class DerSimonianLaird(BaseEstimator):
         # Re-estimate beta with tau^2 estimate
         beta_dl, inv_cov = weighted_least_squares(y, v, X, tau2=tau_dl,
                                                   return_cov=True)
-        return {'beta': beta_dl, 'tau2': tau_dl, 'inv_cov': inv_cov}
+        return {'fe_params': beta_dl, 'tau2': tau_dl, 'inv_cov': inv_cov}
 
 
 class Hedges(BaseEstimator):
@@ -215,14 +215,35 @@ class Hedges(BaseEstimator):
         tau_ho = np.maximum(0, tau_ho)
         # Estimate beta with tau^2 estimate
         beta_ho = weighted_least_squares(y, v, X, tau2=tau_ho)
-        return {'beta': beta_ho, 'tau2': tau_ho, 'inv_cov': inv_cov}
+        return {'fe_params': beta_ho, 'tau2': tau_ho, 'inv_cov': inv_cov}
+
+
+class Stouffers(BaseEstimator):
+    """Stouffer's Z-score meta-analysis method.
+
+    Takes study-level z-scores and combines them via Stouffer's method to
+    produce a fixed-effect estimate of the combined effect.
+
+    Notes:
+        The fit() method takes z-scores and (optionally) weights as inputs.
+        These should be passed to the y and v arguments, respectively. If no
+        weights are passed, unit weights are used.
+    """
+    def _fit(self, y, v=None):
+
+        if v is None:
+            v = np.ones_like(y)
+
+        z = (y * v).sum(0) / np.sqrt((v**2).sum(0))
+
+        return {'fe_params': z }
 
 
 class VarianceBasedLikelihoodEstimator(BaseEstimator):
     """ Likelihood-based estimator for estimates with known variances.
 
     Iteratively estimates the between-subject variance tau^2 and fixed effect
-    betas using the specified likelihood-based estimator (ML or REML).
+    coefficients using the specified likelihood-based estimator (ML or REML).
 
     Args:
         method (str, optional): The estimation method to use. Either 'ML' (for
@@ -256,7 +277,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
     def _fit(self, y, v, X):
         # use D-L estimate for initial values
         est_DL = DerSimonianLaird()._fit(y, v, X)
-        beta = est_DL['beta']
+        beta = est_DL['fe_params']
         tau2 = est_DL['tau2']
 
         theta_init = np.r_[beta.ravel(), tau2]
@@ -271,7 +292,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         beta, tau = res.x[:-1], float(res.x[-1])
         tau = np.max([tau, 0])
         _, inv_cov = weighted_least_squares(y, v, X, tau, True)
-        return {'beta': beta[:, None], 'tau2': tau, 'inv_cov': inv_cov}
+        return {'fe_params': beta[:, None], 'tau2': tau, 'inv_cov': inv_cov}
 
     def _ml_nll(self, theta, y, v, X):
         """ ML negative log-likelihood for meta-regression model. """
@@ -302,10 +323,6 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         method (str, optional): The estimation method to use. Either 'ML' (for
             maximum-likelihood) or 'REML' (restricted maximum-likelihood).
             Defaults to 'ML'.
-        beta (array, optional): Initial beta values to use in optimization. If
-            None (default), uses the weighted least squares estimate.
-        tau2 (float, optional): Initial tau^2 value to use in optimization.
-            Defaults to 0.
         kwargs (dict, optional): Keyword arguments to pass to the SciPy
             minimizer.
 
@@ -355,7 +372,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         beta, sigma, tau = res.x[:-2], float(res.x[-2]), float(res.x[-1])
         tau = np.max([tau, 0])
         _, inv_cov = weighted_least_squares(y, sigma / n, X, tau, True)
-        return {'beta': beta[:, None], 'sigma2': np.array(sigma), 'tau2': tau,
+        return {'fe_params': beta[:, None], 'sigma2': np.array(sigma), 'tau2': tau,
                 'inv_cov': inv_cov}
 
     def _ml_nll(self, theta, y, n, X):

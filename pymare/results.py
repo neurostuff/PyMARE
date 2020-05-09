@@ -142,7 +142,7 @@ def permutation_test(results, n_perm=1000):
 
     # create results arrays
     fe_p = np.zeros_like(results.fe_params)
-    rfx = results.tau2 is not None
+    rfx = (results.tau2 is not None)
     tau_p = np.zeros((n_datasets,)) if rfx else None
 
     # Calculate # of permutations and determine whether to use exact test
@@ -195,7 +195,7 @@ def permutation_test(results, n_perm=1000):
         fe_obs = fe_stats['est'][:, i]
         if fe_obs.ndim == 1:
             fe_obs = fe_obs[:, None]
-        fe_p[:, i] = (fe_obs < np.abs(params['beta'])).mean(1)
+        fe_p[:, i] = (fe_obs < np.abs(params['fe_params'])).mean(1)
         if rfx:
             tau_p[i] = (re_stats['tau^2'][i] < np.abs(params['tau2'])).mean()
 
@@ -266,7 +266,7 @@ class BayesianMetaRegressionResults:
             A pandas DataFrame, unless the `fmt="xarray"` argument is passed in
             kwargs, in which case an xarray Dataset is returned.
         """
-        var_names = ['beta', 'tau2']
+        var_names = ['fe_params', 'tau2']
         if include_theta:
             var_names.append('theta')
         var_names = kwargs.pop('var_names', var_names)

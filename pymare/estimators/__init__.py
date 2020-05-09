@@ -1,7 +1,7 @@
 from .estimators import (WeightedLeastSquares, DerSimonianLaird,
                          VarianceBasedLikelihoodEstimator,
                          SampleSizeBasedLikelihoodEstimator,
-                         StanMetaRegression, Hedges)
+                         StanMetaRegression, Hedges, Stouffers)
 
 __all__ = [
     'WeightedLeastSquares',
@@ -9,5 +9,6 @@ __all__ = [
     'VarianceBasedLikelihoodEstimator',
     'SampleSizeBasedLikelihoodEstimator',
     'StanMetaRegression',
-    'Hedges'
+    'Hedges',
+    'Stouffers'
 ]
