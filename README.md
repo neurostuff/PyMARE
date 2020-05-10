@@ -5,10 +5,16 @@ A Python library for mixed-effects meta-regression (including meta-analysis).
 [![CircleCI](https://circleci.com/gh/neurostuff/PyMARE.svg?style=shield)](https://circleci.com/gh/neurostuff/PyMARE)
 [![Codecov](https://codecov.io/gh/neurostuff/PyMARE/branch/master/graph/badge.svg)](https://codecov.io/gh/neurostuff/pymare)
 
-**PyMARE should be considered pre-alpha software, and the API is under active development. Expect things to break.**
+**PyMARE is alpha software under heavy development; we reserve the right to make major changes to the API.**
 
 ## Quickstart
-Install PyMARE from GitHub:
+Install PyMARE from PyPI:
+```
+pip install pymare
+```
+
+
+Or for the bleeding-edge GitHub version:
 
 ```
 pip install git+https://github.com/neurostuff/pymare.git
@@ -38,7 +44,6 @@ This produces the following output:
          name   estimate        se   z-score     p-val  ci_0.025   ci_0.975
 0  intercept  -0.106579  2.993715 -0.035601  0.971600 -5.974153   5.760994
 1     my_cov   0.769961  1.113344  0.691575  0.489204 -1.412153   2.952075
-2      tau^2  10.949937       NaN       NaN       NaN  3.807599  59.616025
 ```
 
 Alternatively, we can achieve the same outcome using PyMARE's object-oriented API (which the `meta_regression` function wraps):
