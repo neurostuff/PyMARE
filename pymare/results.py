@@ -236,10 +236,75 @@ class CombinationTestResults:
     def p(self):
         if self._p is None:
             self._p = ss.norm.cdf(self.z)
-        return self._z
+        return self._p
 
     def to_df(self):
         pass
+
+    def permutation_test(self, n_perm=1000):
+        """Run permutation test.
+
+        Args:
+            n_perm (int):Number of permutations to generate. The actual number
+                used may be smaller in the event of an exact test (see below),
+                but will never be larger.
+
+        Returns:
+            An instance of class PermutationTestResults.
+
+        Notes:
+            If the number of possible permutations is smaller than n_perm, an
+            exact test will be conducted. Otherwise an approximate test will be
+            conducted by randomly shuffling the outcomes n_perm times (or, for
+            intercept-only models, by randomly flipping their signs). Permuted
+            datasets are processed in parallel. This means that one can often
+            set very high n_perm values (e.g., 100k) with little performance
+            degradation.
+        """
+        n_obs, n_datasets = self.dataset.y.shape
+
+        # create results arrays
+        z_p = np.zeros_like(self.z)
+
+        # Calculate # of permutations and determine whether to use exact test
+        n_exact = 2**n_obs
+        if n_exact < n_perm:
+            perms = np.array(list(itertools.product([-1, 1], repeat=n_obs))).T
+            exact = True
+            n_perm = n_exact
+        else:
+            exact = False
+
+        # Initialize a new version of the estimator so we can guarantee z input
+        est = self.estimator.__class__(input='z')
+
+        # Loop over parallel datasets
+        for i in range(n_datasets):
+
+            y = self.dataset.y[:, i]
+            y_perm = np.repeat(y[:, None], n_perm, axis=1)
+
+            if exact:
+                y_perm *= perms
+            else:
+                signs = np.random.choice(np.array([-1, 1]), (n_obs, n_perm))
+                y_perm *= signs
+
+            # Pass parameters, remembering that v may actually be n
+            kwargs = {'y': y_perm}
+            if 'v' in getfullargspec(est._fit).args:
+                kwargs['v'] = self.dataset.v
+            params = est._fit(**kwargs)
+
+            z_obs = self.z[i]
+            if z_obs.ndim == 1:
+                z_obs = z_obs[:, None]
+            z_p[i] = (z_obs < np.abs(params['z'])).mean()
+
+        # p-values can't be smaller than 1/n_perm
+        z_p = np.maximum(1/n_perm, z_p)
+
+        return PermutationTestResults(self, n_perm, z_p, None, exact)
 
 
 class PermutationTestResults:
