@@ -191,7 +191,7 @@ class MetaRegressionResults:
             params = self.estimator._fit(**kwargs)
 
             fe_obs = fe_stats['est'][:, i]
-            if fe_obs.ndim == 1:
+            if fe_obs.ndim == 1:``
                 fe_obs = fe_obs[:, None]
             fe_p[:, i] = (np.abs(fe_obs) < np.abs(params['fe_params'])).mean(1)
             if rfx:
@@ -238,9 +238,6 @@ class CombinationTestResults:
         if self._p is None:
             self._p = ss.norm.cdf(self.z)
         return self._p
-
-    def to_df(self):
-        pass
 
     def permutation_test(self, n_perm=1000):
         """Run permutation test.
