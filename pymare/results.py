@@ -193,16 +193,17 @@ class MetaRegressionResults:
             fe_obs = fe_stats['est'][:, i]
             if fe_obs.ndim == 1:
                 fe_obs = fe_obs[:, None]
-            fe_p[:, i] = (fe_obs < np.abs(params['fe_params'])).mean(1)
+            fe_p[:, i] = (np.abs(fe_obs) < np.abs(params['fe_params'])).mean(1)
             if rfx:
-                tau_p[i] = (re_stats['tau^2'][i] < np.abs(params['tau2'])).mean()
+                abs_obs = np.abs(re_stats['tau^2'][i])
+                tau_p[i] = (abs_obs < np.abs(params['tau2'])).mean()
 
         # p-values can't be smaller than 1/n_perm
-        fe_p = np.maximum(1/n_perm, fe_p)
+        params = {'fe_p': np.maximum(1 / n_perm, fe_p)}
         if rfx:
-            tau_p = np.maximum(1/n_perm, tau_p)
+            params['tau2_p'] = np.maximum(1 / n_perm, tau_p)
 
-        return PermutationTestResults(self, n_perm, fe_p, tau_p, exact)
+        return PermutationTestResults(self, params, n_perm, exact)
 
 
 class CombinationTestResults:
@@ -299,37 +300,39 @@ class CombinationTestResults:
             z_obs = self.z[i]
             if z_obs.ndim == 1:
                 z_obs = z_obs[:, None]
-            z_p[i] = (z_obs < np.abs(params['z'])).mean()
+            z_p[i] = (z_obs > params['z']).mean()
 
         # p-values can't be smaller than 1/n_perm
-        z_p = np.maximum(1/n_perm, z_p)
+        z_p = np.maximum(1 / n_perm, z_p)
 
-        return PermutationTestResults(self, n_perm, z_p, None, exact)
+        return PermutationTestResults(self, {'fe_p': z_p}, n_perm, exact)
 
 
 class PermutationTestResults:
     """Lightweight container to hold and display permutation test results."""
-    def __init__(self, results, n_perm, fe_p, tau2_p=None, exact=False):
+    def __init__(self, results, perm_p, n_perm, exact=False):
         self.results = results
-        self.fe_p = fe_p
-        self.tau2_p = tau2_p
+        self.perm_p = perm_p
         self.n_perm = n_perm
         self.exact = exact
 
-    def to_df(self, alpha=0.05):
+    def to_df(self, **kwargs):
         """Export permutation test results as a pandas DF.
 
         Args:
-            alpha (float): The alpha value to use for confidence intervals.
+            kwargs: Keyword arguments to pass onto to_df() calls of parent
+                results class (e.g., in case of MetaRegressionResults class,
+                `alpha` is available).
 
         Returns:
-            A pandas DataFrame that adds a 'p-value (perm.)' column to the
-            standard fixed effect result table obtained when calling to_df()
-            on a MetaRegressionResults instance.
+            A pandas DataFrame that adds columns to the standard fixed effect
+            result table based on permutation test results. A column is added
+            for every name found in both the parent DF and the params
+            dictionary passed at initialization.
         """
-        df = self.results.to_df(alpha)
-        p_ind = list(df.columns).index('p-value')
-        df.insert(p_ind + 1, 'p-value (perm.)', self.fe_p)
+        df = self.results.to_df(**kwargs)
+        c_ind = list(df.columns).index('p-value')
+        df.insert(c_ind + 1, 'p-value (perm.)', self.perm_p['fe_p'])
         return df
 
 

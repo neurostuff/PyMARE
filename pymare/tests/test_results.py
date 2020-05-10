@@ -97,8 +97,8 @@ def test_exact_perm_test_2d_no_mods(small_dataset_2d):
     assert pmr.n_perm == 8
     assert pmr.exact
     assert isinstance(pmr.results, MetaRegressionResults)
-    assert pmr.fe_p.shape == (1, 2)
-    assert pmr.tau2_p.shape == (2,)
+    assert pmr.perm_p['fe_p'].shape == (1, 2)
+    assert pmr.perm_p['tau2_p'].shape == (2,)
 
 
 def test_approx_perm_test_1d_with_mods(results):
@@ -106,8 +106,8 @@ def test_approx_perm_test_1d_with_mods(results):
     assert pmr.n_perm == 1000
     assert not pmr.exact
     assert isinstance(pmr.results, MetaRegressionResults)
-    assert pmr.fe_p.shape == (2, 1)
-    assert pmr.tau2_p.shape == (1,)
+    assert pmr.perm_p['fe_p'].shape == (2, 1)
+    assert pmr.perm_p['tau2_p'].shape == (1,)
 
 
 def test_exact_perm_test_1d_no_mods():
@@ -117,8 +117,8 @@ def test_exact_perm_test_1d_no_mods():
     assert pmr.n_perm == 16
     assert pmr.exact
     assert isinstance(pmr.results, MetaRegressionResults)
-    assert pmr.fe_p.shape == (1, 1)
-    assert pmr.tau2_p.shape == (1,)
+    assert pmr.perm_p['fe_p'].shape == (1, 1)
+    assert pmr.perm_p['tau2_p'].shape == (1,)
 
 
 def test_approx_perm_test_with_n_based_estimator(dataset_n):
@@ -127,8 +127,8 @@ def test_approx_perm_test_with_n_based_estimator(dataset_n):
     assert pmr.n_perm == 100
     assert not pmr.exact
     assert isinstance(pmr.results, MetaRegressionResults)
-    assert pmr.fe_p.shape == (1, 1)
-    assert pmr.tau2_p.shape == (1,)
+    assert pmr.perm_p['fe_p'].shape == (1, 1)
+    assert pmr.perm_p['tau2_p'].shape == (1,)
 
 
 def test_stouffers_perm_test_exact():
@@ -138,8 +138,8 @@ def test_stouffers_perm_test_exact():
     assert pmr.n_perm == 16
     assert pmr.exact
     assert isinstance(pmr.results, CombinationTestResults)
-    assert pmr.fe_p.shape == (1,)
-    assert pmr.tau2_p is None
+    assert pmr.perm_p['fe_p'].shape == (1,)
+    assert 'tau2_p' not in pmr.perm_p
 
 
 def test_stouffers_perm_test_approx():
@@ -150,5 +150,6 @@ def test_stouffers_perm_test_approx():
     assert not pmr.exact
     assert pmr.n_perm == 2000
     assert isinstance(pmr.results, CombinationTestResults)
-    assert pmr.fe_p.shape == (1,)
-    assert pmr.tau2_p is None
+    assert pmr.perm_p['fe_p'].shape == (1,)
+    assert 'tau2_p' not in pmr.perm_p
+
