@@ -6,10 +6,12 @@ from warnings import warn
 
 import numpy as np
 from scipy.optimize import minimize, Bounds
+from scipy import stats
 import wrapt
 
 from ..stats import weighted_least_squares
-from ..results import MetaRegressionResults, BayesianMetaRegressionResults
+from ..results import (MetaRegressionResults, BayesianMetaRegressionResults,
+                       CombinationTestResults)
 
 
 @wrapt.decorator
@@ -105,7 +107,7 @@ class BaseEstimator(metaclass=ABCMeta):
             raise ValueError("This {} instance hasn't been fitted yet. Please "
                              "call fit() before summary().".format(name))
         p = self.params_
-        return MetaRegressionResults(self, self.dataset_, p['beta'],
+        return MetaRegressionResults(self, self.dataset_, p['fe_params'],
                                      p['inv_cov'], p['tau2'])
 
 
@@ -129,16 +131,20 @@ class WeightedLeastSquares(BaseEstimator):
         This estimator accepts 2-D inputs for y and v--i.e., it can produce
         estimates simultaneously for multiple independent sets of y/v values
         (use the 2nd dimension for the parallel iterates). The X matrix must be
-        identical for all iterates.
+        identical for all iterates. If no v argument is passed to fit(), unit
+        weights will be used, resulting in the ordinary least-squares (OLS)
+        solution.
     """
 
     def __init__(self, tau2=0.):
         self.tau2 = tau2
 
-    def _fit(self, y, v, X):
+    def _fit(self, y, X, v=None):
+        if v is None:
+            v = np.ones_like(y)
         beta, inv_cov = weighted_least_squares(y, v, X, self.tau2,
                                                return_cov=True)
-        return {'beta': beta, 'tau2': self.tau2, 'inv_cov': inv_cov}
+        return {'fe_params': beta, 'tau2': self.tau2, 'inv_cov': inv_cov}
 
 
 class DerSimonianLaird(BaseEstimator):
@@ -164,17 +170,16 @@ class DerSimonianLaird(BaseEstimator):
     def _fit(self, y, v, X):
         k, p = X.shape
 
-        # Estimate initial betas with WLS
-        w = 1. / v
-
+        # Estimate initial betas with WLS, assuming tau^2=0
         beta_wls, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
 
         # Cochrane's Q
+        w = 1. / v
         w_sum = w.sum(0)
         Q = (w * (y - X.dot(beta_wls)) ** 2).sum(0)
 
         # Einsum indices: k = studies, p = predictors, i = parallel iterates.
-        # q is a dummy for 2nd p when p x p ovariance matrix inputs are passed.
+        # q is a dummy for 2nd p when p x p covariance matrix is passed.
         Xw2 = np.einsum('kp,ki->ipk', X, w**2)
         pXw2 = np.einsum('ipk,qpi->iqk', Xw2, inv_cov)
         A = w_sum - np.trace(pXw2.dot(X), axis1=1, axis2=2)
@@ -184,7 +189,7 @@ class DerSimonianLaird(BaseEstimator):
         # Re-estimate beta with tau^2 estimate
         beta_dl, inv_cov = weighted_least_squares(y, v, X, tau2=tau_dl,
                                                   return_cov=True)
-        return {'beta': beta_dl, 'tau2': tau_dl, 'inv_cov': inv_cov}
+        return {'fe_params': beta_dl, 'tau2': tau_dl, 'inv_cov': inv_cov}
 
 
 class Hedges(BaseEstimator):
@@ -212,14 +217,125 @@ class Hedges(BaseEstimator):
         tau_ho = np.maximum(0, tau_ho)
         # Estimate beta with tau^2 estimate
         beta_ho = weighted_least_squares(y, v, X, tau2=tau_ho)
-        return {'beta': beta_ho, 'tau2': tau_ho, 'inv_cov': inv_cov}
+        return {'fe_params': beta_ho, 'tau2': tau_ho, 'inv_cov': inv_cov}
+
+
+class CombinationTest(BaseEstimator):
+    """Base class for methods based on combining p/z values."""
+    def __init__(self, input='z', p_type='right'):
+        self.input = input
+        self.p_type = p_type
+
+    def _get_z(self, y):
+        # Return the p-value/z-score input as z
+        if self.input == 'p':
+            if self.p_type == 'left':
+                y = 1 - y
+            elif self.p_type.startswith('two'):
+                y = y / 2
+            if np.any(y < 0.) or np.any(y > 1.):
+                raise ValueError(
+                    "Invalid p-values (< 0 or > 1) passed as inputs.")
+            y = stats.norm.ppf(y)
+        return y
+
+    def _get_p(self, y):
+        # Return the p-value/z-score input as p
+        if self.input == 'z':
+           return stats.norm.cdf(y)
+        return y
+
+    def summary(self):
+        if not hasattr(self, 'params_'):
+            name = self.__class__.__name__
+            raise ValueError("This {} instance hasn't been fitted yet. Please "
+                             "call fit() before summary().".format(name))
+        return CombinationTestResults(self, self.dataset_, self.params_['z'])
+
+
+class Stouffers(CombinationTest):
+    """Stouffer's Z-score meta-analysis method.
+
+    Takes study-level z-scores or p-values and combines them via Stouffer's
+    method to produce a fixed-effect estimate of the combined effect.
+
+    Args:
+        input (str): The type of measure passed as the `y` input to fit().
+            Must be one of 'p' (p-values) or 'z' (z-scores).
+        p_type (str) If input == 'p', p_type indicates the type of passed
+            p-values. Valid values:
+                * 'right' (default): one-sided, right-tailed p-values
+                * 'left': one-sided, left-tailed p-values
+                * 'two': two-sided p-values
+
+    Notes:
+        * When passing in two-sided p-values as input, note that sign
+        information is unavailable, and the null being tested is that at least
+        one study deviates from 0 in *either* direction. If one-sided p-value
+        can be computed, users are strongly recommended to pass those instead.
+        (The same caveat applies to 'z' inputs if originally computed from
+        two-sided p-values.)
+        * This estimator does not support meta-regression; any moderators
+        passed in as the X array will be ignored.
+        * The fit() method takes z-scores of p-values as the 'y' input, and
+        (optionally) weights as the 'v' input. If no weights are passed, unit
+        weights are used.
+    """
+    def _fit(self, y, v=None):
+
+        y = self._get_z(y)
+
+        if v is None:
+            v = np.ones_like(y)
+
+        z = (y * v).sum(0) / np.sqrt((v**2).sum(0))
+
+        return {'z': z }
+
+
+class Fishers(CombinationTest):
+    """Fisher's method for combining p-values.
+
+    Takes study-level p-values or z-scores and combines them via Fisher's
+    method to produce a fixed-effect estimate of the combined effect.
+
+    Args:
+        input (str): The type of measure passed as the `y` input to fit().
+            Must be one of 'p' (p-values) or 'z' (z-scores).
+        p_type (str) If input == 'p', p_type indicates the type of passed
+            p-values. Valid values:
+                * 'right' (default): one-sided, right-tailed p-values
+                * 'left': one-sided, left-tailed p-values
+                * 'two': two-sided p-values
+
+    Notes:
+        * When passing in two-sided p-values as input, note that sign
+        information is unavailable, and the null being tested is that at least
+        one study deviates from 0 in *either* direction. If one-sided p-value
+        can be computed, users are strongly recommended to pass those instead.
+        (The same caveat applies to 'z' inputs if originally computed from
+        two-sided p-values.)
+        * This estimator does not support meta-regression; any moderators
+        passed in as the X array will be ignored.
+        * The fit() method takes z-scores or p-values as the `y` input. Studies
+        are weighted equally; the `v` argument will be ignored if passed.
+    """
+    def _fit(self, y):
+
+        y = self._get_p(y)
+
+        chi2 = -2 * np.log(y).sum(0)
+        p = 1 - stats.chi2.cdf(chi2, 2 * y.shape[0])
+        z = stats.norm.ppf(p)
+
+        return {'z': z}
 
 
 class VarianceBasedLikelihoodEstimator(BaseEstimator):
     """ Likelihood-based estimator for estimates with known variances.
 
     Iteratively estimates the between-subject variance tau^2 and fixed effect
-    betas using the specified likelihood-based estimator (ML or REML).
+    coefficients using the specified likelihood-based estimator (ML or REML).
 
     Args:
         method (str, optional): The estimation method to use. Either 'ML' (for
@@ -253,7 +369,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
     def _fit(self, y, v, X):
         # use D-L estimate for initial values
         est_DL = DerSimonianLaird()._fit(y, v, X)
-        beta = est_DL['beta']
+        beta = est_DL['fe_params']
         tau2 = est_DL['tau2']
 
         theta_init = np.r_[beta.ravel(), tau2]
@@ -268,7 +384,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         beta, tau = res.x[:-1], float(res.x[-1])
         tau = np.max([tau, 0])
         _, inv_cov = weighted_least_squares(y, v, X, tau, True)
-        return {'beta': beta[:, None], 'tau2': tau, 'inv_cov': inv_cov}
+        return {'fe_params': beta[:, None], 'tau2': tau, 'inv_cov': inv_cov}
 
     def _ml_nll(self, theta, y, v, X):
         """ ML negative log-likelihood for meta-regression model. """
@@ -299,10 +415,6 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         method (str, optional): The estimation method to use. Either 'ML' (for
             maximum-likelihood) or 'REML' (restricted maximum-likelihood).
             Defaults to 'ML'.
-        beta (array, optional): Initial beta values to use in optimization. If
-            None (default), uses the weighted least squares estimate.
-        tau2 (float, optional): Initial tau^2 value to use in optimization.
-            Defaults to 0.
         kwargs (dict, optional): Keyword arguments to pass to the SciPy
             minimizer.
 
@@ -352,7 +464,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         beta, sigma, tau = res.x[:-2], float(res.x[-2]), float(res.x[-1])
         tau = np.max([tau, 0])
         _, inv_cov = weighted_least_squares(y, sigma / n, X, tau, True)
-        return {'beta': beta[:, None], 'sigma2': np.array(sigma), 'tau2': tau,
+        return {'fe_params': beta[:, None], 'sigma2': np.array(sigma), 'tau2': tau,
                 'inv_cov': inv_cov}
 
     def _ml_nll(self, theta, y, n, X):

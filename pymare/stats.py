@@ -20,7 +20,6 @@ def weighted_least_squares(y, v, X, tau2=0., return_cov=False):
         inverse covariance matrix; if False, only the parameter estimates.
     """
 
-    # Estimate initial betas with WLS
     w = 1. / (v + tau2)
 
     # Einsum indices: k = studies, p = predictors, i = parallel iterates

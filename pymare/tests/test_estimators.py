@@ -3,7 +3,7 @@ import pytest
 from pymare.estimators import (WeightedLeastSquares, DerSimonianLaird,
                                VarianceBasedLikelihoodEstimator,
                                SampleSizeBasedLikelihoodEstimator,
-                               StanMetaRegression, Hedges)
+                               StanMetaRegression, Hedges, Stouffers, Fishers)
 from pymare import Dataset
 
 
@@ -115,6 +115,31 @@ def test_sample_size_based_restricted_maximum_likelihood_estimator(dataset_n):
     assert np.allclose(beta, [-2.1071], atol=1e-4)
     assert np.allclose(sigma2, 13.048, atol=1e-3)
     assert np.allclose(tau2, 3.2177, atol=1e-4)
+
+
+def test_stouffers():
+    # 1-d
+    z = np.array([2.1, 0.7, -0.2, 4.1, 3.8])[:, None]
+    results = Stouffers()._fit(z)
+    assert np.allclose(results['z'], [4.69574], atol=1e-5)
+
+    # 2-d with weights
+    z = np.c_[z, np.array([-0.6, -1.61, -2.3, -0.8, -4.01])[:, None]]
+    w = np.array([2, 1, 1, 2, 2])[:, None]
+    results = Stouffers()._fit(z, w)['z'].ravel()
+    assert np.allclose(results, [5.47885, -3.93675], atol=1e-5)
+
+
+def test_fishers():
+    # 1-d
+    z = np.array([2.1, 0.7, -0.2, 4.1, 3.8])[:, None]
+    results = Fishers()._fit(z)
+    assert np.allclose(results['z'], [2.469052], atol=1e-5)
+
+    # 2-d
+    z = np.c_[z, np.array([-0.6, -1.61, -2.3, -0.8, -4.01])[:, None]]
+    results = Fishers()._fit(z)['z'].ravel()
+    assert np.allclose(results, [2.469052, -4.27573], atol=1e-5)
 
 
 def test_2d_looping(dataset_2d):
