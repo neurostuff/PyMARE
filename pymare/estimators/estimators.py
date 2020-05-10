@@ -6,10 +6,12 @@ from warnings import warn
 
 import numpy as np
 from scipy.optimize import minimize, Bounds
+from scipy import stats
 import wrapt
 
 from ..stats import weighted_least_squares
-from ..results import MetaRegressionResults, BayesianMetaRegressionResults
+from ..results import (MetaRegressionResults, BayesianMetaRegressionResults,
+                       CombinationTestResults)
 
 
 @wrapt.decorator
@@ -139,7 +141,7 @@ class WeightedLeastSquares(BaseEstimator):
 
     def _fit(self, y, X, v=None):
         if v is None:
-            v = np.ones.like(y)
+            v = np.ones_like(y)
         beta, inv_cov = weighted_least_squares(y, v, X, self.tau2,
                                                return_cov=True)
         return {'fe_params': beta, 'tau2': self.tau2, 'inv_cov': inv_cov}
@@ -218,25 +220,71 @@ class Hedges(BaseEstimator):
         return {'fe_params': beta_ho, 'tau2': tau_ho, 'inv_cov': inv_cov}
 
 
-class Stouffers(BaseEstimator):
+class CombinationTest(BaseEstimator):
+    """Base class for methods based on combining p/z values."""
+    def __init__(self, input='z', p_type='right'):
+        self.input = input
+        self.p_type = p_type
+
+    def _get_z(self, y):
+        # Return the p-value/z-score input as z
+        if self.input == 'p':
+            if self.p_type == 'left':
+                y = 1 - y
+            elif self.p_type.startswith('two'):
+                y = y / 2
+            if np.any(y < 0.) or np.any(y > 1.):
+                raise ValueError(
+                    "Invalid p-values (< 0 or > 1) passed as inputs.")
+            y = stats.norm.ppf(y)
+        return y
+
+    def summary(self):
+        if not hasattr(self, 'params_'):
+            name = self.__class__.__name__
+            raise ValueError("This {} instance hasn't been fitted yet. Please "
+                             "call fit() before summary().".format(name))
+        return CombinationTestResults(self, self.dataset_, self.params_['z'])
+
+
+class Stouffers(CombinationTest):
     """Stouffer's Z-score meta-analysis method.
 
     Takes study-level z-scores and combines them via Stouffer's method to
     produce a fixed-effect estimate of the combined effect.
 
+    Args:
+        input (str): The type of measure passed as the `y` input to fit().
+            Must be one of 'p' (p-values) or 'z' (z-scores).
+        p_type (str) If input == 'p', p_type indicates the type of passed
+            p-values. Valid values:
+                * 'right' (default): one-sided, right-tailed p-values
+                * 'left': one-sided, left-tailed p-values
+                * 'two': two-sided p-values
+
     Notes:
-        The fit() method takes z-scores and (optionally) weights as inputs.
+        * When passing in two-sided p-values as input, note that sign
+        information is unavailable, and the null being tested is that at least
+        one study deviates from 0 in *either* direction. If one-sided p-value
+        can be computed, users are strongly recommended to pass those instead.
+        (The same caveat applies to 'z' inputs if originally computed from
+        two-sided p-values.)
+        * This estimator does not support meta-regression; any moderators
+        passed in as the X array will be ignored.
+        * The fit() method takes z-scores and (optionally) weights as inputs.
         These should be passed to the y and v arguments, respectively. If no
         weights are passed, unit weights are used.
     """
     def _fit(self, y, v=None):
+
+        y = self._get_z(y)
 
         if v is None:
             v = np.ones_like(y)
 
         z = (y * v).sum(0) / np.sqrt((v**2).sum(0))
 
-        return {'fe_params': z }
+        return {'z': z }
 
 
 class VarianceBasedLikelihoodEstimator(BaseEstimator):

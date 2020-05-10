@@ -132,15 +132,15 @@ class CombinationTestResults:
         self._z = z
         self._p = p
 
-    @lru_cache(maxsize=1)
     @property
+    @lru_cache(maxsize=1)
     def z(self):
         if self._z is None:
             self._z = ss.norm.ppf(self.p)
         return self._z
 
-    @lru_cache(maxsize=1)
     @property
+    @lru_cache(maxsize=1)
     def p(self):
         if self._p is None:
             self._p = ss.norm.cdf(self.z)

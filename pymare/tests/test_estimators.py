@@ -121,13 +121,12 @@ def test_stouffers():
     # 1-d
     z = np.array([2.1, 0.7, -0.2, 4.1, 3.8])[:, None]
     results = Stouffers()._fit(z)
-    assert np.allclose(results['fe_params'], [4.69574], atol=1e-5)
+    assert np.allclose(results['z'], [4.69574], atol=1e-5)
 
     # 2-d
     z = np.c_[z, np.array([-0.6, -1.61, -2.3, -0.8, -4.01])[:, None]]
-    print(z)
     w = np.array([2, 1, 1, 2, 2])[:, None]
-    results = Stouffers()._fit(z, w)['fe_params'].ravel()
+    results = Stouffers()._fit(z, w)['z'].ravel()
     assert np.allclose(results, [5.47885, -3.93675], atol=1e-5)
 
 
