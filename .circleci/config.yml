@@ -86,7 +86,7 @@ workflows:
       - coverage_and_tests:
           requires:
             - build
-      - deploy
+      - deploy:
           requires:
             - coverage_and_tests
           filters:
