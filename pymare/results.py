@@ -191,7 +191,7 @@ class MetaRegressionResults:
             params = self.estimator._fit(**kwargs)
 
             fe_obs = fe_stats['est'][:, i]
-            if fe_obs.ndim == 1:``
+            if fe_obs.ndim == 1:
                 fe_obs = fe_obs[:, None]
             fe_p[:, i] = (np.abs(fe_obs) < np.abs(params['fe_params'])).mean(1)
             if rfx:

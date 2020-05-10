@@ -29,7 +29,7 @@ def results_2d(fitted_estimator, dataset_2d):
 
 def test_meta_regression_results_init_1d(fitted_estimator):
     est = fitted_estimator
-    results = MetaRegressionResults(est, est.dataset_, est.params_['beta'],
+    results = MetaRegressionResults(est, est.dataset_, est.params_['fe_params'],
                                     est.params_['inv_cov'], est.params_['tau2'])
     assert isinstance(est.summary(), MetaRegressionResults)
     assert results.fe_params.shape == (2, 1)
