@@ -16,6 +16,10 @@ with open(op.join(op.dirname(__file__), '.zenodo.json'), 'r') as fo:
 authors = [author['name'] for author in zenodo_info['creators']]
 authors = [author.split(', ')[1] + ' ' + author.split(', ')[0] for author in authors]
 
+readme_file = op.join(op.dirname(__file__), 'README.md')
+with open(readme_file, encoding='utf-8') as f:
+    longdesc = f.read()
+
 AUTHOR = 'PyMARE developers'
 COPYRIGHT = 'Copyright 2019--now, PyMARE developers'
 CREDITS = authors
@@ -26,8 +30,8 @@ STATUS = 'Prototype'
 URL = 'https://github.com/neurostuff/PyMARE'
 PACKAGENAME = 'PyMARE'
 DESCRIPTION = 'PyMARE: Python Meta-Analysis & Regression Engine'
-LONGDESC = """
-"""
+LONGDESC = longdesc
+LONGDESCCONTTYPE = "text/markdown"
 
 DOWNLOAD_URL = (
     'https://github.com/neurostuff/{name}/archive/{ver}.tar.gz'.format(
