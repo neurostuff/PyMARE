@@ -80,7 +80,10 @@ workflows:
   version: 2.1
   build_test_deploy:
     jobs:
-      - build
+      - build:
+          filters:
+            tags:
+              only: /.*/
       - coverage_and_tests:
           requires:
             - build
