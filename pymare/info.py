@@ -19,6 +19,7 @@ authors = [author.split(', ')[1] + ' ' + author.split(', ')[0] for author in aut
 readme_file = op.join(op.dirname(__file__), 'README.md')
 with open(readme_file, encoding='utf-8') as f:
     longdesc = f.read()
+print(longdesc)
 
 AUTHOR = 'PyMARE developers'
 COPYRIGHT = 'Copyright 2019--now, PyMARE developers'

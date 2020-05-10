@@ -42,6 +42,7 @@ def main():
         version=vars['VERSION'],
         description=vars['DESCRIPTION'],
         long_description=vars['LONGDESC'],
+        long_description_content_type=vars['LONGDESCCONTTYPE'],
         author=vars['AUTHOR'],
         author_email=vars['EMAIL'],
         maintainer=vars['MAINTAINER'],
