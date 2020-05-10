@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-""" NiMARE setup script """
+""" PyMARE setup script """
 
 
 def main():
