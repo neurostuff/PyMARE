@@ -55,12 +55,10 @@ jobs:
           file: /tmp/src/PyMARE/coverage.xml
 
   deploy:
-    working_directory: /tmp/src/PyMARE
     docker:
       - image: continuumio/miniconda3
-      - attach_workspace:
-          at: /tmp
     steps:
+      - checkout
       - run:
           name: init .pypirc
           command: |
