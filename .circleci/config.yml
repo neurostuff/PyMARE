@@ -87,6 +87,9 @@ workflows:
       - coverage_and_tests:
           requires:
             - build
+          filters:
+            tags:
+              only: /.*/
       - deploy:
           requires:
             - coverage_and_tests
