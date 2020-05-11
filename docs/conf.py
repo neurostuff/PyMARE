@@ -137,7 +137,7 @@ html_logo = '_static/nimare_banner.png'
 # -- Options for HTMLHelp output ------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'nimaredoc'
+htmlhelp_basename = 'pymaredoc'
 
 # The following is used by sphinx.ext.linkcode to provide links to github
 linkcode_resolve = make_linkcode_resolve('pymare',
