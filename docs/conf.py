@@ -25,6 +25,8 @@ sys.path.insert(0, os.path.abspath(os.path.pardir))
 
 from github_link import make_linkcode_resolve
 
+import pymare
+
 
 # -- General configuration ------------------------------------------------
 
@@ -41,17 +43,19 @@ add_module_names = False
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = ['sphinx.ext.autodoc',
-              'sphinx.ext.napoleon',
-              'sphinxarg.ext',
-              'sphinx.ext.intersphinx',
               'sphinx.ext.autosummary',
               'sphinx.ext.doctest',
-              'sphinx.ext.todo',
-              'numpydoc',
               'sphinx.ext.ifconfig',
+              'sphinx.ext.intersphinx',
               'sphinx.ext.linkcode',
+              'sphinx.ext.mathjax',
+              'sphinx.ext.napoleon',
+              'sphinx.ext.todo',
+              'sphinx_copybutton',
               'sphinx_gallery.gen_gallery',
-              'm2r']
+              'sphinxarg.ext',
+              'm2r',
+              'numpydoc']
 
 import sphinx
 from distutils.version import LooseVersion
@@ -79,7 +83,6 @@ author = 'PyMARE developers'
 # built documents.
 #
 # The short X.Y version.
-import pymare
 version = pymare.__version__
 # The full version, including alpha/beta/rc tags.
 release = pymare.__version__
@@ -95,6 +98,9 @@ language = None
 # directories to ignore when looking for source files.
 # This patterns also effect to html_static_path and html_extra_path
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store', 'utils/*']
+
+# The reST default role (used for this markup: `text`) to use for all documents.
+default_role = "autolink"
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
@@ -138,7 +144,7 @@ html_logo = '_static/nimare_banner.png'
 # -- Options for HTMLHelp output ------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'nimaredoc'
+htmlhelp_basename = 'pymaredoc'
 
 # The following is used by sphinx.ext.linkcode to provide links to github
 linkcode_resolve = make_linkcode_resolve('pymare',
@@ -146,15 +152,22 @@ linkcode_resolve = make_linkcode_resolve('pymare',
                                          'pymare/blob/{revision}/'
                                          '{package}/{path}#L{lineno}')
 
-# Example configuration for intersphinx: refer to the Python standard library.
+# -----------------------------------------------------------------------------
+# intersphinx
+# -----------------------------------------------------------------------------
+_python_version_str = '{0.major}.{0.minor}'.format(sys.version_info)
+_python_doc_base = 'https://docs.python.org/' + _python_version_str
 intersphinx_mapping = {
-    'http://docs.python.org/3.5': None,
-    'http://docs.scipy.org/doc/numpy': None,
-    'http://docs.scipy.org/doc/scipy/reference': None,
-    'http://matplotlib.org/': None,
-    'http://scikit-learn.org/0.17': None,
-    'http://nipy.org/nibabel/': None,
-    'http://pandas.pydata.org/pandas-docs/stable/': None,
+    'python': (_python_doc_base, None),
+    'numpy': ('https://docs.scipy.org/doc/numpy',
+              (None, './_intersphinx/numpy-objects.inv')),
+    'scipy': ('https://docs.scipy.org/doc/scipy/reference',
+              (None, './_intersphinx/scipy-objects.inv')),
+    'sklearn': ('https://scikit-learn.org/stable',
+                (None, './_intersphinx/sklearn-objects.inv')),
+    'matplotlib': ('https://matplotlib.org/',
+                   (None, 'https://matplotlib.org/objects.inv')),
+    'pandas': ('https://pandas.pydata.org/pandas-docs/stable/', None),
 }
 
 sphinx_gallery_conf = {
@@ -162,12 +175,18 @@ sphinx_gallery_conf = {
     'examples_dirs'     : '../examples',
     # path where to save gallery generated examples
     'gallery_dirs'      : 'auto_examples',
-    'backreferences_dir': '_build/backreferences',
+    'backreferences_dir': 'generated',
     # Modules for which function level galleries are created.  In
     # this case sphinx_gallery and numpy in a tuple of strings.
-    'doc_module'        : ('pymare'),
+    'doc_module'        : ('pymare',),
     'ignore_patterns'   : ['utils/'],
-    }
+    'reference_url': {
+         # The module you locally document uses None
+        'pymare': None,
+        'matplotlib': 'https://matplotlib.org/',
+        'numpy': 'http://docs.scipy.org/doc/numpy/',
+    },
+}
 
 # Generate the plots for the gallery
 plot_gallery = 'True'
