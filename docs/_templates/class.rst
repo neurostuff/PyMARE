@@ -4,10 +4,12 @@
 .. currentmodule:: {{ module }}
 
 .. autoclass:: {{ objname }}
+
    {% block methods %}
+   .. automethod:: __init__
    {% endblock %}
 
-.. include:: {{fullname}}.{{objname}}.examples
+.. include:: {{module}}.{{objname}}.examples
 
 .. raw:: html
 

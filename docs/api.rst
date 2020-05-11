@@ -10,17 +10,17 @@ API
    :no-members:
    :no-inherited-members:
 
-.. currentmodule:: pymare.core
+.. currentmodule:: pymare
 
-.. autosummary:: pymare.core
+.. autosummary::
    :toctree: generated/
    :template: class.rst
 
-   pymare.core.Dataset
+   core.Dataset
 
    :template: function.rst
 
-   pymare.core.meta_regression
+   core.meta_regression
 
 
 .. _api_estimators_ref:
@@ -32,20 +32,20 @@ API
    :no-members:
    :no-inherited-members:
 
-.. currentmodule:: pymare.estimators
+.. currentmodule:: pymare
 
-.. autosummary:: pymare.estimators
+.. autosummary::
    :toctree: generated/
    :template: class.rst
 
-   pymare.estimators.WeightedLeastSquares
-   pymare.estimators.DerSimonianLaird
-   pymare.estimators.VarianceBasedLikelihoodEstimator
-   pymare.estimators.SampleSizeBasedLikelihoodEstimator
-   pymare.estimators.StanMetaRegression
-   pymare.estimators.Hedges
-   pymare.estimators.Stouffers
-   pymare.estimators.Fishers
+   estimators.WeightedLeastSquares
+   estimators.DerSimonianLaird
+   estimators.VarianceBasedLikelihoodEstimator
+   estimators.SampleSizeBasedLikelihoodEstimator
+   estimators.StanMetaRegression
+   estimators.Hedges
+   estimators.Stouffers
+   estimators.Fishers
 
 
 .. _api_results_ref:
@@ -57,16 +57,16 @@ API
    :no-members:
    :no-inherited-members:
 
-.. currentmodule:: pymare.results
+.. currentmodule:: pymare
 
-.. autosummary:: pymare.results
+.. autosummary::
    :toctree: generated/
    :template: class.rst
 
-   pymare.results.MetaRegressionResults
-   pymare.results.CombinationTestResults
-   pymare.results.PermutationTestResults
-   pymare.results.BayesianMetaRegressionResults
+   results.MetaRegressionResults
+   results.CombinationTestResults
+   results.PermutationTestResults
+   results.BayesianMetaRegressionResults
 
 
 .. _api_effectsize_ref:
@@ -78,21 +78,21 @@ API
    :no-members:
    :no-inherited-members:
 
-.. currentmodule:: pymare.effectsize
+.. currentmodule:: pymare
 
-.. autosummary:: pymare.effectsize
+.. autosummary::
    :toctree: generated/
    :template: class.rst
 
-   pymare.effectsize.OneSampleEffectSizeConverter
-   pymare.effectsize.TwoSampleEffectSizeConverter
-   pymare.effectsize.Expression
+   effectsize.OneSampleEffectSizeConverter
+   effectsize.TwoSampleEffectSizeConverter
+   effectsize.Expression
 
    :template: function.rst
-   pymare.effectsize.solve_system
-   pymare.effectsize.Expression
-   pymare.effectsize.select_expressions
-   pymare.effectsize.compute_measure
+   effectsize.solve_system
+   effectsize.Expression
+   effectsize.select_expressions
+   effectsize.compute_measure
 
 .. _api_stats_ref:
 
@@ -103,13 +103,13 @@ API
    :no-members:
    :no-inherited-members:
 
-.. currentmodule:: pymare.stats
+.. currentmodule:: pymare
 
-.. autosummary:: pymare.stats
+.. autosummary::
    :toctree: generated/
    :template: function.rst
 
-   pymare.stats.weighted_least_squares
-   pymare.stats.ensure_2d
-   pymare.stats.q_profile
-   pymare.stats.q_gen
+   stats.weighted_least_squares
+   stats.ensure_2d
+   stats.q_profile
+   stats.q_gen

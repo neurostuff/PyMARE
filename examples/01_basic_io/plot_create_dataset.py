@@ -7,28 +7,26 @@
  Creating a dataset
 ===================
 
-In PyMARE, operations are performed on `Dataset` objects.
-Here we show how Datasets are loaded and what they can be used for.
-
-.. note::
-    This will likely change as we work to shift database querying to a remote
-    database, rather than handling it locally with NiMARE.
+In PyMARE, operations are performed on :class:`pymare.core.Dataset` objects.
+Datasets are very lightweight objects that store the data used for
+meta-analyses, including study-level estimates (y), variances (v),
+predictors (X), and sample sizes (n).
 """
 ###############################################################################
 # Start with the necessary imports
 # --------------------------------
-import numpy as np
 import pandas as pd
+from pprint import pprint
 
-from pymare.core import Dataset
+from pymare import core
 
 ###############################################################################
 # Datasets can be created from arrays
 # -----------------------------------
 v = [100, 100, 100]
-X = [[5, 2, 1], [9, 8, 7]]
+X = [[5, 9], [2, 8], [1, 7]]
 y = [2, 4, 6]
-dataset = Dataset(y=y, v=v, X=X)
+dataset = core.Dataset(y=y, v=v, X=X)
 
 ###############################################################################
 # Datasets can also be created from pandas DataFrames
@@ -39,4 +37,6 @@ df = pd.DataFrame({
     'X1': [5, 2, 1],
     'X7': [9, 8, 7]
 })
-dataset = Dataset(v='v_alt', X=['X1', 'X7'], data=df)
+dataset = core.Dataset(v='v_alt', X=['X1', 'X7'], data=df, add_intercept=False)
+
+pprint(vars(dataset))

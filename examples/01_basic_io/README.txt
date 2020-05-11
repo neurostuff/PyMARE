@@ -1,4 +1,4 @@
-.. _examples-index:
+.. _io-examples-index:
 
 Basic I/O
 ---------
