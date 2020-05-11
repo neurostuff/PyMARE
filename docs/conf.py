@@ -47,7 +47,6 @@ extensions = ['sphinx.ext.autodoc',
               'sphinx.ext.autosummary',
               'sphinx.ext.doctest',
               'sphinx.ext.todo',
-              'numpydoc',
               'sphinx.ext.ifconfig',
               'sphinx.ext.linkcode',
               'sphinx_gallery.gen_gallery',
@@ -148,13 +147,13 @@ linkcode_resolve = make_linkcode_resolve('pymare',
 
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {
-    'http://docs.python.org/3.5': None,
-    'http://docs.scipy.org/doc/numpy': None,
-    'http://docs.scipy.org/doc/scipy/reference': None,
-    'http://matplotlib.org/': None,
-    'http://scikit-learn.org/0.17': None,
-    'http://nipy.org/nibabel/': None,
-    'http://pandas.pydata.org/pandas-docs/stable/': None,
+    'https://docs.python.org/3.5': None,
+    'https://docs.scipy.org/doc/numpy': None,
+    'https://docs.scipy.org/doc/scipy/reference': None,
+    'https://matplotlib.org/': None,
+    'https://scikit-learn.org/0.17': None,
+    'https://nipy.org/nibabel/': None,
+    'https://pandas.pydata.org/pandas-docs/stable/': None,
 }
 
 sphinx_gallery_conf = {

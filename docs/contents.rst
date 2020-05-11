@@ -5,5 +5,6 @@ Site Map
 
    about
    installation
+   auto_examples/index
    contributing
    api
