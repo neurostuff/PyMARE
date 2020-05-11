@@ -60,11 +60,14 @@ TESTS_REQUIRES = [
 ]
 
 DOC_REQUIRES = [
-    'sphinx>=1.5.3',
+    'sphinx~=2.4.2',
     'sphinx_rtd_theme',
     'sphinx-argparse',
     'numpydoc',
-    'm2r'
+    'm2r',
+    'sphinx_copybutton',
+    'sphinx_gallery',
+    'pillow'
 ]
 
 EXTRA_REQUIRES = {

@@ -36,6 +36,24 @@ jobs:
           paths:
             - "/opt/conda/envs/testenv"
 
+  build_docs:
+    working_directory: /tmp/src/PyMARE
+    docker:
+      - image: continuumio/miniconda3
+    steps:
+      - attach_workspace:  # get PyMARE
+          at: /tmp
+      - restore_cache:  # load environment
+          key: deps9-{{ checksum "pymare/info.py" }}
+      - run:
+          name: Build documentation
+          command: |
+            apt-get install -yqq make
+            source activate testenv
+            make -C docs html
+      - store_artifacts:
+          path: /tmp/src/PyMARE/docs/_build/html
+
   coverage_and_tests:
     working_directory: /tmp/src/PyMARE
     docker:
@@ -81,6 +99,12 @@ workflows:
   build_test_deploy:
     jobs:
       - build:
+          filters:
+            tags:
+              only: /.*/
+      - build_docs:
+          requires:
+            - build
           filters:
             tags:
               only: /.*/
