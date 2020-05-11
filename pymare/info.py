@@ -67,7 +67,8 @@ DOC_REQUIRES = [
     'm2r',
     'sphinx_copybutton',
     'sphinx_gallery',
-    'pillow'
+    'pillow',
+    'matplotlib'
 ]
 
 EXTRA_REQUIRES = {
