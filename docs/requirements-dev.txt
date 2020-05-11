@@ -4,3 +4,4 @@ sphinx_gallery
 m2r
 sphinx_rtd_theme
 sphinx_copybutton
+matplotlib
