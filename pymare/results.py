@@ -106,7 +106,7 @@ class MetaRegressionResults:
         p = ss.chi2.sf(q_fe, df)
         return {
             'Q': q_fe,
-            'p': p,
+            'p(Q)': p,
             'I^2': i2,
             'H': h
         }
