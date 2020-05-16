@@ -90,7 +90,7 @@ def q_profile(y, v, X, alpha=0.05):
 
 
 def q_gen(y, v, X, tau2):
-    """Cochran's Q-statistic.
+    """Generalized form of Cochran's Q-statistic.
 
     Args:
         y (ndarray): 1d array of study-level estimates
@@ -102,9 +102,16 @@ def q_gen(y, v, X, tau2):
 
     Returns:
         A float giving the value of Cochran's Q-statistic.
+
+    References:
+    Veroniki, A. A., Jackson, D., Viechtbauer, W., Bender, R., Bowden, J.,
+    Knapp, G., Kuss, O., Higgins, J. P., Langan, D., & Salanti, G. (2016).
+    Methods to estimate the between-study variance and its uncertainty in
+    meta-analysis. Research synthesis methods, 7(1), 55–79.
+    https://doi.org/10.1002/jrsm.1164
     """
     if np.any(tau2 < 0):
         raise ValueError("Value of tau^2 must be >= 0.")
     beta = weighted_least_squares(y, v, X, tau2)
     w = 1. / (v + tau2)
-    return (w * (y - X.dot(beta)) ** 2).sum()
+    return (w * (y - X.dot(beta)) ** 2).sum(0)
