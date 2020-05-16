@@ -13,7 +13,7 @@ try:
 except:
     az = None
 
-from .stats import q_profile
+from .stats import q_profile, q_gen
 
 
 class MetaRegressionResults:
@@ -94,6 +94,21 @@ class MetaRegressionResults:
             'tau^2': self.tau2,
             'ci_l': np.array([ci['ci_l'] for ci in cis]),
             'ci_u': np.array([ci['ci_u'] for ci in cis])
+        }
+
+    @lru_cache(maxsize=16)
+    def get_heterogeneity_stats(self):
+        v = self.estimator.get_v(self.dataset)
+        q_fe = q_gen(self.dataset.y, v, self.dataset.X, 0)
+        df = self.dataset.y.shape[0] - self.dataset.X.shape[1]
+        i2 =np.maximum(100. * (q_fe - df) / q_fe, 0.)
+        h = np.maximum(np.sqrt(q_fe / df), 1.)
+        p = ss.chi2.cdf(q_fe, df)
+        return {
+            'Q': q_fe,
+            'p': p,
+            'I^2': i2,
+            'H': h
         }
 
     def to_df(self, alpha=0.05):
