@@ -103,7 +103,7 @@ class MetaRegressionResults:
         df = self.dataset.y.shape[0] - self.dataset.X.shape[1]
         i2 =np.maximum(100. * (q_fe - df) / q_fe, 0.)
         h = np.maximum(np.sqrt(q_fe / df), 1.)
-        p = ss.chi2.cdf(q_fe, df)
+        p = ss.chi2.sf(q_fe, df)
         return {
             'Q': q_fe,
             'p': p,
