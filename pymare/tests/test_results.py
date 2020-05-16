@@ -71,6 +71,15 @@ def test_mrr_get_re_stats(results_2d):
     assert round(stats['ci_u'][2], 2) == 59.61
 
 
+def test_mrr_get_heterogeneity_stats(results_2d):
+    stats = results_2d.get_heterogeneity_stats()
+    assert len(stats['Q'] == 3)
+    assert stats['Q'][2].round(4) == 53.8052
+    assert stats['I^2'][0].round(4) == 88.8487
+    assert stats['H'][0].round(4) == 2.9946
+    assert stats['p'][0] < 1e-5
+
+
 def test_mrr_to_df(results):
     df = results.to_df()
     assert df.shape == (2, 7)
