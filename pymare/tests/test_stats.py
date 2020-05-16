@@ -4,7 +4,7 @@ from pymare.stats import q_gen, q_profile
 
 def test_q_gen(vars_with_intercept):
     result = q_gen(*vars_with_intercept, 8)
-    assert round(result, 4) == 8.0161
+    assert round(result[0], 4) == 8.0161
 
 
 def test_q_profile(vars_with_intercept):
