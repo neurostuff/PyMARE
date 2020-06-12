@@ -68,7 +68,8 @@ DOC_REQUIRES = [
     'sphinx_copybutton',
     'sphinx_gallery',
     'pillow',
-    'matplotlib'
+    'matplotlib',
+    'seaborn'
 ]
 
 EXTRA_REQUIRES = {
