@@ -241,7 +241,7 @@ class CombinationTest(BaseEstimator):
     def _get_p(self, y):
         # Return the p-value/z-score input as p
         if self.input == 'z':
-           return stats.norm.cdf(y)
+            return stats.norm.cdf(y)
         return y
 
     def summary(self):
