@@ -17,7 +17,7 @@ SYMPY_MODULES = ['numpy', 'scipy']
 
 def solve_system(system, known_vars=None):
     """Solve and evaluate a system of SymPy equations given known inputs.
-    
+
     Args:
         system ([sympy.core.expr.Expr]): A list of SymPy expressions defining
             the system to solve.
@@ -178,7 +178,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
             error (bool): Specifies behavior in the event that the requested
                 quantity cannot be computed. If True (default), raises an
                 exception. If False, returns None.
-        
+
         Returns:
             A float or ndarray containing the requested parameter values, if
             successfully computed.
@@ -239,7 +239,7 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
 
         Args:
             measure (str): The measure to map to the Dataset's y and v
-                attributes (where y is the desired measure, and v is its 
+                attributes (where y is the desired measure, and v is its
                 variance). Valid values include:
                     * 'RM': Raw mean of the group.
                     * 'SM': Standardized mean. This is often called Hedges g.
@@ -319,7 +319,7 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
 
         Args:
             measure (str): The measure to map to the Dataset's y and v
-                attributes (where y is the desired measure, and v is its 
+                attributes (where y is the desired measure, and v is its
                 variance). Valid values include:
                     * 'RMD': Raw mean difference between groups.
                     * 'SMD': Standardized mean difference between groups. This

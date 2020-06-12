@@ -425,10 +425,10 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         keyword arguments.
 
     References:
-        Sangnawakij, P., Böhning, D., Niwitpong, S. A., Adams, S., Stanton, M., 
-        & Holling, H. (2019). Meta-analysis without study-specific variance 
-        information: Heterogeneity case. Statistical Methods in Medical Research, 
-        28(1), 196–210. https://doi.org/10.1177/0962280217718867    
+        Sangnawakij, P., Böhning, D., Niwitpong, S. A., Adams, S., Stanton, M.,
+        & Holling, H. (2019). Meta-analysis without study-specific variance
+        information: Heterogeneity case. Statistical Methods in Medical Research,
+        28(1), 196–210. https://doi.org/10.1177/0962280217718867
     """
 
     def __init__(self, method='ml', **kwargs):
