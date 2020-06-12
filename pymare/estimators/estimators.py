@@ -20,12 +20,11 @@ def _loopable(wrapped, instance, args, kwargs):
     # over the 2nd dimension of y/v/n inputs, and reconstruction of outputs.
     n_iter = kwargs['y'].shape[1]
     if n_iter > 10:
-        warn("Input contains {} parallel datasets (in 2nd dim of y and"
-                " v). The selected estimator will loop over datasets"
-                " naively, and this may be slow for large numbers of "
-                "datasets. Consider using the DL, HE, or WLS estimators, "
-                "which handle parallel datasets more efficiently."
-                .format(n_iter))
+        warn("Input contains {} parallel datasets (in 2nd dim of y and v). "
+             "The selected estimator will loop over datasets naively, "
+             "and this may be slow for large numbers of datasets. "
+             "Consider using the DL, HE, or WLS estimators, "
+             "which handle parallel datasets more efficiently.".format(n_iter))
     param_dicts = []
     for i in range(n_iter):
         iter_kwargs = {'X': kwargs['X']}
