@@ -290,7 +290,7 @@ class Stouffers(CombinationTest):
 
         z = (y * v).sum(0) / np.sqrt((v**2).sum(0))
 
-        return {'z': z }
+        return {'z': z}
 
 
 class Fishers(CombinationTest):
