@@ -20,7 +20,8 @@ def main():
     pkg_data = {
         'pymare': [
             'tests/data/*',
-            'resources/*'
+            'resources/*',
+            'effectsize/*.json',
         ]
     }
 
