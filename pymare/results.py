@@ -381,7 +381,11 @@ class BayesianMetaRegressionResults:
             A pandas DataFrame, unless the `fmt="xarray"` argument is passed in
             kwargs, in which case an xarray Dataset is returned.
         """
-        return az.summary(self.data, **kwargs)
+        var_names = ['beta', 'tau2']
+        if include_theta:
+            var_names.append('theta')
+        var_names = kwargs.pop('var_names', var_names)
+        return az.summary(self.data, var_names, **kwargs)
 
     def plot(self, kind='trace', **kwargs):
         """Generate various plots of the posterior estimates via ArviZ.
