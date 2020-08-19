@@ -542,7 +542,6 @@ class StanMetaRegression(BaseEstimator):
         from pystan import StanModel
         self.model = StanModel(model_code=spec)
 
-    @_loopable
     def _fit(self, y, v, X, groups=None):
         """Run the Stan sampler and return results.
 
@@ -568,6 +567,11 @@ class StanMetaRegression(BaseEstimator):
             `groups` argument can be used to specify the nesting structure
             (i.e., which rows in `y`, `v`, and `X` belong to each study).
         """
+        if y.ndim > 1 and y.shape[1] > 1:
+            raise ValueError("The StanMetaRegression estimator currently does "
+                             "not support 2-dimensional inputs. Passed y has "
+                             "shape {}.".format(y.shape))
+
         if self.model is None:
             self.compile()
 
