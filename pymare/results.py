@@ -381,7 +381,7 @@ class BayesianMetaRegressionResults:
             A pandas DataFrame, unless the `fmt="xarray"` argument is passed in
             kwargs, in which case an xarray Dataset is returned.
         """
-        var_names = ['fe_params', 'tau2']
+        var_names = ['beta', 'tau2']
         if include_theta:
             var_names.append('theta')
         var_names = kwargs.pop('var_names', var_names)
