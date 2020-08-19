@@ -515,8 +515,8 @@ class StanMetaRegression(BaseEstimator):
         # thetas at the moment. This is sub-optimal in terms of estimation,
         # but allows us to avoid having to add extra logic to detect and
         # handle intercepts in X.
-        spec = f"""
-        data {{
+        spec = """
+        data {
             int<lower=1> N;
             int<lower=1> K;
             vector[N] y;
@@ -524,20 +524,20 @@ class StanMetaRegression(BaseEstimator):
             int<lower=1> C;
             matrix[K, C] X;
             vector[N] sigma;
-        }}
-        parameters {{
+        }
+        parameters {
             vector[C] beta;
             vector[K] theta;
             real<lower=0> tau2;
-        }}
-        transformed parameters {{
+        }
+        transformed parameters {
             vector[N] mu;
             mu = theta[id] + X * beta;
-        }}
-        model {{
+        }
+        model {
             y ~ normal(mu, sigma);
             theta ~ normal(0, tau2);
-        }}
+        }
         """
         from pystan import StanModel
         self.model = StanModel(model_code=spec)
