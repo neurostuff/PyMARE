@@ -31,7 +31,7 @@ class CombinationTest(BaseEstimator):
             ose = self.__class__(mode='directed')
             p1 = ose.p_value(y, *args, **kwargs)
             p2 = ose.p_value(-y, *args, **kwargs)
-            p = np.maximum(1, 2 * np.minimum(p1, p2))
+            p = np.minimum(1, 2 * np.minimum(p1, p2))
         else:
             p = self.p_value(y, *args, **kwargs)
         return {'p': p}
@@ -41,7 +41,7 @@ class CombinationTest(BaseEstimator):
             name = self.__class__.__name__
             raise ValueError("This {} instance hasn't been fitted yet. Please "
                              "call fit() before summary().".format(name))
-        return CombinationTestResults(self, self.dataset_, self.params_['z'])
+        return CombinationTestResults(self, self.dataset_, self.params_['p'])
 
 
 class Stouffers(CombinationTest):
@@ -78,7 +78,7 @@ class Stouffers(CombinationTest):
             of meta-analysis applications, this mode is not appropriate, and
             users should instead opt for 'directed' or 'concordant'.
         (3) This estimator does not support meta-regression; any moderators
-            passed in as the X array will be ignored.
+            passed in to fit() as the X array will be ignored.
     """
     def p_value(self, z, w=None):
         if self.mode == 'undirected':
@@ -123,7 +123,7 @@ class Fishers(CombinationTest):
             of meta-analysis applications, this mode is not appropriate, and
             users should instead opt for 'directed' or 'concordant'.
         (3) This estimator does not support meta-regression; any moderators
-            passed in as the X array will be ignored.
+            passed in to fit() as the X array will be ignored.
     """
     def _z_to_p(self, z):
         # Transforms the z inputs to p values based on mode of test
