@@ -41,30 +41,38 @@ class CombinationTest(BaseEstimator):
 class Stouffers(CombinationTest):
     """Stouffer's Z-score meta-analysis method.
 
-    Takes study-level z-scores and combines them via Stouffer's method to
-    produce a fixed-effect estimate of the combined effect.
+    Takes a set of independent z-scores and combines them via Stouffer's method
+    to produce a fixed-effect estimate of the combined effect.
 
     Args:
-        input (str): The type of measure passed as the `y` input to fit().
-            Must be one of 'p' (p-values) or 'z' (z-scores).
-        p_type (str) If input == 'p', p_type indicates the type of passed
-            p-values. Valid values:
-                * 'right' (default): one-sided, right-tailed p-values
-                * 'left': one-sided, left-tailed p-values
-                * 'un': two-sided p-values
+        mode (str): The type of test to perform-- i.e., what null hypothesis to
+            reject. See Winkler et al. (2016) for details. Valid options are:
+                * 'directed': tests a directional hypothesis--i.e., that the
+                    observed value is consistently greater than 0 in the input
+                    studies.
+                * 'undirected': tests an undirected hypothesis--i.e., that the
+                    observed value differs from 0 in the input studies, but
+                    allowing the direction of the deviation to vary by study.
+                * 'concordant': equivalent to two directed tests, one for each
+                    sign, with correction for 2 tests.
 
     Notes:
-        * When passing in two-sided p-values as input, note that sign
-        information is unavailable, and the null being tested is that at least
-        one study deviates from 0 in *either* direction. If one-sided p-value
-        can be computed, users are strongly recommended to pass those instead.
-        (The same caveat applies to 'z' inputs if originally computed from
-        two-sided p-values.)
-        * This estimator does not support meta-regression; any moderators
-        passed in as the X array will be ignored.
-        * The fit() method takes z-scores of p-values as the 'y' input, and
-        (optionally) weights as the 'v' input. If no weights are passed, unit
-        weights are used.
+        (1) All input z-scores are assumed to correspond to one-sided p-values.
+            Do NOT pass in z-scores that have been directly converted from
+            two-tailed p-values, as these do not preserve directional
+            information.
+        (2) The 'directed' and 'undirected' modes are NOT the same as
+            one-tailed and two-tailed tests. In general, users who want to test
+            directed hypotheses should use the 'directed' mode, and users who
+            want to test for consistent effects in either the positive or
+            negative direction should use the 'concordant' mode. The
+            'undirected' mode tests a fairly uncommon null that doesn't
+            constrain the sign of effects to be consistent across studies
+            (one can think of it as a test of extremity). In the vast majority
+            of meta-analysis applications, this mode is not appropriate, and
+            users should instead opt for 'directed' or 'concordant'.
+        (3) This estimator does not support meta-regression; any moderators
+            passed in as the X array will be ignored.
     """
     def p_value(self, z, w=None):
         if self.mode == 'undirected':
@@ -78,29 +86,38 @@ class Stouffers(CombinationTest):
 class Fishers(CombinationTest):
     """Fisher's method for combining p-values.
 
-    Takes study-level p-values or z-scores and combines them via Fisher's
-    method to produce a fixed-effect estimate of the combined effect.
+    Takes a set of independent z-scores and combines them via Fisher's method
+    to produce a fixed-effect estimate of the combined effect.
 
     Args:
-        input (str): The type of measure passed as the `y` input to fit().
-            Must be one of 'p' (p-values) or 'z' (z-scores).
-        p_type (str) If input == 'p', p_type indicates the type of passed
-            p-values. Valid values:
-                * 'right' (default): one-sided, right-tailed p-values
-                * 'left': one-sided, left-tailed p-values
-                * 'un': two-sided p-values
+        mode (str): The type of test to perform-- i.e., what null hypothesis to
+            reject. See Winkler et al. (2016) for details. Valid options are:
+                * 'directed': tests a directional hypothesis--i.e., that the
+                    observed value is consistently greater than 0 in the input
+                    studies.
+                * 'undirected': tests an undirected hypothesis--i.e., that the
+                    observed value differs from 0 in the input studies, but
+                    allowing the direction of the deviation to vary by study.
+                * 'concordant': equivalent to two directed tests, one for each
+                    sign, with correction for 2 tests.
 
     Notes:
-        * When passing in two-sided p-values as input, note that sign
-        information is unavailable, and the null being tested is that at least
-        one study deviates from 0 in *either* direction. If one-sided p-value
-        can be computed, users are strongly recommended to pass those instead.
-        (The same caveat applies to 'z' inputs if originally computed from
-        two-sided p-values.)
-        * This estimator does not support meta-regression; any moderators
-        passed in as the X array will be ignored.
-        * The fit() method takes z-scores or p-values as the `y` input. Studies
-        are weighted equally; the `v` argument will be ignored if passed.
+        (1) All input z-scores are assumed to correspond to one-sided p-values.
+            Do NOT pass in z-scores that have been directly converted from
+            two-tailed p-values, as these do not preserve directional
+            information.
+        (2) The 'directed' and 'undirected' modes are NOT the same as
+            one-tailed and two-tailed tests. In general, users who want to test
+            directed hypotheses should use the 'directed' mode, and users who
+            want to test for consistent effects in either the positive or
+            negative direction should use the 'concordant' mode. The
+            'undirected' mode tests a fairly uncommon null that doesn't
+            constrain the sign of effects to be consistent across studies
+            (one can think of it as a test of extremity). In the vast majority
+            of meta-analysis applications, this mode is not appropriate, and
+            users should instead opt for 'directed' or 'concordant'.
+        (3) This estimator does not support meta-regression; any moderators
+            passed in as the X array will be ignored.
     """
     def _z_to_p(self, z):
         # Transforms the z inputs to p values based on mode of test
