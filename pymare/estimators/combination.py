@@ -9,13 +9,11 @@ from ..results import CombinationTestResults
 
 class CombinationTest(BaseEstimator):
     """Base class for methods based on combining p/z values."""
-    def __init__(self, mode='one-sided'):
+    def __init__(self, mode='directed'):
         mode = mode.lower()
-        if not (mode.startswith('one') or mode.startswith('two') or
-                mode.startswith('conc')):
-            raise ValueError("Invalid mode; must be one of 'one-sided', "
-                             "'two-sided', or 'concordant' (or 'one', 'two',"
-                             "or 'conc' for short).")
+        if mode not in {'directed', 'undirected', 'concordant'}:
+            raise ValueError("Invalid mode; must be one of 'directed', "
+                             "'undirected', or 'concordant'.")
         self.mode = mode
 
     @abstractmethod
@@ -23,8 +21,8 @@ class CombinationTest(BaseEstimator):
         pass
 
     def _fit(self, y, *args, **kwargs):
-        if self.mode.startswith('conc'):
-            ose = self.__class__(mode='one')
+        if self.mode == 'concordant':
+            ose = self.__class__(mode='directed')
             p1 = ose.p_value(y, *args, **kwargs)
             p2 = ose.p_value(-y, *args, **kwargs)
             p = np.maximum(1, 2 * np.minimum(p1, p2))
@@ -53,7 +51,7 @@ class Stouffers(CombinationTest):
             p-values. Valid values:
                 * 'right' (default): one-sided, right-tailed p-values
                 * 'left': one-sided, left-tailed p-values
-                * 'two': two-sided p-values
+                * 'un': two-sided p-values
 
     Notes:
         * When passing in two-sided p-values as input, note that sign
@@ -69,7 +67,7 @@ class Stouffers(CombinationTest):
         weights are used.
     """
     def p_value(self, z, w=None):
-        if self.mode.startswith('two'):
+        if self.mode == 'undirected':
             z = ss.norm.isf(2 * ss.norm.sf(np.abs(z)))
         if w is None:
             w = np.ones_like(z)
@@ -90,7 +88,7 @@ class Fishers(CombinationTest):
             p-values. Valid values:
                 * 'right' (default): one-sided, right-tailed p-values
                 * 'left': one-sided, left-tailed p-values
-                * 'two': two-sided p-values
+                * 'un': two-sided p-values
 
     Notes:
         * When passing in two-sided p-values as input, note that sign
@@ -107,7 +105,7 @@ class Fishers(CombinationTest):
     def _z_to_p(self, z):
         # Transforms the z inputs to p values based on mode of test
         p = ss.norm.sf(z)
-        if self.mode.startswith('two'):
+        if self.mode == 'undirected':
             p = 2 * np.minimum(p, 1 - p)
         return p
 
