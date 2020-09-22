@@ -1,4 +1,5 @@
 from abc import abstractmethod
+import warnings
 
 import numpy as np
 import scipy.stats as ss
@@ -14,6 +15,11 @@ class CombinationTest(BaseEstimator):
         if mode not in {'directed', 'undirected', 'concordant'}:
             raise ValueError("Invalid mode; must be one of 'directed', "
                              "'undirected', or 'concordant'.")
+        if mode == 'undirected':
+            warnings.warn(
+                "You have opted to conduct an 'undirected' test. Are you sure "
+                "this is what you want? If you're looking for the analog of a "
+                "conventional two-tailed test, use 'concordant'.")
         self.mode = mode
 
     @abstractmethod
