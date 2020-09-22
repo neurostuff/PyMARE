@@ -44,7 +44,7 @@ class CombinationTest(BaseEstimator):
         return CombinationTestResults(self, self.dataset_, self.params_['p'])
 
 
-class Stouffers(CombinationTest):
+class StoufferCombinationTest(CombinationTest):
     """Stouffer's Z-score meta-analysis method.
 
     Takes a set of independent z-scores and combines them via Stouffer's method
@@ -89,7 +89,7 @@ class Stouffers(CombinationTest):
         return ss.norm.sf(cz)
 
 
-class Fishers(CombinationTest):
+class FisherCombinationTest(CombinationTest):
     """Fisher's method for combining p-values.
 
     Takes a set of independent z-scores and combines them via Fisher's method
