@@ -26,6 +26,9 @@ class CombinationTest(BaseEstimator):
     def p_value(self, z, *args, **kwargs):
         pass
 
+    def _z_to_p(self, z):
+        return ss.norm.sf(z)
+
     def _fit(self, y, *args, **kwargs):
         if self.mode == 'concordant':
             ose = self.__class__(mode='directed')
@@ -33,6 +36,8 @@ class CombinationTest(BaseEstimator):
             p2 = ose.p_value(-y, *args, **kwargs)
             p = np.minimum(1, 2 * np.minimum(p1, p2))
         else:
+            if self.mode == 'undirected':
+                y = np.abs(y)
             p = self.p_value(y, *args, **kwargs)
         return {'p': p}
 
@@ -81,12 +86,10 @@ class StoufferCombinationTest(CombinationTest):
             passed in to fit() as the X array will be ignored.
     """
     def p_value(self, z, w=None):
-        if self.mode == 'undirected':
-            z = ss.norm.isf(2 * ss.norm.sf(np.abs(z)))
         if w is None:
             w = np.ones_like(z)
         cz = (z * w).sum(0) / np.sqrt((w**2).sum(0))
-        return ss.norm.sf(cz)
+        return 1 - ss.norm.sf(cz)
 
 
 class FisherCombinationTest(CombinationTest):
@@ -125,13 +128,6 @@ class FisherCombinationTest(CombinationTest):
         (3) This estimator does not support meta-regression; any moderators
             passed in to fit() as the X array will be ignored.
     """
-    def _z_to_p(self, z):
-        # Transforms the z inputs to p values based on mode of test
-        p = ss.norm.sf(z)
-        if self.mode == 'undirected':
-            p = 2 * np.minimum(p, 1 - p)
-        return p
-
     def p_value(self, z):
         p = self._z_to_p(z)
         chi2 = -2 * np.log(p).sum(0)
