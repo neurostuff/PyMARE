@@ -46,7 +46,7 @@ class CombinationTest(BaseEstimator):
             name = self.__class__.__name__
             raise ValueError("This {} instance hasn't been fitted yet. Please "
                              "call fit() before summary().".format(name))
-        return CombinationTestResults(self, self.dataset_, self.params_['p'])
+        return CombinationTestResults(self, self.dataset_, p=self.params_['p'])
 
 
 class StoufferCombinationTest(CombinationTest):
@@ -89,7 +89,7 @@ class StoufferCombinationTest(CombinationTest):
         if w is None:
             w = np.ones_like(z)
         cz = (z * w).sum(0) / np.sqrt((w**2).sum(0))
-        return 1 - ss.norm.sf(cz)
+        return ss.norm.sf(cz)
 
 
 class FisherCombinationTest(CombinationTest):
