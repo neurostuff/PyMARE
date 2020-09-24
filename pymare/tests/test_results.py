@@ -7,7 +7,8 @@ from pymare.results import (MetaRegressionResults, CombinationTestResults,
 from pymare.estimators import (WeightedLeastSquares, DerSimonianLaird,
                                VarianceBasedLikelihoodEstimator,
                                SampleSizeBasedLikelihoodEstimator,
-                               StanMetaRegression, Hedges, Stouffers)
+                               StanMetaRegression, Hedges,
+                               StoufferCombinationTest, FisherCombinationTest)
 
 
 @pytest.fixture
@@ -142,7 +143,7 @@ def test_approx_perm_test_with_n_based_estimator(dataset_n):
 
 def test_stouffers_perm_test_exact():
     dataset = Dataset([1, 1, 2, 1.3], [1.5, 1, 2, 4])
-    results = Stouffers().fit(dataset).summary()
+    results = StoufferCombinationTest().fit(dataset).summary()
     pmr = results.permutation_test(2000)
     assert pmr.n_perm == 16
     assert pmr.exact
@@ -154,11 +155,10 @@ def test_stouffers_perm_test_exact():
 def test_stouffers_perm_test_approx():
     y = [2.8, -0.2, -1, 4.5, 1.9, 2.38, 0.6, 1.88, -0.4, 1.5, 3.163, 0.7]
     dataset = Dataset(y)
-    results = Stouffers().fit(dataset).summary()
+    results = StoufferCombinationTest().fit(dataset).summary()
     pmr = results.permutation_test(2000)
     assert not pmr.exact
     assert pmr.n_perm == 2000
     assert isinstance(pmr.results, CombinationTestResults)
     assert pmr.perm_p['fe_p'].shape == (1,)
     assert 'tau2_p' not in pmr.perm_p
-
