@@ -3,12 +3,13 @@ import scipy.stats as ss
 import pytest
 
 from pymare.estimators import StoufferCombinationTest, FisherCombinationTest
+from pymare import Dataset
 
 
 _z1 = np.array([2.1, 0.7, -0.2, 4.1, 3.8])[:, None]
 _z2 = np.c_[_z1, np.array([-0.6, -1.61, -2.3, -0.8, -4.01])[:, None]]
 
-params = [
+_params = [
     (StoufferCombinationTest, _z1, 'directed', [4.69574]),
     (StoufferCombinationTest, _z1, 'undirected', [4.87462819]),
     (StoufferCombinationTest, _z1, 'concordant', [4.55204117]),
@@ -24,9 +25,17 @@ params = [
 ]
 
 
-@pytest.mark.parametrize("Cls,data,mode,expected", params)
+@pytest.mark.parametrize("Cls,data,mode,expected", _params)
 def test_combination_test(Cls, data, mode, expected):
     results = Cls(mode)._fit(data)
     z = ss.norm.isf(results['p'])
-    print(z, expected)
+    assert np.allclose(z, expected, atol=1e-5)
+
+
+@pytest.mark.parametrize("Cls,data,mode,expected", _params)
+def test_combination_test_from_dataset(Cls, data, mode, expected):
+    dset = Dataset(y=data)
+    est = Cls(mode).fit(dset)
+    results = est.summary()
+    z = ss.norm.isf(results.p)
     assert np.allclose(z, expected, atol=1e-5)
