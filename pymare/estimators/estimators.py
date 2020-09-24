@@ -6,7 +6,7 @@ from warnings import warn
 
 import numpy as np
 from scipy.optimize import minimize, Bounds
-from scipy import stats
+from scipy import stats as ss
 import wrapt
 
 from ..stats import weighted_least_squares
@@ -218,117 +218,6 @@ class Hedges(BaseEstimator):
         # Estimate beta with tau^2 estimate
         beta_ho = weighted_least_squares(y, v, X, tau2=tau_ho)
         return {'fe_params': beta_ho, 'tau2': tau_ho, 'inv_cov': inv_cov}
-
-
-class CombinationTest(BaseEstimator):
-    """Base class for methods based on combining p/z values."""
-    def __init__(self, input='z', p_type='right'):
-        self.input = input
-        self.p_type = p_type
-
-    def _get_z(self, y):
-        # Return the p-value/z-score input as z
-        if self.input == 'p':
-            if self.p_type == 'left':
-                y = 1 - y
-            elif self.p_type.startswith('two'):
-                y = y / 2
-            if np.any(y < 0.) or np.any(y > 1.):
-                raise ValueError(
-                    "Invalid p-values (< 0 or > 1) passed as inputs.")
-            y = stats.norm.ppf(y)
-        return y
-
-    def _get_p(self, y):
-        # Return the p-value/z-score input as p
-        if self.input == 'z':
-           return stats.norm.cdf(y)
-        return y
-
-    def summary(self):
-        if not hasattr(self, 'params_'):
-            name = self.__class__.__name__
-            raise ValueError("This {} instance hasn't been fitted yet. Please "
-                             "call fit() before summary().".format(name))
-        return CombinationTestResults(self, self.dataset_, self.params_['z'])
-
-
-class Stouffers(CombinationTest):
-    """Stouffer's Z-score meta-analysis method.
-
-    Takes study-level z-scores or p-values and combines them via Stouffer's
-    method to produce a fixed-effect estimate of the combined effect.
-
-    Args:
-        input (str): The type of measure passed as the `y` input to fit().
-            Must be one of 'p' (p-values) or 'z' (z-scores).
-        p_type (str) If input == 'p', p_type indicates the type of passed
-            p-values. Valid values:
-                * 'right' (default): one-sided, right-tailed p-values
-                * 'left': one-sided, left-tailed p-values
-                * 'two': two-sided p-values
-
-    Notes:
-        * When passing in two-sided p-values as input, note that sign
-        information is unavailable, and the null being tested is that at least
-        one study deviates from 0 in *either* direction. If one-sided p-value
-        can be computed, users are strongly recommended to pass those instead.
-        (The same caveat applies to 'z' inputs if originally computed from
-        two-sided p-values.)
-        * This estimator does not support meta-regression; any moderators
-        passed in as the X array will be ignored.
-        * The fit() method takes z-scores of p-values as the 'y' input, and
-        (optionally) weights as the 'v' input. If no weights are passed, unit
-        weights are used.
-    """
-    def _fit(self, y, v=None):
-
-        y = self._get_z(y)
-
-        if v is None:
-            v = np.ones_like(y)
-
-        z = (y * v).sum(0) / np.sqrt((v**2).sum(0))
-
-        return {'z': z }
-
-
-class Fishers(CombinationTest):
-    """Fisher's method for combining p-values.
-
-    Takes study-level p-values or z-scores and combines them via Fisher's
-    method to produce a fixed-effect estimate of the combined effect.
-
-    Args:
-        input (str): The type of measure passed as the `y` input to fit().
-            Must be one of 'p' (p-values) or 'z' (z-scores).
-        p_type (str) If input == 'p', p_type indicates the type of passed
-            p-values. Valid values:
-                * 'right' (default): one-sided, right-tailed p-values
-                * 'left': one-sided, left-tailed p-values
-                * 'two': two-sided p-values
-
-    Notes:
-        * When passing in two-sided p-values as input, note that sign
-        information is unavailable, and the null being tested is that at least
-        one study deviates from 0 in *either* direction. If one-sided p-value
-        can be computed, users are strongly recommended to pass those instead.
-        (The same caveat applies to 'z' inputs if originally computed from
-        two-sided p-values.)
-        * This estimator does not support meta-regression; any moderators
-        passed in as the X array will be ignored.
-        * The fit() method takes z-scores or p-values as the `y` input. Studies
-        are weighted equally; the `v` argument will be ignored if passed.
-    """
-    def _fit(self, y):
-
-        y = self._get_p(y)
-
-        chi2 = -2 * np.log(y).sum(0)
-        p = 1 - stats.chi2.cdf(chi2, 2 * y.shape[0])
-        z = stats.norm.ppf(p)
-
-        return {'z': z}
 
 
 class VarianceBasedLikelihoodEstimator(BaseEstimator):
