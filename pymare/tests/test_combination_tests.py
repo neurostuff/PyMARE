@@ -27,7 +27,7 @@ _params = [
 
 @pytest.mark.parametrize("Cls,data,mode,expected", _params)
 def test_combination_test(Cls, data, mode, expected):
-    results = Cls(mode)._fit(data)
+    results = Cls(mode).fit(data)
     z = ss.norm.isf(results['p'])
     assert np.allclose(z, expected, atol=1e-5)
 
@@ -35,7 +35,7 @@ def test_combination_test(Cls, data, mode, expected):
 @pytest.mark.parametrize("Cls,data,mode,expected", _params)
 def test_combination_test_from_dataset(Cls, data, mode, expected):
     dset = Dataset(y=data)
-    est = Cls(mode).fit(dset)
+    est = Cls(mode).fit_dataset(dset)
     results = est.summary()
     z = ss.norm.isf(results.p)
     assert np.allclose(z, expected, atol=1e-5)

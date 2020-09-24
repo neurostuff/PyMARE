@@ -16,7 +16,7 @@ from ..results import (MetaRegressionResults, BayesianMetaRegressionResults,
 
 @wrapt.decorator
 def _loopable(wrapped, instance, args, kwargs):
-    # Decorator for _fit method of Estimator classes to handle naive looping
+    # Decorator for fit() method of Estimator classes to handle naive looping
     # over the 2nd dimension of y/v/n inputs, and reconstruction of outputs.
     n_iter = kwargs['y'].shape[1]
     if n_iter > 10:
@@ -46,21 +46,13 @@ def _loopable(wrapped, instance, args, kwargs):
 class BaseEstimator(metaclass=ABCMeta):
 
     @abstractmethod
-    def _fit(self):
-        # Subclasses must implement _fit() method that directly takes arrays.
-        # The following named arguments are allowed, and will be automatically
-        # extracted from the Dataset instance:
-        # * y (estimates)
-        # * v (variances)
-        # * n (sample_sizes)
-        # * X (predictors)
+    def fit(self, *args, **kwargs):
         pass
 
-    def fit(self, dataset=None, **kwargs):
-
+    def fit_dataset(self, dataset=None, **kwargs):
         if dataset is not None:
             kwargs = {}
-            spec = getfullargspec(self._fit)
+            spec = getfullargspec(self.fit)
             n_kw = len(spec.defaults) if spec.defaults else 0
             n_args = len(spec.args) - n_kw - 1
             for i, name in enumerate(spec.args[1:]):
@@ -69,7 +61,7 @@ class BaseEstimator(metaclass=ABCMeta):
                 else:
                     kwargs[name] = getattr(dataset, name)
 
-        self.params_ = self._fit(**kwargs)
+        self.params_ = self.fit(**kwargs)
         self.dataset_ = dataset
 
         return self
@@ -86,7 +78,7 @@ class BaseEstimator(metaclass=ABCMeta):
         Notes:
             This is equivalent to directly accessing `dataset.v` when variances
             are present, but affords a way of estimating v from sample size (n)
-            for any estimator that implicitly estimate a sigma^2 parameter.
+            for any estimator that implicitly estimates a sigma^2 parameter.
         """
         if dataset.v is not None:
             return dataset.v
@@ -139,7 +131,7 @@ class WeightedLeastSquares(BaseEstimator):
     def __init__(self, tau2=0.):
         self.tau2 = tau2
 
-    def _fit(self, y, X, v=None):
+    def fit(self, y, X, v=None):
         if v is None:
             v = np.ones_like(y)
         beta, inv_cov = weighted_least_squares(y, v, X, self.tau2,
@@ -167,7 +159,7 @@ class DerSimonianLaird(BaseEstimator):
         identical for all iterates.
     """
 
-    def _fit(self, y, v, X):
+    def fit(self, y, v, X):
         k, p = X.shape
 
         # Estimate initial betas with WLS, assuming tau^2=0
@@ -208,7 +200,7 @@ class Hedges(BaseEstimator):
         identical for all iterates.
     """
 
-    def _fit(self, y, v, X):
+    def fit(self, y, v, X):
         k, p = X.shape[:2]
         _unit_v = np.ones_like(y)
         beta, inv_cov = weighted_least_squares(y, _unit_v, X, return_cov=True)
@@ -255,9 +247,9 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         self.kwargs = kwargs
 
     @_loopable
-    def _fit(self, y, v, X):
+    def fit(self, y, v, X):
         # use D-L estimate for initial values
-        est_DL = DerSimonianLaird()._fit(y, v, X)
+        est_DL = DerSimonianLaird().fit(y, v, X)
         beta = est_DL['fe_params']
         tau2 = est_DL['tau2']
 
@@ -329,7 +321,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         self.kwargs = kwargs
 
     @_loopable
-    def _fit(self, y, n, X):
+    def fit(self, y, n, X):
         if n.std() < np.sqrt(np.finfo(float).eps):
             raise ValueError("Sample size-based likelihood estimator cannot "
                              "work with all-equal sample sizes.")
@@ -431,7 +423,7 @@ class StanMetaRegression(BaseEstimator):
         from pystan import StanModel
         self.model = StanModel(model_code=spec)
 
-    def _fit(self, y, v, X, groups=None):
+    def fit(self, y, v, X, groups=None):
         """Run the Stan sampler and return results.
 
         Args:

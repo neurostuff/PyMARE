@@ -177,7 +177,7 @@ class MetaRegressionResults:
             y_perm = np.repeat(y[:, None], n_perm, axis=1)
 
             # for v, we might actually be working with n, depending on estimator
-            has_v = 'v' in getfullargspec(self.estimator._fit).args[1:]
+            has_v = 'v' in getfullargspec(self.estimator.fit).args[1:]
             v = self.dataset.v[:, i] if has_v else self.dataset.n[:, i]
 
             v_perm = np.repeat(v[:, None], n_perm, axis=1)
@@ -203,7 +203,7 @@ class MetaRegressionResults:
             # Pass parameters, remembering that v may actually be n
             kwargs = {'y': y_perm, 'X': self.dataset.X}
             kwargs['v' if has_v else 'n'] = v_perm
-            params = self.estimator._fit(**kwargs)
+            params = self.estimator.fit(**kwargs)
 
             fe_obs = fe_stats['est'][:, i]
             if fe_obs.ndim == 1:
@@ -305,9 +305,9 @@ class CombinationTestResults:
 
             # Some combination tests can handle weights (passed as v)
             kwargs = {'y': y_perm}
-            if 'v' in getfullargspec(est._fit).args:
+            if 'v' in getfullargspec(est.fit).args:
                 kwargs['v'] = self.dataset.v
-            params = est._fit(**kwargs)
+            params = est.fit(**kwargs)
 
             p_obs = self.z[i]
             if p_obs.ndim == 1:

@@ -29,7 +29,7 @@ class CombinationTest(BaseEstimator):
     def _z_to_p(self, z):
         return ss.norm.sf(z)
 
-    def _fit(self, y, *args, **kwargs):
+    def fit(self, y, *args, **kwargs):
         if self.mode == 'concordant':
             ose = self.__class__(mode='directed')
             p1 = ose.p_value(y, *args, **kwargs)
