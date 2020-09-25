@@ -29,16 +29,16 @@ class CombinationTest(BaseEstimator):
     def _z_to_p(self, z):
         return ss.norm.sf(z)
 
-    def fit(self, y, *args, **kwargs):
+    def fit(self, z, *args, **kwargs):
         if self.mode == 'concordant':
             ose = self.__class__(mode='directed')
-            p1 = ose.p_value(y, *args, **kwargs)
-            p2 = ose.p_value(-y, *args, **kwargs)
+            p1 = ose.p_value(z, *args, **kwargs)
+            p2 = ose.p_value(-z, *args, **kwargs)
             p = np.minimum(1, 2 * np.minimum(p1, p2))
         else:
             if self.mode == 'undirected':
-                y = np.abs(y)
-            p = self.p_value(y, *args, **kwargs)
+                z = np.abs(z)
+            p = self.p_value(z, *args, **kwargs)
         return {'p': p}
 
     def summary(self):
