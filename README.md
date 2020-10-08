@@ -60,10 +60,25 @@ from pymare.estimators import VarianceBasedLikelihoodEstimator
 dataset = Dataset(y, v, X)
 # Estimator class for likelihood-based methods when variances are known
 estimator = VarianceBasedLikelihoodEstimator(method='REML')
-# All estimators accept a `Dataset` instance as the first argument to `.fit()`
-estimator.fit(dataset)
+# All estimators expose a fit_dataset() method that takes a `Dataset`
+# instance as the first (and usually only) argument.
+estimator.fit_dataset(dataset)
 # Post-fitting we can obtain a MetaRegressionResults instance via .summary()
 results = estimator.summary()
 # Print summary of results as a pandas DataFrame
 print(result.to_df())
+```
+
+And if we want to be even more explicit, we can avoid the `Dataset` abstraction
+entirely (though we'll lose some convenient validation checks):
+
+```python
+estimator = VarianceBasedLikelihoodEstimator(method='REML')
+
+# X must be 2-d; this is one of the things the Dataset implicitly handles.
+X = X[:, None]
+
+estimator.fit(y, v, X)
+
+results = estimator.summary()
 ```
