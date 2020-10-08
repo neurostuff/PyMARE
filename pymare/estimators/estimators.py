@@ -16,7 +16,7 @@ from ..results import (MetaRegressionResults, BayesianMetaRegressionResults,
 
 @wrapt.decorator
 def _loopable(wrapped, instance, args, kwargs):
-    # Decorator for _fit method of Estimator classes to handle naive looping
+    # Decorator for fit() method of Estimator classes to handle naive looping
     # over the 2nd dimension of y/v/n inputs, and reconstruction of outputs.
     n_iter = kwargs['y'].shape[1]
     if n_iter > 10:
@@ -26,6 +26,7 @@ def _loopable(wrapped, instance, args, kwargs):
                 "datasets. Consider using the DL, HE, or WLS estimators, "
                 "which handle parallel datasets more efficiently."
                 .format(n_iter))
+
     param_dicts = []
     for i in range(n_iter):
         iter_kwargs = {'X': kwargs['X']}
@@ -35,41 +36,58 @@ def _loopable(wrapped, instance, args, kwargs):
         if 'n' in kwargs:
             n = kwargs['n'][:, i, None] if kwargs['n'].shape[1] > 1 else kwargs['n']
             iter_kwargs['n'] = n
-        param_dicts.append(wrapped(**iter_kwargs))
+        wrapped(**iter_kwargs)
+        param_dicts.append(instance.params_.copy())
+
     params = {}
     for k in param_dicts[0]:
         concat = np.stack([pd[k].squeeze() for pd in param_dicts], axis=-1)
         params[k] = np.atleast_2d(concat)
-    return params
+
+    instance.params_ = params
+    return instance
 
 
 class BaseEstimator(metaclass=ABCMeta):
 
+    # A class-level mapping from Dataset attributes to fit() arguments. Used by
+    # fit_dataset() for estimators that take non-standard arguments (e.g., 'z'
+    # instead of 'y'). Keys are default Dataset attribute names (e.g., 'y') and
+    # values are the target arg names in the estimator class's fit() method
+    # (e.g., 'z').
+    _dataset_attr_map = {}
+
     @abstractmethod
-    def _fit(self):
-        # Subclasses must implement _fit() method that directly takes arrays.
-        # The following named arguments are allowed, and will be automatically
-        # extracted from the Dataset instance:
-        # * y (estimates)
-        # * v (variances)
-        # * n (sample_sizes)
-        # * X (predictors)
+    def fit(self, *args, **kwargs):
         pass
 
-    def fit(self, dataset=None, **kwargs):
+    def fit_dataset(self, dataset, *args, **kwargs):
+        """ Applies the current estimator to the passed Dataset container.
 
-        if dataset is not None:
-            kwargs = {}
-            spec = getfullargspec(self._fit)
-            n_kw = len(spec.defaults) if spec.defaults else 0
-            n_args = len(spec.args) - n_kw - 1
-            for i, name in enumerate(spec.args[1:]):
-                if i >= n_args:
-                    kwargs[name] = getattr(dataset, name, spec.defaults[i - n_args])
-                else:
-                    kwargs[name] = getattr(dataset, name)
+        A convenience interface that wraps fit() and automatically aligns the
+        variables held in a Dataset with the required arguments.
 
-        self.params_ = self._fit(**kwargs)
+        Args:
+            dataset (Dataset): A PyMARE Dataset instance holding the data.
+            args, kwargs: optional positional and keyword arguments to pass
+                onto the fit() method.
+        """
+        all_kwargs = {}
+        spec = getfullargspec(self.fit)
+        n_kw = len(spec.defaults) if spec.defaults else 0
+        n_args = len(spec.args) - n_kw - 1
+
+        for i, name in enumerate(spec.args[1:]):
+            # Check for remapped name
+            attr_name = self._dataset_attr_map.get(name, name)
+            if i >= n_args:
+                all_kwargs[name] = getattr(dataset, attr_name,
+                                           spec.defaults[i - n_args])
+            else:
+                all_kwargs[name] = getattr(dataset, attr_name)
+
+        all_kwargs.update(kwargs)
+        self.fit(*args, **all_kwargs)
         self.dataset_ = dataset
 
         return self
@@ -86,7 +104,7 @@ class BaseEstimator(metaclass=ABCMeta):
         Notes:
             This is equivalent to directly accessing `dataset.v` when variances
             are present, but affords a way of estimating v from sample size (n)
-            for any estimator that implicitly estimate a sigma^2 parameter.
+            for any estimator that implicitly estimates a sigma^2 parameter.
         """
         if dataset.v is not None:
             return dataset.v
@@ -139,12 +157,13 @@ class WeightedLeastSquares(BaseEstimator):
     def __init__(self, tau2=0.):
         self.tau2 = tau2
 
-    def _fit(self, y, X, v=None):
+    def fit(self, y, X, v=None):
         if v is None:
             v = np.ones_like(y)
         beta, inv_cov = weighted_least_squares(y, v, X, self.tau2,
                                                return_cov=True)
-        return {'fe_params': beta, 'tau2': self.tau2, 'inv_cov': inv_cov}
+        self.params_ = {'fe_params': beta, 'tau2': self.tau2, 'inv_cov': inv_cov}
+        return self
 
 
 class DerSimonianLaird(BaseEstimator):
@@ -167,7 +186,7 @@ class DerSimonianLaird(BaseEstimator):
         identical for all iterates.
     """
 
-    def _fit(self, y, v, X):
+    def fit(self, y, v, X):
         k, p = X.shape
 
         # Estimate initial betas with WLS, assuming tau^2=0
@@ -189,7 +208,8 @@ class DerSimonianLaird(BaseEstimator):
         # Re-estimate beta with tau^2 estimate
         beta_dl, inv_cov = weighted_least_squares(y, v, X, tau2=tau_dl,
                                                   return_cov=True)
-        return {'fe_params': beta_dl, 'tau2': tau_dl, 'inv_cov': inv_cov}
+        self.params_ = {'fe_params': beta_dl, 'tau2': tau_dl, 'inv_cov': inv_cov}
+        return self
 
 
 class Hedges(BaseEstimator):
@@ -208,7 +228,7 @@ class Hedges(BaseEstimator):
         identical for all iterates.
     """
 
-    def _fit(self, y, v, X):
+    def fit(self, y, v, X):
         k, p = X.shape[:2]
         _unit_v = np.ones_like(y)
         beta, inv_cov = weighted_least_squares(y, _unit_v, X, return_cov=True)
@@ -217,7 +237,8 @@ class Hedges(BaseEstimator):
         tau_ho = np.maximum(0, tau_ho)
         # Estimate beta with tau^2 estimate
         beta_ho = weighted_least_squares(y, v, X, tau2=tau_ho)
-        return {'fe_params': beta_ho, 'tau2': tau_ho, 'inv_cov': inv_cov}
+        self.params_ = {'fe_params': beta_ho, 'tau2': tau_ho, 'inv_cov': inv_cov}
+        return self
 
 
 class VarianceBasedLikelihoodEstimator(BaseEstimator):
@@ -255,9 +276,9 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         self.kwargs = kwargs
 
     @_loopable
-    def _fit(self, y, v, X):
+    def fit(self, y, v, X):
         # use D-L estimate for initial values
-        est_DL = DerSimonianLaird()._fit(y, v, X)
+        est_DL = DerSimonianLaird().fit(y, v, X).params_
         beta = est_DL['fe_params']
         tau2 = est_DL['tau2']
 
@@ -273,7 +294,8 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         beta, tau = res.x[:-1], float(res.x[-1])
         tau = np.max([tau, 0])
         _, inv_cov = weighted_least_squares(y, v, X, tau, True)
-        return {'fe_params': beta[:, None], 'tau2': tau, 'inv_cov': inv_cov}
+        self.params_ = {'fe_params': beta[:, None], 'tau2': tau, 'inv_cov': inv_cov}
+        return self
 
     def _ml_nll(self, theta, y, v, X):
         """ ML negative log-likelihood for meta-regression model. """
@@ -329,7 +351,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         self.kwargs = kwargs
 
     @_loopable
-    def _fit(self, y, n, X):
+    def fit(self, y, n, X):
         if n.std() < np.sqrt(np.finfo(float).eps):
             raise ValueError("Sample size-based likelihood estimator cannot "
                              "work with all-equal sample sizes.")
@@ -353,8 +375,13 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         beta, sigma, tau = res.x[:-2], float(res.x[-2]), float(res.x[-1])
         tau = np.max([tau, 0])
         _, inv_cov = weighted_least_squares(y, sigma / n, X, tau, True)
-        return {'fe_params': beta[:, None], 'sigma2': np.array(sigma), 'tau2': tau,
-                'inv_cov': inv_cov}
+        self.params_ = {
+            'fe_params': beta[:, None],
+            'sigma2': np.array(sigma),
+            'tau2': tau,
+            'inv_cov': inv_cov
+        }
+        return self
 
     def _ml_nll(self, theta, y, n, X):
         """ ML negative log-likelihood for meta-regression model. """
@@ -431,7 +458,7 @@ class StanMetaRegression(BaseEstimator):
         from pystan import StanModel
         self.model = StanModel(model_code=spec)
 
-    def _fit(self, y, v, X, groups=None):
+    def fit(self, y, v, X, groups=None):
         """Run the Stan sampler and return results.
 
         Args:
@@ -479,7 +506,7 @@ class StanMetaRegression(BaseEstimator):
         }
 
         self.result_ = self.model.sampling(data=data, **self.sampling_kwargs)
-        return self.result_
+        return self
 
     def summary(self, ci=95):
         if self.result_ is None:

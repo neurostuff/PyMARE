@@ -29,17 +29,18 @@ class CombinationTest(BaseEstimator):
     def _z_to_p(self, z):
         return ss.norm.sf(z)
 
-    def _fit(self, y, *args, **kwargs):
+    def fit(self, z, *args, **kwargs):
         if self.mode == 'concordant':
             ose = self.__class__(mode='directed')
-            p1 = ose.p_value(y, *args, **kwargs)
-            p2 = ose.p_value(-y, *args, **kwargs)
+            p1 = ose.p_value(z, *args, **kwargs)
+            p2 = ose.p_value(-z, *args, **kwargs)
             p = np.minimum(1, 2 * np.minimum(p1, p2))
         else:
             if self.mode == 'undirected':
-                y = np.abs(y)
-            p = self.p_value(y, *args, **kwargs)
-        return {'p': p}
+                z = np.abs(z)
+            p = self.p_value(z, *args, **kwargs)
+        self.params_ = {'p': p}
+        return self
 
     def summary(self):
         if not hasattr(self, 'params_'):
@@ -85,6 +86,13 @@ class StoufferCombinationTest(CombinationTest):
         (3) This estimator does not support meta-regression; any moderators
             passed in to fit() as the X array will be ignored.
     """
+
+    # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
+    _dataset_attr_map = {'z': 'y', 'w': 'v'}
+
+    def fit(self, z, w=None):
+        return super().fit(z, w=w)
+
     def p_value(self, z, w=None):
         if w is None:
             w = np.ones_like(z)
@@ -128,6 +136,10 @@ class FisherCombinationTest(CombinationTest):
         (3) This estimator does not support meta-regression; any moderators
             passed in to fit() as the X array will be ignored.
     """
+
+    # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
+    _dataset_attr_map = {'z': 'y'}
+
     def p_value(self, z):
         p = self._z_to_p(z)
         chi2 = -2 * np.log(p).sum(0)
