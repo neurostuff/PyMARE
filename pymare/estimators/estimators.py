@@ -45,19 +45,12 @@ def _loopable(wrapped, instance, args, kwargs):
 
 class BaseEstimator(metaclass=ABCMeta):
 
-    def _map_dataset_to_fit_args(self, dataset):
-        # Default mapper for Dataset --> fit() arguments. Will work for any
-        # BaseEstimator subclasses that don't need to remap variable names.
-        kwargs = {}
-        spec = getfullargspec(self.fit)
-        n_kw = len(spec.defaults) if spec.defaults else 0
-        n_args = len(spec.args) - n_kw - 1
-        for i, name in enumerate(spec.args[1:]):
-            if i >= n_args:
-                kwargs[name] = getattr(dataset, name, spec.defaults[i - n_args])
-            else:
-                kwargs[name] = getattr(dataset, name)
-        return kwargs
+    # A class-level mapping from Dataset attributes to fit() arguments. Used by
+    # fit_dataset() for estimators that take non-standard arguments (e.g., 'z'
+    # instead of 'y'). Keys are default Dataset attribute names (e.g., 'y') and
+    # values are the target arg names in the estimator class's fit() method
+    # (e.g., 'z').
+    _dataset_attr_map = {}
 
     @abstractmethod
     def fit(self, *args, **kwargs):
@@ -74,9 +67,22 @@ class BaseEstimator(metaclass=ABCMeta):
             args, kwargs: optional positional and keyword arguments to pass
                 onto the fit() method.
         """
-        ds_kwargs = self._map_dataset_to_fit_args(dataset)
-        ds_kwargs.update(kwargs)
-        self.params_ = self.fit(*args, **ds_kwargs)
+        all_kwargs = {}
+        spec = getfullargspec(self.fit)
+        n_kw = len(spec.defaults) if spec.defaults else 0
+        n_args = len(spec.args) - n_kw - 1
+
+        for i, name in enumerate(spec.args[1:]):
+            # Check for remapped name
+            arg_name = self._dataset_attr_map.get(name, name)
+            if i >= n_args:
+                all_kwargs[arg_name] = getattr(dataset, name,
+                                           spec.defaults[i - n_args])
+            else:
+                all_kwargs[arg_name] = getattr(dataset, name)
+
+        all_kwargs.update(kwargs)
+        self.params_ = self.fit(*args, **all_kwargs)
         self.dataset_ = dataset
 
         return self
