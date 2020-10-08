@@ -39,7 +39,8 @@ class CombinationTest(BaseEstimator):
             if self.mode == 'undirected':
                 z = np.abs(z)
             p = self.p_value(z, *args, **kwargs)
-        return {'p': p}
+        self.params_ = {'p': p}
+        return self
 
     def summary(self):
         if not hasattr(self, 'params_'):
@@ -88,6 +89,9 @@ class StoufferCombinationTest(CombinationTest):
 
     # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
     _dataset_attr_map = {'z': 'y', 'w': 'v'}
+
+    def fit(self, z, w=None):
+        return super().fit(z, w=w)
 
     def p_value(self, z, w=None):
         if w is None:

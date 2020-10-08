@@ -203,7 +203,7 @@ class MetaRegressionResults:
             # Pass parameters, remembering that v may actually be n
             kwargs = {'y': y_perm, 'X': self.dataset.X}
             kwargs['v' if has_v else 'n'] = v_perm
-            params = self.estimator.fit(**kwargs)
+            params = self.estimator.fit(**kwargs).params_
 
             fe_obs = fe_stats['est'][:, i]
             if fe_obs.ndim == 1:
@@ -304,10 +304,10 @@ class CombinationTestResults:
                 y_perm *= signs
 
             # Some combination tests can handle weights (passed as v)
-            kwargs = {'y': y_perm}
-            if 'v' in getfullargspec(est.fit).args:
-                kwargs['v'] = self.dataset.v
-            params = est.fit(**kwargs)
+            kwargs = {'z': y_perm}
+            if 'w' in getfullargspec(est.fit).args:
+                kwargs['w'] = self.dataset.v
+            params = est.fit(**kwargs).params_
 
             p_obs = self.z[i]
             if p_obs.ndim == 1:

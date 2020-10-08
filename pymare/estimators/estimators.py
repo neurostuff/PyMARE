@@ -26,6 +26,7 @@ def _loopable(wrapped, instance, args, kwargs):
                 "datasets. Consider using the DL, HE, or WLS estimators, "
                 "which handle parallel datasets more efficiently."
                 .format(n_iter))
+
     param_dicts = []
     for i in range(n_iter):
         iter_kwargs = {'X': kwargs['X']}
@@ -35,12 +36,16 @@ def _loopable(wrapped, instance, args, kwargs):
         if 'n' in kwargs:
             n = kwargs['n'][:, i, None] if kwargs['n'].shape[1] > 1 else kwargs['n']
             iter_kwargs['n'] = n
-        param_dicts.append(wrapped(**iter_kwargs))
+        wrapped(**iter_kwargs)
+        param_dicts.append(instance.params_.copy())
+
     params = {}
     for k in param_dicts[0]:
         concat = np.stack([pd[k].squeeze() for pd in param_dicts], axis=-1)
         params[k] = np.atleast_2d(concat)
-    return params
+
+    instance.params_ = params
+    return instance
 
 
 class BaseEstimator(metaclass=ABCMeta):
@@ -82,7 +87,7 @@ class BaseEstimator(metaclass=ABCMeta):
                 all_kwargs[name] = getattr(dataset, attr_name)
 
         all_kwargs.update(kwargs)
-        self.params_ = self.fit(*args, **all_kwargs)
+        self.fit(*args, **all_kwargs)
         self.dataset_ = dataset
 
         return self
@@ -157,7 +162,8 @@ class WeightedLeastSquares(BaseEstimator):
             v = np.ones_like(y)
         beta, inv_cov = weighted_least_squares(y, v, X, self.tau2,
                                                return_cov=True)
-        return {'fe_params': beta, 'tau2': self.tau2, 'inv_cov': inv_cov}
+        self.params_ = {'fe_params': beta, 'tau2': self.tau2, 'inv_cov': inv_cov}
+        return self
 
 
 class DerSimonianLaird(BaseEstimator):
@@ -202,7 +208,8 @@ class DerSimonianLaird(BaseEstimator):
         # Re-estimate beta with tau^2 estimate
         beta_dl, inv_cov = weighted_least_squares(y, v, X, tau2=tau_dl,
                                                   return_cov=True)
-        return {'fe_params': beta_dl, 'tau2': tau_dl, 'inv_cov': inv_cov}
+        self.params_ = {'fe_params': beta_dl, 'tau2': tau_dl, 'inv_cov': inv_cov}
+        return self
 
 
 class Hedges(BaseEstimator):
@@ -230,7 +237,8 @@ class Hedges(BaseEstimator):
         tau_ho = np.maximum(0, tau_ho)
         # Estimate beta with tau^2 estimate
         beta_ho = weighted_least_squares(y, v, X, tau2=tau_ho)
-        return {'fe_params': beta_ho, 'tau2': tau_ho, 'inv_cov': inv_cov}
+        self.params_ = {'fe_params': beta_ho, 'tau2': tau_ho, 'inv_cov': inv_cov}
+        return self
 
 
 class VarianceBasedLikelihoodEstimator(BaseEstimator):
@@ -270,7 +278,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
     @_loopable
     def fit(self, y, v, X):
         # use D-L estimate for initial values
-        est_DL = DerSimonianLaird().fit(y, v, X)
+        est_DL = DerSimonianLaird().fit(y, v, X).params_
         beta = est_DL['fe_params']
         tau2 = est_DL['tau2']
 
@@ -286,7 +294,8 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         beta, tau = res.x[:-1], float(res.x[-1])
         tau = np.max([tau, 0])
         _, inv_cov = weighted_least_squares(y, v, X, tau, True)
-        return {'fe_params': beta[:, None], 'tau2': tau, 'inv_cov': inv_cov}
+        self.params_ = {'fe_params': beta[:, None], 'tau2': tau, 'inv_cov': inv_cov}
+        return self
 
     def _ml_nll(self, theta, y, v, X):
         """ ML negative log-likelihood for meta-regression model. """
@@ -366,8 +375,13 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         beta, sigma, tau = res.x[:-2], float(res.x[-2]), float(res.x[-1])
         tau = np.max([tau, 0])
         _, inv_cov = weighted_least_squares(y, sigma / n, X, tau, True)
-        return {'fe_params': beta[:, None], 'sigma2': np.array(sigma), 'tau2': tau,
-                'inv_cov': inv_cov}
+        self.params_ = {
+            'fe_params': beta[:, None],
+            'sigma2': np.array(sigma),
+            'tau2': tau,
+            'inv_cov': inv_cov
+        }
+        return self
 
     def _ml_nll(self, theta, y, n, X):
         """ ML negative log-likelihood for meta-regression model. """
@@ -492,7 +506,7 @@ class StanMetaRegression(BaseEstimator):
         }
 
         self.result_ = self.model.sampling(data=data, **self.sampling_kwargs)
-        return self.result_
+        return self
 
     def summary(self, ci=95):
         if self.result_ is None:
