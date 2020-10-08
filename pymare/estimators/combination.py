@@ -85,6 +85,10 @@ class StoufferCombinationTest(CombinationTest):
         (3) This estimator does not support meta-regression; any moderators
             passed in to fit() as the X array will be ignored.
     """
+
+    # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
+    _dataset_attr_map = {'z': 'y', 'w': 'v'}
+
     def p_value(self, z, w=None):
         if w is None:
             w = np.ones_like(z)
@@ -128,6 +132,10 @@ class FisherCombinationTest(CombinationTest):
         (3) This estimator does not support meta-regression; any moderators
             passed in to fit() as the X array will be ignored.
     """
+
+    # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
+    _dataset_attr_map = {'z': 'y'}
+
     def p_value(self, z):
         p = self._z_to_p(z)
         chi2 = -2 * np.log(p).sum(0)

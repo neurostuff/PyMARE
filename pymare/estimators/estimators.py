@@ -74,12 +74,12 @@ class BaseEstimator(metaclass=ABCMeta):
 
         for i, name in enumerate(spec.args[1:]):
             # Check for remapped name
-            arg_name = self._dataset_attr_map.get(name, name)
+            attr_name = self._dataset_attr_map.get(name, name)
             if i >= n_args:
-                all_kwargs[arg_name] = getattr(dataset, name,
+                all_kwargs[name] = getattr(dataset, attr_name,
                                            spec.defaults[i - n_args])
             else:
-                all_kwargs[arg_name] = getattr(dataset, name)
+                all_kwargs[name] = getattr(dataset, attr_name)
 
         all_kwargs.update(kwargs)
         self.params_ = self.fit(*args, **all_kwargs)
