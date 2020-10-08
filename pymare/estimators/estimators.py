@@ -45,23 +45,38 @@ def _loopable(wrapped, instance, args, kwargs):
 
 class BaseEstimator(metaclass=ABCMeta):
 
+    def _map_dataset_to_fit_args(self, dataset):
+        # Default mapper for Dataset --> fit() arguments. Will work for any
+        # BaseEstimator subclasses that don't need to remap variable names.
+        kwargs = {}
+        spec = getfullargspec(self.fit)
+        n_kw = len(spec.defaults) if spec.defaults else 0
+        n_args = len(spec.args) - n_kw - 1
+        for i, name in enumerate(spec.args[1:]):
+            if i >= n_args:
+                kwargs[name] = getattr(dataset, name, spec.defaults[i - n_args])
+            else:
+                kwargs[name] = getattr(dataset, name)
+        return kwargs
+
     @abstractmethod
     def fit(self, *args, **kwargs):
         pass
 
-    def fit_dataset(self, dataset=None, **kwargs):
-        if dataset is not None:
-            kwargs = {}
-            spec = getfullargspec(self.fit)
-            n_kw = len(spec.defaults) if spec.defaults else 0
-            n_args = len(spec.args) - n_kw - 1
-            for i, name in enumerate(spec.args[1:]):
-                if i >= n_args:
-                    kwargs[name] = getattr(dataset, name, spec.defaults[i - n_args])
-                else:
-                    kwargs[name] = getattr(dataset, name)
+    def fit_dataset(self, dataset, *args, **kwargs):
+        """ Applies the current estimator to the passed Dataset container.
 
-        self.params_ = self.fit(**kwargs)
+        A convenience interface that wraps fit() and automatically aligns the
+        variables held in a Dataset with the required arguments.
+
+        Args:
+            dataset (Dataset): A PyMARE Dataset instance holding the data.
+            args, kwargs: optional positional and keyword arguments to pass
+                onto the fit() method.
+        """
+        ds_kwargs = self._map_dataset_to_fit_args(dataset)
+        ds_kwargs.update(kwargs)
+        self.params_ = self.fit(*args, **ds_kwargs)
         self.dataset_ = dataset
 
         return self
