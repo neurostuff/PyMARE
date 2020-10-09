@@ -86,7 +86,7 @@ def q_profile(y, v, X, alpha=0.05):
     # Use the D-L estimate of tau^2 as a starting point; when using a fixed
     # value, minimize() sometimes fails to stay in bounds.
     from .estimators import DerSimonianLaird
-    ub_start = DerSimonianLaird().fit(y, v, X).params_['tau2']
+    ub_start = 2 * DerSimonianLaird().fit(y, v, X).params_['tau2']
 
     lb = minimize(lambda x: (q_gen(*args, x) - l_crit)**2, [0],
                   bounds=bds).x[0]
