@@ -9,7 +9,7 @@ from scipy.optimize import minimize, Bounds
 from scipy import stats as ss
 import wrapt
 
-from ..stats import weighted_least_squares
+from ..stats import weighted_least_squares, ensure_2d
 from ..results import (MetaRegressionResults, BayesianMetaRegressionResults,
                        CombinationTestResults)
 
@@ -187,6 +187,10 @@ class DerSimonianLaird(BaseEstimator):
     """
 
     def fit(self, y, v, X):
+
+        y = ensure_2d(y)
+        v = ensure_2d(v)
+
         k, p = X.shape
 
         # Estimate initial betas with WLS, assuming tau^2=0

@@ -83,7 +83,12 @@ class MetaRegressionResults:
                     'X': self.dataset.X,
                     'alpha': alpha,
                 }
-                q_cis = q_profile(**args)
+
+                try:
+                    q_cis = q_profile(**args)
+                except Exception as exc:
+                    q_cis = {'ci_l': np.nan, 'ci_u': np.nan}
+
                 cis.append(q_cis)
 
         else:
