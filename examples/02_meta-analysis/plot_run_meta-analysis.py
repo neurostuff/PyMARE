@@ -29,6 +29,6 @@ n = np.random.randint(5, 50, size=n_studies)
 # Datasets can also be created from pandas DataFrames
 # ---------------------------------------------------
 dataset = core.Dataset(v=v, X=X, y=y, n=n)
-est = estimators.WeightedLeastSquares().fit(dataset)
+est = estimators.WeightedLeastSquares().fit_dataset(dataset)
 results = est.summary()
 print(results.to_df())

@@ -7,13 +7,14 @@ from pymare.results import (MetaRegressionResults, CombinationTestResults,
 from pymare.estimators import (WeightedLeastSquares, DerSimonianLaird,
                                VarianceBasedLikelihoodEstimator,
                                SampleSizeBasedLikelihoodEstimator,
-                               StanMetaRegression, Hedges, Stouffers)
+                               StanMetaRegression, Hedges,
+                               StoufferCombinationTest, FisherCombinationTest)
 
 
 @pytest.fixture
 def fitted_estimator(dataset):
     est = DerSimonianLaird()
-    return est.fit(dataset)
+    return est.fit_dataset(dataset)
 
 
 @pytest.fixture
@@ -24,7 +25,7 @@ def results(fitted_estimator):
 @pytest.fixture
 def results_2d(fitted_estimator, dataset_2d):
     est = VarianceBasedLikelihoodEstimator()
-    return est.fit(dataset_2d).summary()
+    return est.fit_dataset(dataset_2d).summary()
 
 
 def test_meta_regression_results_init_1d(fitted_estimator):
@@ -95,13 +96,13 @@ def test_estimator_summary(dataset):
     with pytest.raises(ValueError):
         results = est.summary()
     
-    est.fit(dataset)
+    est.fit_dataset(dataset)
     summary = est.summary()
     assert isinstance(summary, MetaRegressionResults)
 
 
 def test_exact_perm_test_2d_no_mods(small_dataset_2d):
-    results = DerSimonianLaird().fit(small_dataset_2d).summary()
+    results = DerSimonianLaird().fit_dataset(small_dataset_2d).summary()
     pmr = results.permutation_test(1000)
     assert pmr.n_perm == 8
     assert pmr.exact
@@ -121,7 +122,7 @@ def test_approx_perm_test_1d_with_mods(results):
 
 def test_exact_perm_test_1d_no_mods():
     dataset = Dataset([1, 1, 2, 1.3], [1.5, 1, 2, 4])
-    results = DerSimonianLaird().fit(dataset).summary()
+    results = DerSimonianLaird().fit_dataset(dataset).summary()
     pmr = results.permutation_test(867)
     assert pmr.n_perm == 16
     assert pmr.exact
@@ -131,7 +132,7 @@ def test_exact_perm_test_1d_no_mods():
 
 
 def test_approx_perm_test_with_n_based_estimator(dataset_n):
-    results = SampleSizeBasedLikelihoodEstimator().fit(dataset_n).summary()
+    results = SampleSizeBasedLikelihoodEstimator().fit_dataset(dataset_n).summary()
     pmr = results.permutation_test(100)
     assert pmr.n_perm == 100
     assert not pmr.exact
@@ -142,7 +143,7 @@ def test_approx_perm_test_with_n_based_estimator(dataset_n):
 
 def test_stouffers_perm_test_exact():
     dataset = Dataset([1, 1, 2, 1.3], [1.5, 1, 2, 4])
-    results = Stouffers().fit(dataset).summary()
+    results = StoufferCombinationTest().fit_dataset(dataset).summary()
     pmr = results.permutation_test(2000)
     assert pmr.n_perm == 16
     assert pmr.exact
@@ -154,11 +155,10 @@ def test_stouffers_perm_test_exact():
 def test_stouffers_perm_test_approx():
     y = [2.8, -0.2, -1, 4.5, 1.9, 2.38, 0.6, 1.88, -0.4, 1.5, 3.163, 0.7]
     dataset = Dataset(y)
-    results = Stouffers().fit(dataset).summary()
+    results = StoufferCombinationTest().fit_dataset(dataset).summary()
     pmr = results.permutation_test(2000)
     assert not pmr.exact
     assert pmr.n_perm == 2000
     assert isinstance(pmr.results, CombinationTestResults)
     assert pmr.perm_p['fe_p'].shape == (1,)
     assert 'tau2_p' not in pmr.perm_p
-

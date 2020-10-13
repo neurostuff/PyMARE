@@ -177,7 +177,7 @@ class MetaRegressionResults:
             y_perm = np.repeat(y[:, None], n_perm, axis=1)
 
             # for v, we might actually be working with n, depending on estimator
-            has_v = 'v' in getfullargspec(self.estimator._fit).args[1:]
+            has_v = 'v' in getfullargspec(self.estimator.fit).args[1:]
             v = self.dataset.v[:, i] if has_v else self.dataset.n[:, i]
 
             v_perm = np.repeat(v[:, None], n_perm, axis=1)
@@ -203,7 +203,7 @@ class MetaRegressionResults:
             # Pass parameters, remembering that v may actually be n
             kwargs = {'y': y_perm, 'X': self.dataset.X}
             kwargs['v' if has_v else 'n'] = v_perm
-            params = self.estimator._fit(**kwargs)
+            params = self.estimator.fit(**kwargs).params_
 
             fe_obs = fe_stats['est'][:, i]
             if fe_obs.ndim == 1:
@@ -244,21 +244,21 @@ class CombinationTestResults:
     @lru_cache(maxsize=1)
     def z(self):
         if self._z is None:
-            self._z = ss.norm.ppf(self.p)
+            self._z = ss.norm.isf(self.p)
         return self._z
 
     @property
     @lru_cache(maxsize=1)
     def p(self):
         if self._p is None:
-            self._p = ss.norm.cdf(self.z)
+            self._p = ss.norm.sf(self.z)
         return self._p
 
     def permutation_test(self, n_perm=1000):
         """Run permutation test.
 
         Args:
-            n_perm (int):Number of permutations to generate. The actual number
+            n_perm (int): Number of permutations to generate. The actual number
                 used may be smaller in the event of an exact test (see below),
                 but will never be larger.
 
@@ -277,7 +277,7 @@ class CombinationTestResults:
         n_obs, n_datasets = self.dataset.y.shape
 
         # create results arrays
-        z_p = np.zeros_like(self.z)
+        p_p = np.zeros_like(self.z)
 
         # Calculate # of permutations and determine whether to use exact test
         n_exact = 2**n_obs
@@ -288,8 +288,8 @@ class CombinationTestResults:
         else:
             exact = False
 
-        # Initialize a new version of the estimator so we can guarantee z input
-        est = self.estimator.__class__(input='z')
+        # Initialize a copy of the estimator to prevent overwriting results
+        est = self.estimator.__class__(mode=self.estimator.mode)
 
         # Loop over parallel datasets
         for i in range(n_datasets):
@@ -303,21 +303,21 @@ class CombinationTestResults:
                 signs = np.random.choice(np.array([-1, 1]), (n_obs, n_perm))
                 y_perm *= signs
 
-            # Pass parameters, remembering that v may actually be n
-            kwargs = {'y': y_perm}
-            if 'v' in getfullargspec(est._fit).args:
-                kwargs['v'] = self.dataset.v
-            params = est._fit(**kwargs)
+            # Some combination tests can handle weights (passed as v)
+            kwargs = {'z': y_perm}
+            if 'w' in getfullargspec(est.fit).args:
+                kwargs['w'] = self.dataset.v
+            params = est.fit(**kwargs).params_
 
-            z_obs = self.z[i]
-            if z_obs.ndim == 1:
-                z_obs = z_obs[:, None]
-            z_p[i] = (z_obs > params['z']).mean()
+            p_obs = self.z[i]
+            if p_obs.ndim == 1:
+                p_obs = p_obs[:, None]
+            p_p[i] = (p_obs > params['p']).mean()
 
         # p-values can't be smaller than 1/n_perm
-        z_p = np.maximum(1 / n_perm, z_p)
+        p_p = np.maximum(1 / n_perm, p_p)
 
-        return PermutationTestResults(self, {'fe_p': z_p}, n_perm, exact)
+        return PermutationTestResults(self, {'fe_p': p_p}, n_perm, exact)
 
 
 class PermutationTestResults:
@@ -381,7 +381,7 @@ class BayesianMetaRegressionResults:
             A pandas DataFrame, unless the `fmt="xarray"` argument is passed in
             kwargs, in which case an xarray Dataset is returned.
         """
-        var_names = ['fe_params', 'tau2']
+        var_names = ['beta', 'tau2']
         if include_theta:
             var_names.append('theta')
         var_names = kwargs.pop('var_names', var_names)

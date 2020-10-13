@@ -1,7 +1,8 @@
 from .estimators import (WeightedLeastSquares, DerSimonianLaird,
                          VarianceBasedLikelihoodEstimator,
                          SampleSizeBasedLikelihoodEstimator,
-                         StanMetaRegression, Hedges, Stouffers, Fishers)
+                         StanMetaRegression, Hedges)
+from .combination import StoufferCombinationTest, FisherCombinationTest
 
 __all__ = [
     'WeightedLeastSquares',
@@ -10,6 +11,6 @@ __all__ = [
     'SampleSizeBasedLikelihoodEstimator',
     'StanMetaRegression',
     'Hedges',
-    'Stouffers',
-    'Fishers'
+    'StoufferCombinationTest',
+    'FisherCombinationTest'
 ]
