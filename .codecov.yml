@@ -7,12 +7,12 @@ coverage:
     project:
       default:
         # basic
-        target: 0
-        threshold: null
+        target: auto
+        threshold: 2%
     patch:
       default:
-        target: 0
-        threshold: null
+        target: auto
+        threshold: 2%
   ignore:
     - 'pymare/tests/'
     - 'pymare/_version.py'
