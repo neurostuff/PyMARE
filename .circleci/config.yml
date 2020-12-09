@@ -7,7 +7,7 @@ orbs:
   codecov: codecov/codecov@1.0.5
 jobs:
 
-  build:
+  make_environment:
     working_directory: /tmp/src/PyMARE
     docker:
       - image: continuumio/miniconda3
@@ -98,19 +98,19 @@ workflows:
   version: 2.1
   build_test_deploy:
     jobs:
-      - build:
+      - make_environment:
           filters:
             tags:
               only: /.*/
       - build_docs:
           requires:
-            - build
+            - make_environment
           filters:
             tags:
               only: /.*/
       - coverage_and_tests:
           requires:
-            - build
+            - make_environment
           filters:
             tags:
               only: /.*/

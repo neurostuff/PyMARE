@@ -19,10 +19,10 @@ use it to compare PyMARE's estimators.
     via a number of methods.
 """
 # sphinx_gallery_thumbnail_number = 3
-import numpy as np
 import matplotlib.pyplot as plt
-from scipy import stats
+import numpy as np
 import seaborn as sns
+from scipy import stats
 
 import pymare
 
@@ -65,15 +65,15 @@ p = stats.norm.sf(abs(z)) * 2
 # -----------------------------------------------------------------------------
 fig, axes = plt.subplots(nrows=5, figsize=(16, 10))
 sns.distplot(y, ax=axes[0], bins=20)
-axes[0].set_title('y')
+axes[0].set_title("y")
 sns.distplot(v, ax=axes[1], bins=20)
-axes[1].set_title('v')
+axes[1].set_title("v")
 sns.distplot(n, ax=axes[2], bins=20)
-axes[2].set_title('n')
+axes[2].set_title("n")
 sns.distplot(z, ax=axes[3], bins=20)
-axes[3].set_title('z')
+axes[3].set_title("z")
 sns.distplot(p, ax=axes[4], bins=20)
-axes[4].set_title('p')
+axes[4].set_title("p")
 for i in range(5):
     axes[i].set_yticks([])
 fig.tight_layout()
@@ -88,20 +88,27 @@ study_ticks = np.arange(N_STUDIES)
 
 # Get 95% CI for individual studies
 lower_bounds, upper_bounds = var_to_ci(y, v, n)
-ax.scatter(y, study_ticks+1)
+ax.scatter(y, study_ticks + 1)
 for study in study_ticks:
-    ax.plot((lower_bounds[study], upper_bounds[study]), (study+1, study+1), color='blue')
-ax.axvline(0, color='gray', alpha=0.2, linestyle='--', label='Zero')
-ax.axvline(np.mean(y), color='orange', alpha=0.2, label='Mean of Observed Effects')
+    ax.plot(
+        (lower_bounds[study], upper_bounds[study]), (study + 1, study + 1), color="blue"
+    )
+ax.axvline(0, color="gray", alpha=0.2, linestyle="--", label="Zero")
+ax.axvline(np.mean(y), color="orange", alpha=0.2, label="Mean of Observed Effects")
 
 # Get 95% CI for true effect
 lower_bound, upper_bound = var_to_ci(TRUE_EFFECT, BETWEEN_STUDY_VAR, 1)
-ax.scatter((TRUE_EFFECT,), (N_STUDIES+1,), color='green', label='True Effect')
-ax.plot((lower_bound, upper_bound), (N_STUDIES+1, N_STUDIES+1),
-        color='green', linewidth=3, label='Between-Study 95% CI')
-ax.set_ylim((0, N_STUDIES+2))
-ax.set_xlabel('Mean (95% CI)')
-ax.set_ylabel('Study')
+ax.scatter((TRUE_EFFECT,), (N_STUDIES + 1,), color="green", label="True Effect")
+ax.plot(
+    (lower_bound, upper_bound),
+    (N_STUDIES + 1, N_STUDIES + 1),
+    color="green",
+    linewidth=3,
+    label="Between-Study 95% CI",
+)
+ax.set_ylim((0, N_STUDIES + 2))
+ax.set_xlabel("Mean (95% CI)")
+ax.set_ylabel("Study")
 ax.legend()
 fig.tight_layout()
 
@@ -147,14 +154,14 @@ results = {}
 # Notice that these models don't use :class:`pymare.core.Dataset` objects.
 stouff = pymare.estimators.StoufferCombinationTest()
 stouff.fit(z[:, None])
-print('Stouffers')
-print('p: {}'.format(stouff.params_["p"]))
+print("Stouffers")
+print("p: {}".format(stouff.params_["p"]))
 print()
 
 fisher = pymare.estimators.FisherCombinationTest()
 fisher.fit(z[:, None])
-print('Fishers')
-print('p: {}'.format(fisher.params_["p"]))
+print("Fishers")
+print("p: {}".format(fisher.params_["p"]))
 
 ###############################################################################
 # Now we have a fixed effects model
@@ -164,8 +171,8 @@ print('p: {}'.format(fisher.params_["p"]))
 wls = pymare.estimators.WeightedLeastSquares()
 wls.fit_dataset(dset)
 wls_summary = wls.summary()
-results['Weighted Least Squares'] = wls_summary.to_df()
-print('Weighted Least Squares')
+results["Weighted Least Squares"] = wls_summary.to_df()
+print("Weighted Least Squares")
 print(wls_summary.to_df().T)
 
 ###############################################################################
@@ -182,51 +189,51 @@ print(wls_summary.to_df().T)
 dsl = pymare.estimators.DerSimonianLaird()
 dsl.fit_dataset(dset)
 dsl_summary = dsl.summary()
-results['DerSimonian-Laird'] = dsl_summary.to_df()
-print('DerSimonian-Laird')
+results["DerSimonian-Laird"] = dsl_summary.to_df()
+print("DerSimonian-Laird")
 print(dsl_summary.to_df().T)
 print()
 
 hedge = pymare.estimators.Hedges()
 hedge.fit_dataset(dset)
 hedge_summary = hedge.summary()
-results['Hedges'] = hedge_summary.to_df()
-print('Hedges')
+results["Hedges"] = hedge_summary.to_df()
+print("Hedges")
 print(hedge_summary.to_df().T)
 print()
 
-vb_ml = pymare.estimators.VarianceBasedLikelihoodEstimator(method='ML')
+vb_ml = pymare.estimators.VarianceBasedLikelihoodEstimator(method="ML")
 vb_ml.fit_dataset(dset)
 vb_ml_summary = vb_ml.summary()
-results['Variance-Based with ML'] = vb_ml_summary.to_df()
-print('Variance-Based with ML')
+results["Variance-Based with ML"] = vb_ml_summary.to_df()
+print("Variance-Based with ML")
 print(vb_ml_summary.to_df().T)
 print()
 
-vb_reml = pymare.estimators.VarianceBasedLikelihoodEstimator(method='REML')
+vb_reml = pymare.estimators.VarianceBasedLikelihoodEstimator(method="REML")
 vb_reml.fit_dataset(dset)
 vb_reml_summary = vb_reml.summary()
-results['Variance-Based with REML'] = vb_reml_summary.to_df()
-print('Variance-Based with REML')
+results["Variance-Based with REML"] = vb_reml_summary.to_df()
+print("Variance-Based with REML")
 print(vb_reml_summary.to_df().T)
 print()
 
 # The ``SampleSizeBasedLikelihoodEstimator`` estimates between-study variance
 # using ``y`` and ``n``, but assumes within-study variance is homogenous
 # across studies.
-sb_ml = pymare.estimators.SampleSizeBasedLikelihoodEstimator(method='ML')
+sb_ml = pymare.estimators.SampleSizeBasedLikelihoodEstimator(method="ML")
 sb_ml.fit_dataset(dset)
 sb_ml_summary = sb_ml.summary()
-results['Sample Size-Based with ML'] = sb_ml_summary.to_df()
-print('Sample Size-Based with ML')
+results["Sample Size-Based with ML"] = sb_ml_summary.to_df()
+print("Sample Size-Based with ML")
 print(sb_ml_summary.to_df().T)
 print()
 
-sb_reml = pymare.estimators.SampleSizeBasedLikelihoodEstimator(method='REML')
+sb_reml = pymare.estimators.SampleSizeBasedLikelihoodEstimator(method="REML")
 sb_reml.fit_dataset(dset)
 sb_reml_summary = sb_reml.summary()
-results['Sample Size-Based with REML'] = sb_reml_summary.to_df()
-print('Sample Size-Based with REML')
+results["Sample Size-Based with REML"] = sb_reml_summary.to_df()
+print("Sample Size-Based with REML")
 print(sb_reml_summary.to_df().T)
 
 ###############################################################################
@@ -241,18 +248,24 @@ print(sb_reml_summary.to_df().T)
 fig, ax = plt.subplots(figsize=(8, 8))
 
 for i, (estimator_name, summary_df) in enumerate(results.items()):
-    ax.scatter((summary_df.loc[0, 'estimate'],), (i+1,), label=estimator_name)
-    ax.plot((summary_df.loc[0, 'ci_0.025'],  summary_df.loc[0, 'ci_0.975']),
-            (i+1, i+1),
-            linewidth=3)
+    ax.scatter((summary_df.loc[0, "estimate"],), (i + 1,), label=estimator_name)
+    ax.plot(
+        (summary_df.loc[0, "ci_0.025"], summary_df.loc[0, "ci_0.975"]),
+        (i + 1, i + 1),
+        linewidth=3,
+    )
 
 # Get 95% CI for true effect
 lower_bound, upper_bound = var_to_ci(TRUE_EFFECT, BETWEEN_STUDY_VAR, 1)
-ax.scatter((TRUE_EFFECT,), (i+2,), label='True Effect')
-ax.plot((lower_bound, upper_bound), (i+2, i+2),
-        linewidth=3, label='Between-Study 95% CI')
-ax.set_ylim((0, i+3))
-ax.set_yticklabels([None] + list(results.keys()) + ['True Effect'])
+ax.scatter((TRUE_EFFECT,), (i + 2,), label="True Effect")
+ax.plot(
+    (lower_bound, upper_bound),
+    (i + 2, i + 2),
+    linewidth=3,
+    label="Between-Study 95% CI",
+)
+ax.set_ylim((0, i + 3))
+ax.set_yticklabels([None] + list(results.keys()) + ["True Effect"])
 
-ax.set_xlabel('Mean (95% CI)')
+ax.set_xlabel("Mean (95% CI)")
 fig.tight_layout()
