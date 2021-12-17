@@ -38,7 +38,13 @@ DOWNLOAD_URL = "https://github.com/neurostuff/{name}/archive/{ver}.tar.gz".forma
     name=PACKAGENAME, ver=VERSION
 )
 
-REQUIRES = ["numpy>=1.8.0", "pandas", "scipy", "sympy", "wrapt"]
+REQUIRES = [
+    "numpy>=1.8.0",
+    "pandas",
+    "scipy",
+    "sympy",
+    "wrapt",
+]
 
 STAN_REQUIRES = ["pystan", "arviz"]
 
@@ -60,6 +66,7 @@ DOC_REQUIRES = [
     "sphinx-argparse",
     "numpydoc",
     "m2r",
+    "mistune<2",  # just temporary until m2r addresses this issue
     "sphinx_copybutton",
     "sphinx_gallery",
     "pillow",
