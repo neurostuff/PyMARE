@@ -424,23 +424,26 @@ class StanMetaRegression(BaseEstimator):
         when fitting the meta-regression model repeatedly to different data;
         the separation of .compile() and .fit() steps allows one to compile
         the model only once.
+
+    Warning:
+        With changes to Stan in version 3, which requires Python 3.7, this class no longer works.
+        We will try to fix it in the future.
     """
 
     _result_cls = BayesianMetaRegressionResults
 
     def __init__(self, **sampling_kwargs):
         self.sampling_kwargs = sampling_kwargs
-        self.spec_ = None
-        self.posterior_ = None
+        self.model = None
         self.result_ = None
 
     def compile(self):
-        """Determine the stan model's specification."""
+        """Compile the Stan model."""
         # Note: we deliberately use a centered parameterization for the
         # thetas at the moment. This is sub-optimal in terms of estimation,
         # but allows us to avoid having to add extra logic to detect and
         # handle intercepts in X.
-        self.spec_ = """
+        spec = """
         data {
             int<lower=1> N;
             int<lower=1> K;
@@ -464,6 +467,14 @@ class StanMetaRegression(BaseEstimator):
             theta ~ normal(0, tau2);
         }
         """
+        try:
+            from pystan import StanModel
+        except ImportError:
+            raise ImportError(
+                "Please install pystan or, if using Python 3.7+, switch to Python 3.6."
+            )
+
+        self.model = StanModel(model_code=spec)
 
     def fit(self, y, v, X, groups=None):
         """Run the Stan sampler and return results.
@@ -490,8 +501,6 @@ class StanMetaRegression(BaseEstimator):
             `groups` argument can be used to specify the nesting structure
             (i.e., which rows in `y`, `v`, and `X` belong to each study).
         """
-        import stan
-
         if y.ndim > 1 and y.shape[1] > 1:
             raise ValueError(
                 "The StanMetaRegression estimator currently does "
@@ -499,7 +508,7 @@ class StanMetaRegression(BaseEstimator):
                 "shape {}.".format(y.shape)
             )
 
-        if self.spec_ is None:
+        if self.model is None:
             self.compile()
 
         N = y.shape[0]
@@ -516,8 +525,7 @@ class StanMetaRegression(BaseEstimator):
             "sigma": v.ravel(),
         }
 
-        self.posterior_ = stan.build(self.spec_, data)
-        self.result_ = self.posterior_.sample(**self.sampling_kwargs)
+        self.result_ = self.model.sampling(data=data, **self.sampling_kwargs)
         return self
 
     def summary(self, ci=95):
