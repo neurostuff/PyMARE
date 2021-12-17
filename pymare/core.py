@@ -19,26 +19,39 @@ from .stats import ensure_2d
 class Dataset:
     """Container for input data and arguments to estimators.
 
-    Args:
-        y (array-like, str): 1d array of study-level estimates with length K,
-            or the name of the column in data containing the y values.
-        v (array-like, str, optional): 1d array of study-level variances with
-            length K, or the name of the column in data containing v values.
-        X (array-like, list, optional): 1d or 2d array containing study-level
-            predictors (dimensions K x P), or a list of strings giving the
-            names of the columns in data containing the X values.
-        n (array-like, str, optional): 1d array of study-level sample sizes
-            (length K), or the name of the corresponding column in data.
-        data (pandas.DataFrame, optional): A pandas DataFrame containing y, v,
-            X, and/or n values. By default, columns are expected to have the
-            same names as arguments (e.g., the y values will be expected in the
-            'y' column). This can be modified by passing strings giving column
-            names to any of the y, v, X, or n arguments.
-        X_names ([str], optional): List of length P containing the names of the
-            predictors. Ignored if data is provided (use X to specify columns).
-        add_intercept (bool, optional): If True, an intercept column is
-            automatically added to the predictor matrix. If False, the
-            predictors matrix is passed as-is to estimators.
+    Parameters
+    ----------
+    y : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
+        1d array of study-level estimates with length K, or the name of the column in data
+        containing the y values.
+        Default is None.
+    v : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
+        1d array of study-level variances with length K, or the name of the column in data
+        containing v values.
+        Default is None.
+    X : None or :obj:`numpy.ndarray` of shape (K,[P]) or :obj:`list` of :obj:`str`, optional
+        1d or 2d array containing study-level predictors (dimensions K x P),
+        or a list of strings giving the names of the columns in data containing the X values.
+        Default is None.
+    n : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
+        1d array of study-level sample sizes (length K), or the name of the corresponding column
+        in ``data``.
+        Default is None.
+    data : None or :obj:`pandas.DataFrame`, optional
+        A pandas DataFrame containing y, v, X, and/or n values.
+        By default, columns are expected to have the same names as arguments
+        (e.g., the y values will be expected in the 'y' column).
+        This can be modified by passing strings giving column names to any of the ``y``, ``v``,
+        ``X``, or ``n`` arguments.
+        Default is None.
+    X_names : None or :obj:`list` of :obj:`str`, optional
+        List of length P containing the names of the predictors.
+        Ignored if ``data`` is provided (use ``X`` to specify columns).
+        Default is None.
+    add_intercept : :obj:`bool`, optional
+        If True, an intercept column is automatically added to the predictor matrix.
+        If False, the predictors matrix is passed as-is to estimators.
+        Default is True.
     """
 
     def __init__(
@@ -94,47 +107,65 @@ def meta_regression(
     alpha=0.05,
     **kwargs,
 ):
-    """Fits the standard meta-regression/meta-analysis model to provided data.
+    """Fit the standard meta-regression/meta-analysis model to provided data.
 
-    Args:
-        y (array-like, str): 1d array of study-level estimates with length K,
-            or the name of the column in data containing the y values.
-        v (array-like, str, optional): 1d array of study-level variances with
-            length K, or the name of the column in data containing v values.
-        X (array-like, list, optional): 1d or 2d array containing study-level
-            predictors (dimensions K x P), or a list of strings giving the
-            names of the columns in data containing the X values.
-        n (array-like, str, optional): 1d array of study-level sample sizes
-            (length K), or the name of the corresponding column in data.
-        data (pandas.DataFrame, pymare.Dataset, optional): If a Dataset
-            instance is passed, the y, v, X, n and associated arguments are
-            ignored, and data is passed directly to the selected estimator.
-            If a pandas DataFrame, y, v, X and/or n values are taken from the
-            DF columns. By default, columns are expected to have the same names
-            as arguments (e.g., the y values will be expected in the 'y'
-            column). This can be modified by passing strings giving column
-            names to any of the y, v, X, or n arguments.
-        X_names ([str], optional): List of length P containing the names of the
-            predictors. Ignored if data is provided (use X to specify columns).
-        add_intercept (bool, optional): If True, an intercept column is
-            automatically added to the predictor matrix. If False, the
-            predictors matrix is passed as-is to estimators.
-        method (str, optional): Name of estimation method. Defaults to 'ML'.
-            Supported estimators include:
-                * 'ML': Maximum-likelihood estimator
-                * 'REML': Restricted maximum-likelihood estimator
-                * 'DL': DerSimonian-Laird estimator
-                * 'HE': Hedges estimator
-                * 'WLS' or 'FE': Weighted least squares (fixed effects only)
-                * 'Stan': Full Bayesian MCMC estimation via Stan
-        ci_method (str, optional): Estimation method to use when computing
-            uncertainty estimates. Currently only 'QP' is supported. Defaults
-            to 'QP'. Ignored if method == 'Stan'.
-        alpha (float, optional): Desired alpha level (CIs will have 1 - alpha
-            coverage). Defaults to 0.05.
-        kwargs: Optional keyword arguments to pass onto the chosen estimator.
+    Parameters
+    ----------
+    y : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
+        1d array of study-level estimates with length K, or the name of the column in data
+        containing the y values.
+        Default is None.
+    v : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
+        1d array of study-level variances with length K, or the name of the column in data
+        containing v values.
+        Default is None.
+    X : None or :obj:`numpy.ndarray` of shape (K,[P]) or :obj:`list` of :obj:`str`, optional
+        1d or 2d array containing study-level predictors (dimensions K x P),
+        or a list of strings giving the names of the columns in data containing the X values.
+        Default is None.
+    n : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
+        1d array of study-level sample sizes (length K), or the name of the corresponding column
+        in ``data``.
+        Default is None.
+    data : None or :obj:`pandas.DataFrame` or :obj:`~pymare.core.Dataset`, optional
+        If a Dataset instance is passed, the y, v, X, n and associated arguments are ignored,
+        and data is passed directly to the selected estimator.
+        If a pandas DataFrame, y, v, X and/or n values are taken from the DF columns.
+        By default, columns are expected to have the same names as arguments
+        (e.g., the y values will be expected in the 'y' column).
+        This can be modified by passing strings giving column names to any of the y, v, X, or n
+        arguments.
+    X_names : None or :obj:`list` of :obj:`str`, optional
+        List of length P containing the names of the predictors.
+        Ignored if ``data`` is provided (use ``X`` to specify columns).
+        Default is None.
+    add_intercept : :obj:`bool`, optional
+        If True, an intercept column is automatically added to the predictor matrix.
+        If False, the predictors matrix is passed as-is to estimators.
+        Default is True.
+    method : {"ML", "REML", "DL", "HE", "WLS", "FE", "Stan"}, optional
+        Name of estimation method. Default is 'ML'.
+        Supported estimators include:
 
-    Returns:
+            - 'ML': Maximum-likelihood estimator
+            - 'REML': Restricted maximum-likelihood estimator
+            - 'DL': DerSimonian-Laird estimator
+            - 'HE': Hedges estimator
+            - 'WLS' or 'FE': Weighted least squares (fixed effects only)
+            - 'Stan': Full Bayesian MCMC estimation via Stan
+    ci_method : {"QP"}, optional
+        Estimation method to use when computing uncertainty estimates.
+        Currently only 'QP' is supported. Default is 'QP'.
+        Ignored if ``method == 'Stan'``.
+    alpha : :obj:`float`, optional
+        Desired alpha level (CIs will have 1 - alpha coverage). Default is 0.05.
+    kwargs : :obj:`dict`, optional
+        Optional keyword arguments to pass onto the chosen estimator.
+
+    Returns
+    -------
+    :obj:`~pymare.results.MetaRegressionResults` or \
+        :obj:`~pymare.results.BayesianMetaRegressionResults`
         A MetaRegressionResults or BayesianMetaRegressionResults instance,
         depending on the specified method ('Stan' will return the latter; all
         other methods return the former).

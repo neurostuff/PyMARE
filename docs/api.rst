@@ -44,8 +44,9 @@ API
    estimators.SampleSizeBasedLikelihoodEstimator
    estimators.StanMetaRegression
    estimators.Hedges
-   estimators.Stouffers
-   estimators.Fishers
+   estimators.StoufferCombinationTest
+   estimators.FisherCombinationTest
+   estimators.estimators.BaseEstimator
 
 
 .. _api_results_ref:

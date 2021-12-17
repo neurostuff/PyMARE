@@ -12,13 +12,17 @@ exec_("from sympy.stats import *", _locals)
 
 
 class Expression:
-    """Represents a single statistical expression.
+    """Represent a single statistical expression.
 
-    Args:
-        expr (str): String representation of the mathematical expression.
-        description (str, optional): Optional text description of expression.
-        type (int, optional): Indicates whether the expression applies
-            in the one-sample case (1), two-sample case (2), or both (0).
+    Parameters
+    ----------
+    expr : :obj:`str`
+        String representation of the mathematical expression.
+    description : :obj:`str`, optional
+        Optional text description of expression.
+    type : :obj:`int`, optional
+        Indicates whether the expression applies in the one-sample case (1), two-sample case (2),
+        or both (0).
     """
 
     def __init__(self, expression, description=None, type=0):
@@ -48,19 +52,23 @@ one_sample_expressions, two_sample_expressions = _load_expressions()
 
 
 def select_expressions(target, known_vars, type=1):
-    """Select a ~minimal system of expressions needed to solve for the target.
+    """Select a minimal system of expressions needed to solve for the target.
 
-    Args:
-        target (str): The named statistic to solve for ('t', 'd', 'g', etc.).
-        known_vars (set): A set of strings giving the names of the known
-            variables.
-        type (int): Restricts the system to expressions that apply in
-            the one-sample case (1), two-sample case (2), or both (None).
+    Parameters
+    ----------
+    target : :obj:`str`
+        The named statistic to solve for ('t', 'd', 'g', etc.).
+    known_vars : :obj:`set` or :obj:`str`
+        A set of strings giving the names of the known variables.
+    type : :obj:`int`, optional
+        Restrict the system to expressions that apply in the one-sample case (1),
+        two-sample case (2), or both (None).
 
-    Returns:
+    Returns
+    -------
+    :obj:`list` of :obj:`~pymare.effectsize.Expression` or None
         A list of Expression instances, or None if there is no solution.
     """
-
     exp_dict = defaultdict(list)
 
     exprs = one_sample_expressions if type == 1 else two_sample_expressions
@@ -80,7 +88,6 @@ def select_expressions(target, known_vars, type=1):
 
     def df_search(sym, exprs, known, visited):
         """Recursively select expressions needed to solve for sym."""
-
         results = []
 
         for exp in exp_dict[sym]:
