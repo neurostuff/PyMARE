@@ -5,7 +5,6 @@
 
 def main():
     """ Install entry-point """
-    import pprint
     import versioneer
     from io import open
     import os.path as op

@@ -1,6 +1,6 @@
+import importlib.util
 import json
 import os.path as op
-import importlib.util
 
 spec = importlib.util.spec_from_file_location(
     "_version", op.join(op.dirname(__file__), "pymare/_version.py")
@@ -42,19 +42,29 @@ REQUIRES = ["numpy>=1.8.0", "pandas", "scipy", "sympy", "wrapt"]
 
 STAN_REQUIRES = ["pystan", "arviz"]
 
-TESTS_REQUIRES = ["codecov", "coverage", "coveralls", "flake8", "pytest", "pytest-cov"]
+TESTS_REQUIRES = [
+    'codecov',
+    'coverage',
+    'coveralls',
+    'flake8',
+    "flake8-black",
+    "flake8-docstrings",
+    "flake8-isort",
+    'pytest',
+    'pytest-cov'
+]
 
 DOC_REQUIRES = [
-    "matplotlib",
-    "m2r",
-    "numpydoc",
-    "pillow",
-    "seaborn",
-    "sphinx~=2.4.2",
-    "sphinx-argparse",
-    "sphinx_copybutton",
-    "sphinx_gallery",
-    "sphinx_rtd_theme",
+    'sphinx~=2.4.2',
+    'sphinx_rtd_theme',
+    'sphinx-argparse',
+    'numpydoc',
+    'm2r',
+    'sphinx_copybutton',
+    'sphinx_gallery',
+    'pillow',
+    'matplotlib',
+    'seaborn',
 ]
 
 EXTRA_REQUIRES = {
