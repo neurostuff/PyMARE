@@ -29,7 +29,15 @@ PyMARE is a Python package for meta-analyses and meta-regressions.
   :target: https://codecov.io/gh/neurostuff/pymare
   :alt: Codecov
 
-.. include:: contents.rst
+.. toctree::
+   :maxdepth: 2
+   :caption: Contents:
+
+   about
+   installation
+   auto_examples/index
+   contributing
+   api
 
 Indices and tables
 ------------------
