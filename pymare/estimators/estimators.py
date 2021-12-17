@@ -430,16 +430,17 @@ class StanMetaRegression(BaseEstimator):
 
     def __init__(self, **sampling_kwargs):
         self.sampling_kwargs = sampling_kwargs
-        self.model = None
+        self.spec_ = None
+        self.posterior_ = None
         self.result_ = None
 
     def compile(self):
-        """Compile the Stan model."""
+        """Determine the stan model's specification."""
         # Note: we deliberately use a centered parameterization for the
         # thetas at the moment. This is sub-optimal in terms of estimation,
         # but allows us to avoid having to add extra logic to detect and
         # handle intercepts in X.
-        spec = """
+        self.spec_ = """
         data {
             int<lower=1> N;
             int<lower=1> K;
@@ -463,14 +464,6 @@ class StanMetaRegression(BaseEstimator):
             theta ~ normal(0, tau2);
         }
         """
-        try:
-            # It was called pystan in 3.6
-            from pystan import StanModel
-        except ImportError:
-            # From 3.7+ it's just stan
-            from stan import StanModel
-
-        self.model = StanModel(model_code=spec)
 
     def fit(self, y, v, X, groups=None):
         """Run the Stan sampler and return results.
@@ -497,6 +490,8 @@ class StanMetaRegression(BaseEstimator):
             `groups` argument can be used to specify the nesting structure
             (i.e., which rows in `y`, `v`, and `X` belong to each study).
         """
+        import stan
+
         if y.ndim > 1 and y.shape[1] > 1:
             raise ValueError(
                 "The StanMetaRegression estimator currently does "
@@ -504,7 +499,7 @@ class StanMetaRegression(BaseEstimator):
                 "shape {}.".format(y.shape)
             )
 
-        if self.model is None:
+        if self.spec_ is None:
             self.compile()
 
         N = y.shape[0]
@@ -521,7 +516,8 @@ class StanMetaRegression(BaseEstimator):
             "sigma": v.ravel(),
         }
 
-        self.result_ = self.model.sampling(data=data, **self.sampling_kwargs)
+        self.posterior_ = stan.build(self.spec_, data)
+        self.result_ = self.posterior_.sample(**self.sampling_kwargs)
         return self
 
     def summary(self, ci=95):

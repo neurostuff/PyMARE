@@ -46,7 +46,7 @@ REQUIRES = [
     "wrapt",
 ]
 
-STAN_REQUIRES = ["pystan", "arviz"]
+STAN_REQUIRES = ["pystan>=3", "arviz"]
 
 TESTS_REQUIRES = [
     "codecov",
