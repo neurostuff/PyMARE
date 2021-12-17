@@ -31,12 +31,7 @@ dataset = core.Dataset(y=y, v=v, X=X)
 ###############################################################################
 # Datasets can also be created from pandas DataFrames
 # ---------------------------------------------------
-df = pd.DataFrame({
-    'y': [2, 4, 6],
-    'v_alt': [100, 100, 100],
-    'X1': [5, 2, 1],
-    'X7': [9, 8, 7]
-})
-dataset = core.Dataset(v='v_alt', X=['X1', 'X7'], data=df, add_intercept=False)
+df = pd.DataFrame({"y": [2, 4, 6], "v_alt": [100, 100, 100], "X1": [5, 2, 1], "X7": [9, 8, 7]})
+dataset = core.Dataset(v="v_alt", X=["X1", "X7"], data=df, add_intercept=False)
 
 pprint(vars(dataset))

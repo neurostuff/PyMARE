@@ -1,25 +1,28 @@
-from abc import abstractmethod
 import warnings
+from abc import abstractmethod
 
 import numpy as np
 import scipy.stats as ss
 
-from .estimators import BaseEstimator
 from ..results import CombinationTestResults
+from .estimators import BaseEstimator
 
 
 class CombinationTest(BaseEstimator):
     """Base class for methods based on combining p/z values."""
-    def __init__(self, mode='directed'):
+
+    def __init__(self, mode="directed"):
         mode = mode.lower()
-        if mode not in {'directed', 'undirected', 'concordant'}:
-            raise ValueError("Invalid mode; must be one of 'directed', "
-                             "'undirected', or 'concordant'.")
-        if mode == 'undirected':
+        if mode not in {"directed", "undirected", "concordant"}:
+            raise ValueError(
+                "Invalid mode; must be one of 'directed', 'undirected', or 'concordant'."
+            )
+        if mode == "undirected":
             warnings.warn(
                 "You have opted to conduct an 'undirected' test. Are you sure "
                 "this is what you want? If you're looking for the analog of a "
-                "conventional two-tailed test, use 'concordant'.")
+                "conventional two-tailed test, use 'concordant'."
+            )
         self.mode = mode
 
     @abstractmethod
@@ -30,24 +33,26 @@ class CombinationTest(BaseEstimator):
         return ss.norm.sf(z)
 
     def fit(self, z, *args, **kwargs):
-        if self.mode == 'concordant':
-            ose = self.__class__(mode='directed')
+        if self.mode == "concordant":
+            ose = self.__class__(mode="directed")
             p1 = ose.p_value(z, *args, **kwargs)
             p2 = ose.p_value(-z, *args, **kwargs)
             p = np.minimum(1, 2 * np.minimum(p1, p2))
         else:
-            if self.mode == 'undirected':
+            if self.mode == "undirected":
                 z = np.abs(z)
             p = self.p_value(z, *args, **kwargs)
-        self.params_ = {'p': p}
+        self.params_ = {"p": p}
         return self
 
     def summary(self):
-        if not hasattr(self, 'params_'):
+        if not hasattr(self, "params_"):
             name = self.__class__.__name__
-            raise ValueError("This {} instance hasn't been fitted yet. Please "
-                             "call fit() before summary().".format(name))
-        return CombinationTestResults(self, self.dataset_, p=self.params_['p'])
+            raise ValueError(
+                "This {} instance hasn't been fitted yet. Please "
+                "call fit() before summary().".format(name)
+            )
+        return CombinationTestResults(self, self.dataset_, p=self.params_["p"])
 
 
 class StoufferCombinationTest(CombinationTest):
@@ -88,7 +93,7 @@ class StoufferCombinationTest(CombinationTest):
     """
 
     # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
-    _dataset_attr_map = {'z': 'y', 'w': 'v'}
+    _dataset_attr_map = {"z": "y", "w": "v"}
 
     def fit(self, z, w=None):
         return super().fit(z, w=w)
@@ -96,7 +101,7 @@ class StoufferCombinationTest(CombinationTest):
     def p_value(self, z, w=None):
         if w is None:
             w = np.ones_like(z)
-        cz = (z * w).sum(0) / np.sqrt((w**2).sum(0))
+        cz = (z * w).sum(0) / np.sqrt((w ** 2).sum(0))
         return ss.norm.sf(cz)
 
 
@@ -138,7 +143,7 @@ class FisherCombinationTest(CombinationTest):
     """
 
     # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
-    _dataset_attr_map = {'z': 'y'}
+    _dataset_attr_map = {"z": "y"}
 
     def p_value(self, z):
         p = self._z_to_p(z)

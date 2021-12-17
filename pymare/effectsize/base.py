@@ -1,18 +1,17 @@
 """Tools for effect size computation/conversion."""
 
-import warnings
-from functools import partial
 from abc import ABCMeta
 from collections import defaultdict
+from functools import partial
 
 import numpy as np
-from sympy import sympify, lambdify, Symbol, solve
+from sympy import Symbol, lambdify, solve
 
-from .expressions import select_expressions
 from pymare import Dataset
 
+from .expressions import select_expressions
 
-SYMPY_MODULES = ['numpy', 'scipy']
+SYMPY_MODULES = ["numpy", "scipy"]
 
 
 def solve_system(system, known_vars=None):
@@ -47,7 +46,7 @@ def solve_system(system, known_vars=None):
     for name in known_vars.keys():
         if name not in symbols:
             continue
-        dummy = Symbol('_%s' % name)
+        dummy = Symbol("_%s" % name)
         dummies.add(dummy)
         system.append(symbols[name] - dummy)
 
@@ -68,15 +67,14 @@ def solve_system(system, known_vars=None):
 
     # Prepare the dummy list and data args in a fixed order
     dummy_list = list(dummies)
-    data_args = [known_vars[var.name.strip('_')] for var in dummy_list]
+    data_args = [known_vars[var.name.strip("_")] for var in dummy_list]
 
     # Compute any solved vars via numpy and store in new dict
     results = {}
     for i, sol in enumerate(solutions[0]):
         name = symbols[i].name
         free = sol.free_symbols
-        if (not (free - dummies) and not
-                (len(free) == 1 and list(free)[0].name.strip('_') == name)):
+        if not (free - dummies) and not (len(free) == 1 and list(free)[0].name.strip("_") == name):
             func = lambdify(dummy_list, sol, modules=SYMPY_MODULES)
             results[name] = func(*data_args)
 
@@ -85,6 +83,7 @@ def solve_system(system, known_vars=None):
 
 class EffectSizeConverter(metaclass=ABCMeta):
     """Base class for effect size converters."""
+
     def __init__(self, data=None, **kwargs):
 
         kwargs = {k: v for k, v in kwargs.items() if v is not None}
@@ -117,8 +116,8 @@ class EffectSizeConverter(metaclass=ABCMeta):
         return kwargs
 
     def __getattr__(self, key):
-        if key.startswith('get_'):
-            stat = key.replace('get_', '')
+        if key.startswith("get_"):
+            stat = key.replace("get_", "")
             return partial(self.get, stat=stat)
 
     def update_data(self, incremental=False, **kwargs):
@@ -146,8 +145,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
                 return system
 
         # otherwise try to get a sufficient system
-        exprs = select_expressions(target=stat, known_vars=known,
-                                   type=self._type)
+        exprs = select_expressions(target=stat, known_vars=known, type=self._type)
         if exprs is None:
             return None
         system = [exp.sympy for exp in exprs]
@@ -163,9 +161,9 @@ class EffectSizeConverter(metaclass=ABCMeta):
     def to_dataset(self, measure, **kwargs):
         measure = measure.lower()
         y = self.get(measure)
-        v = self.get('v_{}'.format(measure), error=False)
+        v = self.get("v_{}".format(measure), error=False)
         try:
-            n = self.get('n')
+            n = self.get("n")
         except:
             n = None
         return Dataset(y=y, v=v, n=n, **kwargs)
@@ -200,8 +198,10 @@ class EffectSizeConverter(metaclass=ABCMeta):
 
         if error and (system is None or result is None):
             known = list(self.known_vars.keys())
-            raise ValueError("Unable to solve for statistic '{}' given the "
-                             "known quantities ({}).".format(stat, known))
+            raise ValueError(
+                "Unable to solve for statistic '{}' given the "
+                "known quantities ({}).".format(stat, known)
+            )
 
         self.known_vars.update(result)
         return result[stat]
@@ -229,12 +229,13 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
         a vector of point estimates as `m` and a scalar for the SDs `sd`.
         The lengths of all inputs must match.
     """
+
     _type = 1
 
     def __init__(self, data=None, m=None, sd=None, n=None, r=None, **kwargs):
         super().__init__(data, m=m, sd=sd, n=n, r=r, **kwargs)
 
-    def to_dataset(self, measure='RM', **kwargs):
+    def to_dataset(self, measure="RM", **kwargs):
         """Get a Pymare Dataset with y and v mapped to the specified measure.
 
         Args:
@@ -293,28 +294,29 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
         variable pairs are from independent samples. Paired-sampled comparisons
         are not currently supported.
     """
+
     _type = 2
 
-    def __init__(self, data=None, m1=None, m2=None, sd1=None, sd2=None,
-                 n1=None, n2=None, **kwargs):
-        super().__init__(data, m1=m1, m2=m2, sd1=sd1, sd2=sd2, n1=n1, n2=n2,
-                         **kwargs)
+    def __init__(
+        self, data=None, m1=None, m2=None, sd1=None, sd2=None, n1=None, n2=None, **kwargs
+    ):
+        super().__init__(data, m1=m1, m2=m2, sd1=sd1, sd2=sd2, n1=n1, n2=n2, **kwargs)
 
     def _validate(self, kwargs):
         # Validate that all inputs were passed in pairs
-        var_names = set([v.strip('[12]') for v in kwargs.keys()])
-        pair_vars = var_names - {'d'}
+        var_names = set([v.strip("[12]") for v in kwargs.keys()])
+        pair_vars = var_names - {"d"}
         for var in pair_vars:
-            name1, name2 = '%s1' % var, '%s2' % var
+            name1, name2 = "%s1" % var, "%s2" % var
             var1, var2 = kwargs.get(name1), kwargs.get(name2)
             if (var1 is None) != (var2 is None):
                 raise ValueError(
                     "Input variable '{}' must be provided in pairs; please "
-                    "provide both {} and {} (or neither)."
-                    .format(var, name1, name2))
+                    "provide both {} and {} (or neither).".format(var, name1, name2)
+                )
         return kwargs
 
-    def to_dataset(self, measure='SMD', **kwargs):
+    def to_dataset(self, measure="SMD", **kwargs):
         """Get a Pymare Dataset with y and v mapped to the specified measure.
 
         Args:
@@ -342,9 +344,23 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
         return super().to_dataset(measure, **kwargs)
 
 
-def compute_measure(measure, data=None, comparison='infer', return_type='tuple',
-                    m=None, sd=None, n=None, r=None, m1=None, m2=None,
-                    sd1=None, sd2=None, n1=None, n2=None, **dataset_kwargs):
+def compute_measure(
+    measure,
+    data=None,
+    comparison="infer",
+    return_type="tuple",
+    m=None,
+    sd=None,
+    n=None,
+    r=None,
+    m1=None,
+    m2=None,
+    sd1=None,
+    sd2=None,
+    n1=None,
+    n2=None,
+    **dataset_kwargs,
+):
     """Wrapper that auto-detects and applies the right converter class.
 
     Args:
@@ -413,31 +429,31 @@ def compute_measure(measure, data=None, comparison='infer', return_type='tuple',
 
         Returns:
             A tuple, dict, or pymare.Dataset, depending on `return_type`.
-        """
+    """
 
-    var_args = dict(m=m, sd=sd, n=n, r=r, m1=m1, m2=m2, sd1=sd1, sd2=sd2,
-                    n1=n1, n2=n2)
+    var_args = dict(m=m, sd=sd, n=n, r=r, m1=m1, m2=m2, sd1=sd1, sd2=sd2, n1=n1, n2=n2)
     var_args = {k: v for k, v in var_args.items() if v is not None}
 
     if data is not None:
         var_args = EffectSizeConverter._collect_variables(data, var_args)
 
-    valid_measures = {'RM', 'SM', 'R', 'ZR', 'RMD', 'SMD', 'D'}
+    valid_measures = {"RM", "SM", "R", "ZR", "RMD", "SMD", "D"}
     if measure not in valid_measures:
-        raise ValueError("Invalid measures '{}'; must be one of {}."
-                         .format(measure, valid_measures))
+        raise ValueError(
+            "Invalid measures '{}'; must be one of {}.".format(measure, valid_measures)
+        )
 
     # Select or infer converter class
-    if comparison == 'infer':
+    if comparison == "infer":
 
-        one_samp_inputs = {'m', 'sd', 'n', 'r'}
-        two_samp_inputs = {'m1', 'm2', 'sd1', 'sd2', 'n1', 'n2'}
+        one_samp_inputs = {"m", "sd", "n", "r"}
+        two_samp_inputs = {"m1", "m2", "sd1", "sd2", "n1", "n2"}
 
-        if measure in {'RM', 'SM', 'R', 'ZR'}:
+        if measure in {"RM", "SM", "R", "ZR"}:
             comparison = 1
-        elif measure in {'RMD', 'SMD'}:
+        elif measure in {"RMD", "SMD"}:
             comparison = 2
-        elif measure in {'D'}:
+        elif measure in {"D"}:
             arg_set = set(var_args.keys())
             if (arg_set & one_samp_inputs) and not (arg_set & two_samp_inputs):
                 comparison = 1
@@ -448,31 +464,34 @@ def compute_measure(measure, data=None, comparison='infer', return_type='tuple',
                     "Requested measure (D) and provided data arguments ({}) "
                     "are insufficient to determine comparison; either provide"
                     " data consistent with only one-group or two-group "
-                    "measures, or explicitly set comparison to 1 or 2."
-                    .format(arg_set))
+                    "measures, or explicitly set comparison to 1 or 2.".format(arg_set)
+                )
 
     if comparison == 1:
         conv_cls = OneSampleEffectSizeConverter
     elif comparison == 2:
         conv_cls = TwoSampleEffectSizeConverter
     else:
-        raise ValueError("Invalid comparison type '{}'! Valid values are "
-                         "'infer', 1, and 2.".format(comparison))
+        raise ValueError(
+            "Invalid comparison type '{}'! Valid values are "
+            "'infer', 1, and 2.".format(comparison)
+        )
 
     conv = conv_cls(**var_args)
     y = conv.get(measure)
-    v = conv.get('v_{}'.format(measure))
+    v = conv.get("v_{}".format(measure))
 
     return_type = return_type.lower()
-    if return_type == 'tuple':
+    if return_type == "tuple":
         return (y, v)
-    elif return_type == 'dict':
-        return {'y': y, 'v': v}
-    elif return_type == 'dataset':
+    elif return_type == "dict":
+        return {"y": y, "v": v}
+    elif return_type == "dataset":
         return conv.to_dataset(measure, **dataset_kwargs)
-    elif return_type == 'converter':
+    elif return_type == "converter":
         return conv
     else:
-        raise ValueError("Invalid return_type value '{}'. Must be one of "
-                         "'tuple', 'dict', 'dataset', or 'converter'."
-                         .format(return_type))
+        raise ValueError(
+            "Invalid return_type value '{}'. Must be one of "
+            "'tuple', 'dict', 'dataset', or 'converter'.".format(return_type)
+        )

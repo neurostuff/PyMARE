@@ -36,24 +36,6 @@ jobs:
           paths:
             - "/opt/conda/envs/testenv"
 
-  build_docs:
-    working_directory: /tmp/src/PyMARE
-    docker:
-      - image: continuumio/miniconda3
-    steps:
-      - attach_workspace:  # get PyMARE
-          at: /tmp
-      - restore_cache:  # load environment
-          key: deps9-{{ checksum "pymare/info.py" }}
-      - run:
-          name: Build documentation
-          command: |
-            apt-get install -yqq make
-            source activate testenv
-            make -C docs html
-      - store_artifacts:
-          path: /tmp/src/PyMARE/docs/_build/html
-
   coverage_and_tests:
     working_directory: /tmp/src/PyMARE
     docker:
@@ -66,33 +48,12 @@ jobs:
       - run:
           name: Coverage
           command:  |
+            apt-get update
             apt-get install -yqq curl
             source activate testenv
             py.test --cov-report xml:coverage.xml --cov=pymare --ignore=pymare/tests/test_stan_estimators.py pymare
       - codecov/upload:
           file: /tmp/src/PyMARE/coverage.xml
-
-  deploy:
-    docker:
-      - image: continuumio/miniconda3
-    steps:
-      - checkout
-      - run:
-          name: init .pypirc
-          command: |
-            echo -e "[pypi]" >> ~/.pypirc
-            echo -e "username = $PYPI_USER" >> ~/.pypirc
-            echo -e "password = $PYPI_PASSWORD" >> ~/.pypirc
-      - run:
-          name: create package
-          command: |
-            python setup.py sdist
-            python setup.py bdist_wheel
-      - run:
-          name: upload to pypi
-          command: |
-            pip install twine
-            twine upload dist/*
 
 workflows:
   version: 2.1
@@ -102,23 +63,10 @@ workflows:
           filters:
             tags:
               only: /.*/
-      - build_docs:
-          requires:
-            - make_environment
-          filters:
-            tags:
-              only: /.*/
       - coverage_and_tests:
           requires:
             - make_environment
           filters:
             tags:
               only: /.*/
-      - deploy:
-          requires:
-            - coverage_and_tests
-          filters:
-            tags:
-              only: /[0-9]+(\.[0-9]+)*/
-            branches:
-              ignore: /.*/
+

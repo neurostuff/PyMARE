@@ -2,10 +2,10 @@
 
 import numpy as np
 import scipy.stats as ss
-from scipy.optimize import minimize, Bounds
+from scipy.optimize import Bounds, minimize
 
 
-def weighted_least_squares(y, v, X, tau2=0., return_cov=False):
+def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False):
     """2-D weighted least squares.
 
     Args:
@@ -20,18 +20,18 @@ def weighted_least_squares(y, v, X, tau2=0., return_cov=False):
         inverse covariance matrix; if False, only the parameter estimates.
     """
 
-    w = 1. / (v + tau2)
+    w = 1.0 / (v + tau2)
 
     # Einsum indices: k = studies, p = predictors, i = parallel iterates
-    wX = np.einsum('kp,ki->ipk', X, w)
+    wX = np.einsum("kp,ki->ipk", X, w)
     cov = wX.dot(X)
 
     # numpy >= 1.8 inverts stacked matrices along the first N - 2 dims, so we
     # can vectorize computation along the second dimension (parallel datasets)
     precision = np.linalg.pinv(cov).T
 
-    pwX = np.einsum('ipk,qpi->iqk', wX, precision)
-    beta = np.einsum('ipk,ik->ip', pwX, y.T).T
+    pwX = np.einsum("ipk,qpi->iqk", wX, precision)
+    beta = np.einsum("ipk,ik->ip", pwX, y.T).T
 
     return (beta, precision) if return_cov else beta
 
@@ -86,13 +86,12 @@ def q_profile(y, v, X, alpha=0.05):
     # Use the D-L estimate of tau^2 as a starting point; when using a fixed
     # value, minimize() sometimes fails to stay in bounds.
     from .estimators import DerSimonianLaird
-    ub_start = 2 * DerSimonianLaird().fit(y, v, X).params_['tau2']
 
-    lb = minimize(lambda x: (q_gen(*args, x) - l_crit)**2, [0],
-                  bounds=bds).x[0]
-    ub = minimize(lambda x: (q_gen(*args, x) - u_crit)**2, [ub_start],
-                  bounds=bds).x[0]
-    return {'ci_l': lb, 'ci_u': ub}
+    ub_start = 2 * DerSimonianLaird().fit(y, v, X).params_["tau2"]
+
+    lb = minimize(lambda x: (q_gen(*args, x) - l_crit) ** 2, [0], bounds=bds).x[0]
+    ub = minimize(lambda x: (q_gen(*args, x) - u_crit) ** 2, [ub_start], bounds=bds).x[0]
+    return {"ci_l": lb, "ci_u": ub}
 
 
 def q_gen(y, v, X, tau2):
@@ -119,5 +118,5 @@ def q_gen(y, v, X, tau2):
     if np.any(tau2 < 0):
         raise ValueError("Value of tau^2 must be >= 0.")
     beta = weighted_least_squares(y, v, X, tau2)
-    w = 1. / (v + tau2)
+    w = 1.0 / (v + tau2)
     return (w * (y - X.dot(beta)) ** 2).sum(0)
