@@ -4,8 +4,8 @@ requires = ["setuptools==58.2.0", "wheel"]
 [tool.black]
 line-length = 99
 target-version = ["py37"]
-include = "\.pyi?$"
-exclude = """
+include = '\.pyi?$'
+exclude = '''
 
 (
   /(
@@ -21,7 +21,7 @@ exclude = """
   | versioneer.py
   | pymare/_version.py
 )
-"""
+'''
 
 [tool.isort]
 profile = "black"
