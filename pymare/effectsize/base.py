@@ -1,12 +1,11 @@
 """Tools for effect size computation/conversion."""
 
-import warnings
 from abc import ABCMeta
 from collections import defaultdict
 from functools import partial
 
 import numpy as np
-from sympy import Symbol, lambdify, solve, sympify
+from sympy import Symbol, lambdify, solve
 
 from pymare import Dataset
 

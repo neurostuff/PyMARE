@@ -119,9 +119,6 @@ todo_include_todos = False
 # a list of builtin themes.
 #
 # installing theme package
-
-import sphinx_rtd_theme
-
 html_theme = "sphinx_rtd_theme"
 
 # Theme options are theme-specific and customize the look and feel of a theme
@@ -136,8 +133,9 @@ html_sidebars = {"**": ["globaltoc.html", "relations.html", "searchbox.html", "i
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 
-# https://github.com/rtfd/sphinx_rtd_theme/issues/117
+
 def setup(app):
+    "From https://github.com/rtfd/sphinx_rtd_theme/issues/117."
     app.add_stylesheet("theme_overrides.css")
     app.add_stylesheet("pymare.css")
     app.connect("autodoc-process-docstring", generate_example_rst)

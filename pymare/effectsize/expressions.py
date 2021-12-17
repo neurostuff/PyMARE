@@ -1,6 +1,5 @@
 """Statistical expressions."""
 import json
-import re
 from collections import defaultdict
 from itertools import chain
 from pathlib import Path

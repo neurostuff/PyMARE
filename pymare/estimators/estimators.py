@@ -6,14 +6,9 @@ from warnings import warn
 
 import numpy as np
 import wrapt
-from scipy import stats as ss
 from scipy.optimize import Bounds, minimize
 
-from ..results import (
-    BayesianMetaRegressionResults,
-    CombinationTestResults,
-    MetaRegressionResults,
-)
+from ..results import BayesianMetaRegressionResults, MetaRegressionResults
 from ..stats import ensure_2d, weighted_least_squares
 
 
