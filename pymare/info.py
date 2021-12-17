@@ -43,28 +43,28 @@ REQUIRES = ["numpy>=1.8.0", "pandas", "scipy", "sympy", "wrapt"]
 STAN_REQUIRES = ["pystan", "arviz"]
 
 TESTS_REQUIRES = [
-    'codecov',
-    'coverage',
-    'coveralls',
-    'flake8',
+    "codecov",
+    "coverage",
+    "coveralls",
+    "flake8",
     "flake8-black",
     "flake8-docstrings",
     "flake8-isort",
-    'pytest',
-    'pytest-cov'
+    "pytest",
+    "pytest-cov",
 ]
 
 DOC_REQUIRES = [
-    'sphinx~=2.4.2',
-    'sphinx_rtd_theme',
-    'sphinx-argparse',
-    'numpydoc',
-    'm2r',
-    'sphinx_copybutton',
-    'sphinx_gallery',
-    'pillow',
-    'matplotlib',
-    'seaborn',
+    "sphinx~=2.4.2",
+    "sphinx_rtd_theme",
+    "sphinx-argparse",
+    "numpydoc",
+    "m2r",
+    "sphinx_copybutton",
+    "sphinx_gallery",
+    "pillow",
+    "matplotlib",
+    "seaborn",
 ]
 
 EXTRA_REQUIRES = {

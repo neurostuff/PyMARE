@@ -4,7 +4,7 @@ import numpy as np
 from pymare import Dataset
 
 
-@pytest.fixture(scope='package')
+@pytest.fixture(scope="package")
 def variables():
     y = np.array([[-1, 0.5, 0.5, 0.5, 1, 1, 2, 10]]).T
     v = np.array([[1, 1, 2.4, 0.5, 1, 1, 1.2, 1.5]]).T
@@ -12,19 +12,19 @@ def variables():
     return (y, v, X)
 
 
-@pytest.fixture(scope='package')
+@pytest.fixture(scope="package")
 def dataset(variables):
-    return Dataset(*variables, X_names=['my_covariate'])
+    return Dataset(*variables, X_names=["my_covariate"])
 
 
-@pytest.fixture(scope='package')
+@pytest.fixture(scope="package")
 def small_dataset_2d(variables):
     y = np.array([[1.5, 1.9, 2.2], [4, 2, 1]]).T
     v = np.array([[1, 0.8, 3], [1, 1.5, 1]]).T
     return Dataset(y, v)
 
 
-@pytest.fixture(scope='package')
+@pytest.fixture(scope="package")
 def dataset_2d(variables):
     y, v, X = variables
     y = np.repeat(y, 3, axis=1)
@@ -34,15 +34,19 @@ def dataset_2d(variables):
     return Dataset(y, v, X)
 
 
-@pytest.fixture(scope='package')
+@pytest.fixture(scope="package")
 def dataset_n():
-    y = np.array([[-3., -0.5, 0., -5.01, 0.35, -2., -6., -4., -4.3, -0.1, -1.]]).T
-    n = np.array([[16, 16, 20.548, 32.597, 14., 11.118, 4.444, 12.414, 26.963,
-                   130.556, 126.76]]).T / 2
+    y = np.array([[-3.0, -0.5, 0.0, -5.01, 0.35, -2.0, -6.0, -4.0, -4.3, -0.1, -1.0]]).T
+    n = (
+        np.array(
+            [[16, 16, 20.548, 32.597, 14.0, 11.118, 4.444, 12.414, 26.963, 130.556, 126.76]]
+        ).T
+        / 2
+    )
     return Dataset(y, n=n)
 
 
-@pytest.fixture(scope='package')
+@pytest.fixture(scope="package")
 def vars_with_intercept():
     y = np.array([[-1, 0.5, 0.5, 0.5, 1, 1, 2, 10]]).T
     v = np.array([[1, 1, 2.4, 0.5, 1, 1, 1.2, 1.5]]).T

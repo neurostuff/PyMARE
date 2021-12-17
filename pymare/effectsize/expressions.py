@@ -10,7 +10,7 @@ from sympy.core.compatibility import exec_
 
 
 _locals = {}
-exec_('from sympy.stats import *', _locals)
+exec_("from sympy.stats import *", _locals)
 
 
 class Expression:
@@ -22,6 +22,7 @@ class Expression:
         type (int, optional): Indicates whether the expression applies
             in the one-sample case (1), two-sample case (2), or both (0).
     """
+
     def __init__(self, expression, description=None, type=0):
         self.expr = expression
         self.description = description
@@ -32,8 +33,8 @@ class Expression:
 
 def _load_expressions():
     expressions = []
-    path = Path(__file__).parent / 'expressions.json'
-    expr_list = json.load(open(path, 'r'))
+    path = Path(__file__).parent / "expressions.json"
+    expr_list = json.load(open(path, "r"))
     for expr in expr_list:
         expr = Expression(**expr)
         expressions.append(expr)
@@ -69,8 +70,10 @@ def select_expressions(target, known_vars, type=1):
     # make sure target exists before going any further
     all_symbols = set().union(*[e.symbols for e in exprs])
     if Symbol(target) not in all_symbols:
-        raise ValueError("Target symbol '{}' cannot be found in any of the "
-                         "known expressions).".format(target))
+        raise ValueError(
+            "Target symbol '{}' cannot be found in any of the "
+            "known expressions).".format(target)
+        )
 
     for exp in exprs:
         for sym in exp.symbols:
@@ -102,8 +105,7 @@ def select_expressions(target, known_vars, type=1):
                 continue
 
             # Loop over remaining free symbols and recurse
-            candidates = [df_search(child, new_exprs, known, _visited)
-                          for child in free_symbols]
+            candidates = [df_search(child, new_exprs, known, _visited) for child in free_symbols]
             candidates = [c for c in candidates if c is not None]
 
             # Make sure we've covered all free symbols in the expression

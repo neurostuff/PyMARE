@@ -90,9 +90,7 @@ study_ticks = np.arange(N_STUDIES)
 lower_bounds, upper_bounds = var_to_ci(y, v, n)
 ax.scatter(y, study_ticks + 1)
 for study in study_ticks:
-    ax.plot(
-        (lower_bounds[study], upper_bounds[study]), (study + 1, study + 1), color="blue"
-    )
+    ax.plot((lower_bounds[study], upper_bounds[study]), (study + 1, study + 1), color="blue")
 ax.axvline(0, color="gray", alpha=0.2, linestyle="--", label="Zero")
 ax.axvline(np.mean(y), color="orange", alpha=0.2, label="Mean of Observed Effects")
 

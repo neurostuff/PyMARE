@@ -8,9 +8,9 @@ def test_stan_estimator(dataset):
     # no ground truth here, so we use sanity checks and rough bounds
     est = StanMetaRegression(iter=3000).fit_dataset(dataset)
     results = est.summary()
-    assert 'BayesianMetaRegressionResults' == results.__class__.__name__
-    summary = results.summary(['beta', 'tau2'])
-    beta1, beta2, tau2 = summary['mean'].values[:3]
+    assert "BayesianMetaRegressionResults" == results.__class__.__name__
+    summary = results.summary(["beta", "tau2"])
+    beta1, beta2, tau2 = summary["mean"].values[:3]
     assert -0.5 < beta1 < 0.1
     assert 0.6 < beta2 < 0.9
     assert 3 < tau2 < 5
@@ -19,4 +19,4 @@ def test_stan_estimator(dataset):
 def test_stan_2d_input_failure(dataset_2d):
     with pytest.raises(ValueError) as exc:
         est = StanMetaRegression(iter=500).fit_dataset(dataset_2d)
-    assert str(exc.value).startswith('The StanMetaRegression')
+    assert str(exc.value).startswith("The StanMetaRegression")

@@ -5,10 +5,14 @@ from functools import partial
 import numpy as np
 import pandas as pd
 
-from .estimators import (WeightedLeastSquares, DerSimonianLaird,
-                         VarianceBasedLikelihoodEstimator,
-                         SampleSizeBasedLikelihoodEstimator,
-                         StanMetaRegression, Hedges)
+from .estimators import (
+    DerSimonianLaird,
+    Hedges,
+    SampleSizeBasedLikelihoodEstimator,
+    StanMetaRegression,
+    VarianceBasedLikelihoodEstimator,
+    WeightedLeastSquares,
+)
 from .stats import ensure_2d
 
 
@@ -36,19 +40,23 @@ class Dataset:
             automatically added to the predictor matrix. If False, the
             predictors matrix is passed as-is to estimators.
     """
-    def __init__(self, y=None, v=None, X=None, n=None, data=None, X_names=None,
-                 add_intercept=True):
+
+    def __init__(
+        self, y=None, v=None, X=None, n=None, data=None, X_names=None, add_intercept=True
+    ):
 
         if y is None and data is None:
-            raise ValueError("If no y values are provided, a pandas DataFrame "
-                             "containing a 'y' column must be passed to the "
-                             "data argument.")
+            raise ValueError(
+                "If no y values are provided, a pandas DataFrame "
+                "containing a 'y' column must be passed to the "
+                "data argument."
+            )
 
         # Extract columns from DataFrame
         if data is not None:
-            y = data.loc[:, y or 'y'].values
-            v = data.loc[:, v or 'v'].values
-            X_names = X or 'X'
+            y = data.loc[:, y or "y"].values
+            v = data.loc[:, v or "v"].values
+            X_names = X or "X"
             X = data.loc[:, X_names].values
 
         self.y = ensure_2d(y)
@@ -60,20 +68,32 @@ class Dataset:
 
     def _get_predictors(self, X, names, add_intercept):
         if X is None and not add_intercept:
-            raise ValueError("No fixed predictors found. If no X matrix is "
-                             "provided, add_intercept must be True!")
+            raise ValueError(
+                "No fixed predictors found. If no X matrix is "
+                "provided, add_intercept must be True!"
+            )
         X = pd.DataFrame(X)
         if names is not None:
             X.columns = names
         if add_intercept:
-            intercept = pd.DataFrame({'intercept': np.ones(len(self.y))})
+            intercept = pd.DataFrame({"intercept": np.ones(len(self.y))})
             X = pd.concat([intercept, X], axis=1)
         return X.values, X.columns.tolist()
 
 
-def meta_regression(y=None, v=None, X=None, n=None, data=None, X_names=None,
-                    add_intercept=True, method='ML', ci_method='QP',
-                    alpha=0.05, **kwargs):
+def meta_regression(
+    y=None,
+    v=None,
+    X=None,
+    n=None,
+    data=None,
+    X_names=None,
+    add_intercept=True,
+    method="ML",
+    ci_method="QP",
+    alpha=0.05,
+    **kwargs,
+):
     """Fits the standard meta-regression/meta-analysis model to provided data.
 
     Args:
@@ -120,26 +140,25 @@ def meta_regression(y=None, v=None, X=None, n=None, data=None, X_names=None,
         other methods return the former).
     """
     # if data is None or not isinstance(data, Dataset):
-    if data is None or not data.__class__.__name__ == 'Dataset':
+    if data is None or not data.__class__.__name__ == "Dataset":
         data = Dataset(y, v, X, n, data, X_names, add_intercept)
 
     method = method.lower()
 
-    if method in ['ml', 'reml']:
+    if method in ["ml", "reml"]:
         if v is not None:
             est_cls = partial(VarianceBasedLikelihoodEstimator, method=method)
         elif n is not None:
             est_cls = partial(SampleSizeBasedLikelihoodEstimator, method=method)
         else:
-            raise ValueError("If method is ML or REML, one of `v` or `n` must "
-                             "be passed!")
+            raise ValueError("If method is ML or REML, one of `v` or `n` must " "be passed!")
     else:
         est_cls = {
-            'dl': DerSimonianLaird,
-            'wls': WeightedLeastSquares,
-            'fe': WeightedLeastSquares,
-            'stan': StanMetaRegression,
-            'he': Hedges
+            "dl": DerSimonianLaird,
+            "wls": WeightedLeastSquares,
+            "fe": WeightedLeastSquares,
+            "stan": StanMetaRegression,
+            "he": Hedges,
         }[method]
 
     # Get estimates

@@ -10,32 +10,32 @@ from scipy import stats as ss
 import wrapt
 
 from ..stats import weighted_least_squares, ensure_2d
-from ..results import (MetaRegressionResults, BayesianMetaRegressionResults,
-                       CombinationTestResults)
+from ..results import MetaRegressionResults, BayesianMetaRegressionResults, CombinationTestResults
 
 
 @wrapt.decorator
 def _loopable(wrapped, instance, args, kwargs):
     # Decorator for fit() method of Estimator classes to handle naive looping
     # over the 2nd dimension of y/v/n inputs, and reconstruction of outputs.
-    n_iter = kwargs['y'].shape[1]
+    n_iter = kwargs["y"].shape[1]
     if n_iter > 10:
-        warn("Input contains {} parallel datasets (in 2nd dim of y and"
-                " v). The selected estimator will loop over datasets"
-                " naively, and this may be slow for large numbers of "
-                "datasets. Consider using the DL, HE, or WLS estimators, "
-                "which handle parallel datasets more efficiently."
-                .format(n_iter))
+        warn(
+            "Input contains {} parallel datasets (in 2nd dim of y and"
+            " v). The selected estimator will loop over datasets"
+            " naively, and this may be slow for large numbers of "
+            "datasets. Consider using the DL, HE, or WLS estimators, "
+            "which handle parallel datasets more efficiently.".format(n_iter)
+        )
 
     param_dicts = []
     for i in range(n_iter):
-        iter_kwargs = {'X': kwargs['X']}
-        iter_kwargs['y'] = kwargs['y'][:, i, None]
-        if 'v' in kwargs:
-            iter_kwargs['v'] = kwargs['v'][:, i, None]
-        if 'n' in kwargs:
-            n = kwargs['n'][:, i, None] if kwargs['n'].shape[1] > 1 else kwargs['n']
-            iter_kwargs['n'] = n
+        iter_kwargs = {"X": kwargs["X"]}
+        iter_kwargs["y"] = kwargs["y"][:, i, None]
+        if "v" in kwargs:
+            iter_kwargs["v"] = kwargs["v"][:, i, None]
+        if "n" in kwargs:
+            n = kwargs["n"][:, i, None] if kwargs["n"].shape[1] > 1 else kwargs["n"]
+            iter_kwargs["n"] = n
         wrapped(**iter_kwargs)
         param_dicts.append(instance.params_.copy())
 
@@ -62,7 +62,7 @@ class BaseEstimator(metaclass=ABCMeta):
         pass
 
     def fit_dataset(self, dataset, *args, **kwargs):
-        """ Applies the current estimator to the passed Dataset container.
+        """Applies the current estimator to the passed Dataset container.
 
         A convenience interface that wraps fit() and automatically aligns the
         variables held in a Dataset with the required arguments.
@@ -81,8 +81,7 @@ class BaseEstimator(metaclass=ABCMeta):
             # Check for remapped name
             attr_name = self._dataset_attr_map.get(name, name)
             if i >= n_args:
-                all_kwargs[name] = getattr(dataset, attr_name,
-                                           spec.defaults[i - n_args])
+                all_kwargs[name] = getattr(dataset, attr_name, spec.defaults[i - n_args])
             else:
                 all_kwargs[name] = getattr(dataset, attr_name)
 
@@ -110,27 +109,32 @@ class BaseEstimator(metaclass=ABCMeta):
             return dataset.v
         # Estimate sampling variances from sigma^2 and n if available.
         if dataset.n is None:
-            raise ValueError("Dataset does not contain sampling variances (v),"
-                             " and no estimate of v is possible without sample"
-                             " sizes (n).")
-        if 'sigma2' not in self.params_:
-            raise ValueError("Dataset does not contain sampling variances (v),"
-                             " and no estimate of v is possible because no "
-                             "sigma^2 parameter was found.")
-        return self.params_['sigma2'] / dataset.n
+            raise ValueError(
+                "Dataset does not contain sampling variances (v),"
+                " and no estimate of v is possible without sample"
+                " sizes (n)."
+            )
+        if "sigma2" not in self.params_:
+            raise ValueError(
+                "Dataset does not contain sampling variances (v),"
+                " and no estimate of v is possible because no "
+                "sigma^2 parameter was found."
+            )
+        return self.params_["sigma2"] / dataset.n
 
     def summary(self):
-        if not hasattr(self, 'params_'):
+        if not hasattr(self, "params_"):
             name = self.__class__.__name__
-            raise ValueError("This {} instance hasn't been fitted yet. Please "
-                             "call fit() before summary().".format(name))
+            raise ValueError(
+                "This {} instance hasn't been fitted yet. Please "
+                "call fit() before summary().".format(name)
+            )
         p = self.params_
-        return MetaRegressionResults(self, self.dataset_, p['fe_params'],
-                                     p['inv_cov'], p['tau2'])
+        return MetaRegressionResults(self, self.dataset_, p["fe_params"], p["inv_cov"], p["tau2"])
 
 
 class WeightedLeastSquares(BaseEstimator):
-    """ Weighted least-squares meta-regression.
+    """Weighted least-squares meta-regression.
 
     Provides the weighted least-squares estimate of the fixed effects given
     known/assumed between-study variance tau^2. When tau^2 = 0 (default), the
@@ -154,20 +158,19 @@ class WeightedLeastSquares(BaseEstimator):
         solution.
     """
 
-    def __init__(self, tau2=0.):
+    def __init__(self, tau2=0.0):
         self.tau2 = tau2
 
     def fit(self, y, X, v=None):
         if v is None:
             v = np.ones_like(y)
-        beta, inv_cov = weighted_least_squares(y, v, X, self.tau2,
-                                               return_cov=True)
-        self.params_ = {'fe_params': beta, 'tau2': self.tau2, 'inv_cov': inv_cov}
+        beta, inv_cov = weighted_least_squares(y, v, X, self.tau2, return_cov=True)
+        self.params_ = {"fe_params": beta, "tau2": self.tau2, "inv_cov": inv_cov}
         return self
 
 
 class DerSimonianLaird(BaseEstimator):
-    """ DerSimonian-Laird meta-regression estimator.
+    """DerSimonian-Laird meta-regression estimator.
 
     Estimates the between-subject variance tau^2 using the DerSimonian-Laird
     (1986) method-of-moments approach.
@@ -197,27 +200,26 @@ class DerSimonianLaird(BaseEstimator):
         beta_wls, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
 
         # Cochrane's Q
-        w = 1. / v
+        w = 1.0 / v
         w_sum = w.sum(0)
         Q = (w * (y - X.dot(beta_wls)) ** 2).sum(0)
 
         # Einsum indices: k = studies, p = predictors, i = parallel iterates.
         # q is a dummy for 2nd p when p x p covariance matrix is passed.
-        Xw2 = np.einsum('kp,ki->ipk', X, w**2)
-        pXw2 = np.einsum('ipk,qpi->iqk', Xw2, inv_cov)
+        Xw2 = np.einsum("kp,ki->ipk", X, w ** 2)
+        pXw2 = np.einsum("ipk,qpi->iqk", Xw2, inv_cov)
         A = w_sum - np.trace(pXw2.dot(X), axis1=1, axis2=2)
         tau_dl = (Q - (k - p)) / A
-        tau_dl = np.maximum(0., tau_dl)
+        tau_dl = np.maximum(0.0, tau_dl)
 
         # Re-estimate beta with tau^2 estimate
-        beta_dl, inv_cov = weighted_least_squares(y, v, X, tau2=tau_dl,
-                                                  return_cov=True)
-        self.params_ = {'fe_params': beta_dl, 'tau2': tau_dl, 'inv_cov': inv_cov}
+        beta_dl, inv_cov = weighted_least_squares(y, v, X, tau2=tau_dl, return_cov=True)
+        self.params_ = {"fe_params": beta_dl, "tau2": tau_dl, "inv_cov": inv_cov}
         return self
 
 
 class Hedges(BaseEstimator):
-    """ Hedges meta-regression estimator.
+    """Hedges meta-regression estimator.
 
     Estimates the between-subject variance tau^2 using the Hedges & Olkin
     (1985) approach.
@@ -241,12 +243,12 @@ class Hedges(BaseEstimator):
         tau_ho = np.maximum(0, tau_ho)
         # Estimate beta with tau^2 estimate
         beta_ho = weighted_least_squares(y, v, X, tau2=tau_ho)
-        self.params_ = {'fe_params': beta_ho, 'tau2': tau_ho, 'inv_cov': inv_cov}
+        self.params_ = {"fe_params": beta_ho, "tau2": tau_ho, "inv_cov": inv_cov}
         return self
 
 
 class VarianceBasedLikelihoodEstimator(BaseEstimator):
-    """ Likelihood-based estimator for estimates with known variances.
+    """Likelihood-based estimator for estimates with known variances.
 
     Iteratively estimates the between-subject variance tau^2 and fixed effect
     coefficients using the specified likelihood-based estimator (ML or REML).
@@ -271,11 +273,12 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         Biometrika, 104(2), 489–496. https://doi.org/10.1093/biomet/asx001
     """
 
-    def __init__(self, method='ml', **kwargs):
-        nll_func = getattr(self, '_{}_nll'.format(method.lower()))
+    def __init__(self, method="ml", **kwargs):
+        nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
-            raise ValueError("No log-likelihood function defined for method "
-                             "'{}'.".format(method))
+            raise ValueError(
+                "No log-likelihood function defined for method " "'{}'.".format(method)
+            )
         self._nll_func = nll_func
         self.kwargs = kwargs
 
@@ -283,44 +286,43 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
     def fit(self, y, v, X):
         # use D-L estimate for initial values
         est_DL = DerSimonianLaird().fit(y, v, X).params_
-        beta = est_DL['fe_params']
-        tau2 = est_DL['tau2']
+        beta = est_DL["fe_params"]
+        tau2 = est_DL["tau2"]
 
         theta_init = np.r_[beta.ravel(), tau2]
 
         lb = np.ones(len(theta_init)) * -np.inf
         ub = -lb
-        lb[-1] = 0.  # bound only the variance
+        lb[-1] = 0.0  # bound only the variance
         bds = Bounds(lb, ub, keep_feasible=True)
 
-        res = minimize(self._nll_func, theta_init, (y, v, X), bounds=bds,
-                       **self.kwargs)
+        res = minimize(self._nll_func, theta_init, (y, v, X), bounds=bds, **self.kwargs)
         beta, tau = res.x[:-1], float(res.x[-1])
         tau = np.max([tau, 0])
         _, inv_cov = weighted_least_squares(y, v, X, tau, True)
-        self.params_ = {'fe_params': beta[:, None], 'tau2': tau, 'inv_cov': inv_cov}
+        self.params_ = {"fe_params": beta[:, None], "tau2": tau, "inv_cov": inv_cov}
         return self
 
     def _ml_nll(self, theta, y, v, X):
-        """ ML negative log-likelihood for meta-regression model. """
+        """ML negative log-likelihood for meta-regression model."""
         beta, tau2 = theta[:-1, None], theta[-1]
         if tau2 < 0:
             tau2 = 0
-        w = 1. / (v + tau2)
+        w = 1.0 / (v + tau2)
         R = y - X.dot(beta)
         return -0.5 * (np.log(w).sum() - (R * w * R).sum())
 
     def _reml_nll(self, theta, y, v, X):
-        """ REML negative log-likelihood for meta-regression model. """
+        """REML negative log-likelihood for meta-regression model."""
         ll_ = self._ml_nll(theta, y, v, X)
         tau2 = theta[-1]
-        w = 1. / (v + tau2)
+        w = 1.0 / (v + tau2)
         F = (X * w).T.dot(X)
         return ll_ + 0.5 * np.log(np.linalg.det(F))
 
 
 class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
-    """ Likelihood-based estimator for estimates with known sample sizes but
+    """Likelihood-based estimator for estimates with known sample sizes but
     unknown sampling variances.
 
     Iteratively estimates the between-subject variance tau^2 and fixed effect
@@ -346,49 +348,52 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         28(1), 196–210. https://doi.org/10.1177/0962280217718867
     """
 
-    def __init__(self, method='ml', **kwargs):
-        nll_func = getattr(self, '_{}_nll'.format(method.lower()))
+    def __init__(self, method="ml", **kwargs):
+        nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
-            raise ValueError("No log-likelihood function defined for method "
-                             "'{}'.".format(method))
+            raise ValueError(
+                "No log-likelihood function defined for method " "'{}'.".format(method)
+            )
         self._nll_func = nll_func
         self.kwargs = kwargs
 
     @_loopable
     def fit(self, y, n, X):
         if n.std() < np.sqrt(np.finfo(float).eps):
-            raise ValueError("Sample size-based likelihood estimator cannot "
-                             "work with all-equal sample sizes.")
+            raise ValueError(
+                "Sample size-based likelihood estimator cannot "
+                "work with all-equal sample sizes."
+            )
         if n.std() < n.mean() / 10:
-            raise Warning("Sample sizes are too close, sample size-based "
-                          "likelihood estimator may fail.")
+            raise Warning(
+                "Sample sizes are too close, sample size-based " "likelihood estimator may fail."
+            )
         # set tau^2 to 0 and compute starting values
-        tau2 = 0.
+        tau2 = 0.0
         k, p = X.shape
         beta = weighted_least_squares(y, n, X, tau2)
-        sigma = ((y - X.dot(beta))**2 * n).sum() / (k - p)
+        sigma = ((y - X.dot(beta)) ** 2 * n).sum() / (k - p)
         theta_init = np.r_[beta.ravel(), sigma, tau2]
 
         lb = np.ones(len(theta_init)) * -np.inf
         ub = -lb
-        lb[-2:] = 0.  # bound only the variances
+        lb[-2:] = 0.0  # bound only the variances
         bds = Bounds(lb, ub, keep_feasible=True)
 
-        res = minimize(self._nll_func, theta_init, (y, n, X), bounds=bds,
-                       **self.kwargs)
+        res = minimize(self._nll_func, theta_init, (y, n, X), bounds=bds, **self.kwargs)
         beta, sigma, tau = res.x[:-2], float(res.x[-2]), float(res.x[-1])
         tau = np.max([tau, 0])
         _, inv_cov = weighted_least_squares(y, sigma / n, X, tau, True)
         self.params_ = {
-            'fe_params': beta[:, None],
-            'sigma2': np.array(sigma),
-            'tau2': tau,
-            'inv_cov': inv_cov
+            "fe_params": beta[:, None],
+            "sigma2": np.array(sigma),
+            "tau2": tau,
+            "inv_cov": inv_cov,
         }
         return self
 
     def _ml_nll(self, theta, y, n, X):
-        """ ML negative log-likelihood for meta-regression model. """
+        """ML negative log-likelihood for meta-regression model."""
         beta, sigma2, tau2 = theta[:-2, None], theta[-2], theta[-1]
         if tau2 < 0:
             tau2 = 0
@@ -399,7 +404,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         return -0.5 * (np.log(w).sum() - (R * w * R).sum())
 
     def _reml_nll(self, theta, y, n, X):
-        """ REML negative log-likelihood for meta-regression model. """
+        """REML negative log-likelihood for meta-regression model."""
         ll_ = self._ml_nll(theta, y, n, X)
         sigma2, tau2 = theta[-2:]
         w = 1 / (tau2 + sigma2 / n)
@@ -460,6 +465,7 @@ class StanMetaRegression(BaseEstimator):
         }
         """
         from pystan import StanModel
+
         self.model = StanModel(model_code=spec)
 
     def fit(self, y, v, X, groups=None):
@@ -488,9 +494,11 @@ class StanMetaRegression(BaseEstimator):
             (i.e., which rows in `y`, `v`, and `X` belong to each study).
         """
         if y.ndim > 1 and y.shape[1] > 1:
-            raise ValueError("The StanMetaRegression estimator currently does "
-                             "not support 2-dimensional inputs. Passed y has "
-                             "shape {}.".format(y.shape))
+            raise ValueError(
+                "The StanMetaRegression estimator currently does "
+                "not support 2-dimensional inputs. Passed y has "
+                "shape {}.".format(y.shape)
+            )
 
         if self.model is None:
             self.compile()
@@ -502,11 +510,11 @@ class StanMetaRegression(BaseEstimator):
         data = {
             "K": K,
             "N": N,
-            'id': groups,
-            'C': X.shape[1],
-            'X': X,
-            'y': y.ravel(),
-            'sigma': v.ravel()
+            "id": groups,
+            "C": X.shape[1],
+            "X": X,
+            "y": y.ravel(),
+            "sigma": v.ravel(),
         }
 
         self.result_ = self.model.sampling(data=data, **self.sampling_kwargs)
@@ -515,6 +523,8 @@ class StanMetaRegression(BaseEstimator):
     def summary(self, ci=95):
         if self.result_ is None:
             name = self.__class__.__name__
-            raise ValueError("This {} instance hasn't been fitted yet. Please "
-                             "call fit() before summary().".format(name))
+            raise ValueError(
+                "This {} instance hasn't been fitted yet. Please "
+                "call fit() before summary().".format(name)
+            )
         return BayesianMetaRegressionResults(self.result_, self.dataset_, ci)
