@@ -463,7 +463,12 @@ class StanMetaRegression(BaseEstimator):
             theta ~ normal(0, tau2);
         }
         """
-        from pystan import StanModel
+        try:
+            # It was called pystan in 3.6
+            from pystan import StanModel
+        except ImportError:
+            # From 3.7+ it's just stan
+            from stan import StanModel
 
         self.model = StanModel(model_code=spec)
 
