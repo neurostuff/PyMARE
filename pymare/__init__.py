@@ -1,8 +1,6 @@
-from ._version import get_versions
+"""PyMARE: Python Meta-Analysis & Regression Engine"""
 from .core import Dataset, meta_regression
 from .effectsize import OneSampleEffectSizeConverter, TwoSampleEffectSizeConverter
-
-__version__ = get_versions()["version"]
 
 __all__ = [
     "Dataset",
@@ -11,4 +9,6 @@ __all__ = [
     "TwoSampleEffectSizeConverter",
 ]
 
-del get_versions
+from . import _version
+
+__version__ = _version.get_versions()["version"]
