@@ -46,7 +46,7 @@ REQUIRES = [
     "wrapt",
 ]
 
-STAN_REQUIRES = ["pystan>=3", "arviz"]
+STAN_REQUIRES = ["pystan", "arviz"]
 
 TESTS_REQUIRES = [
     "codecov",
@@ -92,6 +92,7 @@ CLASSIFIERS = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.6",
     "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
