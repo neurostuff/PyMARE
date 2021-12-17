@@ -275,9 +275,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
     def __init__(self, method="ml", **kwargs):
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
-            raise ValueError(
-                "No log-likelihood function defined for method '{}'.".format(method)
-            )
+            raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
         self._nll_func = nll_func
         self.kwargs = kwargs
 
@@ -350,9 +348,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     def __init__(self, method="ml", **kwargs):
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
-            raise ValueError(
-                "No log-likelihood function defined for method '{}'.".format(method)
-            )
+            raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
         self._nll_func = nll_func
         self.kwargs = kwargs
 

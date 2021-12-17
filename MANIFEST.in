@@ -1,0 +1,2 @@
+include versioneer.py
+include pymare/_version.py
