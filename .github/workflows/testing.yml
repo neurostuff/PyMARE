@@ -53,6 +53,9 @@ jobs:
       - name: 'Install PyMARE'
         shell: bash {0}
         run: pip install -e .[tests,stan]
+      - name: Test PyStan installation
+        shell: bash {0}
+        run: python -m "import pystan"
       - name: 'Run tests'
         shell: bash {0}
         run: python -m pytest --pyargs pymare --cov=pymare
