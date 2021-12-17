@@ -8,6 +8,10 @@ on:
     branches:
       - '*'
 
+concurrency:
+  group: environment-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Determine if tests should be run based on commit message.
   check_skip:
