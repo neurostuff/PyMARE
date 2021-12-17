@@ -424,6 +424,10 @@ class StanMetaRegression(BaseEstimator):
         when fitting the meta-regression model repeatedly to different data;
         the separation of .compile() and .fit() steps allows one to compile
         the model only once.
+
+    Warning:
+        With changes to Stan in version 3, which requires Python 3.7, this class no longer works.
+        We will try to fix it in the future.
     """
 
     _result_cls = BayesianMetaRegressionResults
@@ -463,7 +467,12 @@ class StanMetaRegression(BaseEstimator):
             theta ~ normal(0, tau2);
         }
         """
-        from pystan import StanModel
+        try:
+            from pystan import StanModel
+        except ImportError:
+            raise ImportError(
+                "Please install pystan or, if using Python 3.7+, switch to Python 3.6."
+            )
 
         self.model = StanModel(model_code=spec)
 

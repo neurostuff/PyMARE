@@ -1,9 +1,10 @@
-import numpy as np
+"""Tests for estimators that use stan."""
 import pytest
 
 from pymare.estimators import StanMetaRegression
 
 
+@pytest.mark.skip(reason="StanMetaRegression won't work with Python 3.7+.")
 def test_stan_estimator(dataset):
     # no ground truth here, so we use sanity checks and rough bounds
     est = StanMetaRegression(iter=3000).fit_dataset(dataset)
@@ -16,7 +17,8 @@ def test_stan_estimator(dataset):
     assert 3 < tau2 < 5
 
 
+@pytest.mark.skip(reason="StanMetaRegression won't work with Python 3.7+.")
 def test_stan_2d_input_failure(dataset_2d):
     with pytest.raises(ValueError) as exc:
-        est = StanMetaRegression(iter=500).fit_dataset(dataset_2d)
+        StanMetaRegression(iter=500).fit_dataset(dataset_2d)
     assert str(exc.value).startswith("The StanMetaRegression")

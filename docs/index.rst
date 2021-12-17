@@ -17,9 +17,9 @@ PyMARE is a Python package for meta-analyses and meta-regressions.
   :target: https://opensource.org/licenses/MIT
   :alt: License
 
-.. image:: https://circleci.com/gh/neurostuff/PyMARE.svg?style=shield
-  :target: https://circleci.com/gh/neurostuff/PyMARE
-  :alt: CircleCI
+.. image:: https://github.com/neurostuff/pymare/actions/workflows/testing.yml/badge.svg
+  :target: https://github.com/neurostuff/pymare/actions/workflows/testing.yml/badge.svg
+  :alt: GitHub CI
 
 .. image:: https://readthedocs.org/projects/pymare/badge/?version=latest
   :target: http://pymare.readthedocs.io/en/latest/?badge=latest
