@@ -4,6 +4,7 @@ A Python library for mixed-effects meta-regression (including meta-analysis).
 [![Latest Version](https://img.shields.io/pypi/v/pymare.svg)](https://pypi.python.org/pypi/pymare/)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pymare.svg)](https://pypi.python.org/pypi/pymare/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![DOI](https://zenodo.org/badge/228903736.svg)](https://zenodo.org/badge/latestdoi/228903736)
 [![Documentation Status](https://readthedocs.org/projects/pymare/badge/?version=latest)](http://pymare.readthedocs.io/en/latest/?badge=latest)
 ![GitHub CI](https://github.com/neurostuff/pymare/actions/workflows/testing.yml/badge.svg)
 [![Codecov](https://codecov.io/gh/neurostuff/PyMARE/branch/master/graph/badge.svg)](https://codecov.io/gh/neurostuff/pymare)
