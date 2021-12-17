@@ -48,6 +48,7 @@ jobs:
       - run:
           name: Coverage
           command:  |
+            apt-get update
             apt-get install -yqq curl
             source activate testenv
             py.test --cov-report xml:coverage.xml --cov=pymare --ignore=pymare/tests/test_stan_estimators.py pymare
