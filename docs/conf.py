@@ -16,10 +16,13 @@
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-#
 import os
 import sys
 from datetime import datetime
+from distutils.version import LooseVersion
+
+import sphinx
+from m2r import MdInclude
 
 sys.path.insert(0, os.path.abspath("sphinxext"))
 sys.path.insert(0, os.path.abspath(os.path.pardir))
@@ -31,37 +34,27 @@ import pymare
 # -- General configuration ------------------------------------------------
 
 # If your documentation needs a minimal Sphinx version, state it here.
-
-# needs_sphinx = '1.0'
+needs_sphinx = "3.5"
 
 # generate autosummary even if no references
 autosummary_generate = True
-autodoc_default_flags = ["members", "inherited-members"]
 add_module_names = False
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    "sphinx.ext.autodoc",
-    "sphinx.ext.autosummary",
-    "sphinx.ext.doctest",
-    "sphinx.ext.ifconfig",
-    "sphinx.ext.intersphinx",
-    "sphinx.ext.linkcode",
-    "sphinx.ext.mathjax",
-    "sphinx.ext.napoleon",
-    "sphinx.ext.todo",
-    "sphinx_copybutton",
-    "sphinx_gallery.gen_gallery",
-    "sphinxarg.ext",
-    "m2r",
-    "numpydoc",
+    "sphinx.ext.autodoc",  # standard
+    "sphinx.ext.autosummary",  # standard
+    "sphinx.ext.doctest",  # runs doctests
+    "sphinx.ext.intersphinx",  # links code to other packages
+    "sphinx.ext.linkcode",  # links to code from api
+    "sphinx.ext.napoleon",  # alternative to numpydoc
+    "sphinx_copybutton",  # for copying code snippets
+    "sphinx_gallery.gen_gallery",  # example gallery
+    "sphinxarg.ext",  # argparse
+    "recommonmark",  # markdown parser
 ]
-
-from distutils.version import LooseVersion
-
-import sphinx
 
 if LooseVersion(sphinx.__version__) < LooseVersion("1.4"):
     extensions.append("sphinx.ext.pngmath")
@@ -109,23 +102,34 @@ default_role = "autolink"
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = "sphinx"
 
-# If true, `todo` and `todoList` produce output, else they produce nothing.
-todo_include_todos = False
+# -----------------------------------------------------------------------------
+# Napoleon settings
+# -----------------------------------------------------------------------------
+napoleon_google_docstring = False
+napoleon_numpy_docstring = True
+napoleon_include_init_with_doc = True
+napoleon_include_private_with_doc = False
+napoleon_include_special_with_doc = False
+napoleon_use_admonition_for_examples = False
+napoleon_use_admonition_for_notes = False
+napoleon_use_admonition_for_references = False
+napoleon_use_ivar = True
+napoleon_use_param = False
+napoleon_use_keyword = True
+napoleon_use_rtype = False
 
-
-# -- Options for HTML output ----------------------------------------------
-
-# The theme to use for HTML and HTML Help pages.  See the documentation for
-# a list of builtin themes.
-#
-# installing theme package
+# -----------------------------------------------------------------------------
+# HTML output
+# -----------------------------------------------------------------------------
+# The theme to use for HTML and HTML Help pages.
+# See the documentation for a list of builtin themes.
 html_theme = "sphinx_rtd_theme"
 
 # Theme options are theme-specific and customize the look and feel of a theme
-# further.  For a list of options available for each theme, see the
-# documentation.
-#
-# html_theme_options = {}
+# further.  For a list of options available for each theme, see the documentation.
+html_theme_options = {
+    "includehidden": False,  # don't show hidden TOCs in sidebar
+}
 html_sidebars = {"**": ["globaltoc.html", "relations.html", "searchbox.html", "indexsidebar.html"]}
 
 # Add any paths that contain custom static files (such as style sheets) here,
@@ -133,19 +137,12 @@ html_sidebars = {"**": ["globaltoc.html", "relations.html", "searchbox.html", "i
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 
-
-def setup(app):
-    "From https://github.com/rtfd/sphinx_rtd_theme/issues/117."
-    app.add_stylesheet("theme_overrides.css")
-    app.add_stylesheet("pymare.css")
-    app.connect("autodoc-process-docstring", generate_example_rst)
-
-
 html_favicon = "_static/nimare_favicon.png"
 html_logo = "_static/nimare_banner.png"
 
-# -- Options for HTMLHelp output ------------------------------------------
-
+# -----------------------------------------------------------------------------
+# HTMLHelp output
+# -----------------------------------------------------------------------------
 # Output file base name for HTML help builder.
 htmlhelp_basename = "pymaredoc"
 
@@ -185,30 +182,26 @@ sphinx_gallery_conf = {
     "reference_url": {
         # The module you locally document uses None
         "pymare": None,
-        "matplotlib": "https://matplotlib.org/",
-        "numpy": "http://docs.scipy.org/doc/numpy/",
     },
 }
 
 # Generate the plots for the gallery
-plot_gallery = "True"
+plot_gallery = True
 
-# -- Options for Texinfo output -------------------------------------------
 
-# Grouping the document tree into Texinfo files. List of tuples
-# (source start file, target name, title, author,
-#  dir menu entry, description, category)
-texinfo_documents = [
-    (
-        "index",
-        "project-template",
-        "project-template Documentation",
-        "Vighnesh Birodkar",
-        "project-template",
-        "One line description of project.",
-        "Miscellaneous",
-    ),
-]
+def setup(app):
+    """From https://github.com/rtfd/sphinx_rtd_theme/issues/117."""
+    app.add_stylesheet("theme_overrides.css")
+    app.add_stylesheet("pymare.css")
+    app.connect("autodoc-process-docstring", generate_example_rst)
+    # Fix to https://github.com/sphinx-doc/sphinx/issues/7420
+    # from https://github.com/life4/deal/commit/7f33cbc595ed31519cefdfaaf6f415dada5acd94
+    # from m2r to make `mdinclude` work
+    app.add_config_value("no_underscore_emphasis", False, "env")
+    app.add_config_value("m2r_parse_relative_links", False, "env")
+    app.add_config_value("m2r_anonymous_references", False, "env")
+    app.add_config_value("m2r_disable_inline_math", False, "env")
+    app.add_directive("mdinclude", MdInclude)
 
 
 def generate_example_rst(app, what, name, obj, options, lines):
@@ -221,16 +214,3 @@ def generate_example_rst(app, what, name, obj, options, lines):
     if not os.path.exists(examples_path):
         # touch file
         open(examples_path, "w").close()
-
-
-# Documents to append as an appendix to all manuals.
-# texinfo_appendices = []
-
-# If false, no module index is generated.
-# texinfo_domain_indices = True
-
-# How to display URL addresses: 'footnote', 'no', or 'inline'.
-# texinfo_show_urls = 'footnote'
-
-# If true, do not generate a @detailmenu in the "Top" node's menu.
-# texinfo_no_detailmenu = False
