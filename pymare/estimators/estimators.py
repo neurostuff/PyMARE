@@ -5,12 +5,16 @@ from inspect import getfullargspec
 from warnings import warn
 
 import numpy as np
-from scipy.optimize import minimize, Bounds
-from scipy import stats as ss
 import wrapt
+from scipy import stats as ss
+from scipy.optimize import Bounds, minimize
 
-from ..stats import weighted_least_squares, ensure_2d
-from ..results import MetaRegressionResults, BayesianMetaRegressionResults, CombinationTestResults
+from ..results import (
+    BayesianMetaRegressionResults,
+    CombinationTestResults,
+    MetaRegressionResults,
+)
+from ..stats import ensure_2d, weighted_least_squares
 
 
 @wrapt.decorator
@@ -277,7 +281,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
             raise ValueError(
-                "No log-likelihood function defined for method " "'{}'.".format(method)
+                "No log-likelihood function defined for method '{}'.".format(method)
             )
         self._nll_func = nll_func
         self.kwargs = kwargs
@@ -352,7 +356,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
             raise ValueError(
-                "No log-likelihood function defined for method " "'{}'.".format(method)
+                "No log-likelihood function defined for method '{}'.".format(method)
             )
         self._nll_func = nll_func
         self.kwargs = kwargs
@@ -366,7 +370,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
             )
         if n.std() < n.mean() / 10:
             raise Warning(
-                "Sample sizes are too close, sample size-based " "likelihood estimator may fail."
+                "Sample sizes are too close, sample size-based likelihood estimator may fail."
             )
         # set tau^2 to 0 and compute starting values
         tau2 = 0.0

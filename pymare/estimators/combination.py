@@ -1,11 +1,11 @@
-from abc import abstractmethod
 import warnings
+from abc import abstractmethod
 
 import numpy as np
 import scipy.stats as ss
 
-from .estimators import BaseEstimator
 from ..results import CombinationTestResults
+from .estimators import BaseEstimator
 
 
 class CombinationTest(BaseEstimator):
@@ -15,7 +15,7 @@ class CombinationTest(BaseEstimator):
         mode = mode.lower()
         if mode not in {"directed", "undirected", "concordant"}:
             raise ValueError(
-                "Invalid mode; must be one of 'directed', " "'undirected', or 'concordant'."
+                "Invalid mode; must be one of 'directed', 'undirected', or 'concordant'."
             )
         if mode == "undirected":
             warnings.warn(

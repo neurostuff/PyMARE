@@ -151,7 +151,7 @@ def meta_regression(
         elif n is not None:
             est_cls = partial(SampleSizeBasedLikelihoodEstimator, method=method)
         else:
-            raise ValueError("If method is ML or REML, one of `v` or `n` must " "be passed!")
+            raise ValueError("If method is ML or REML, one of `v` or `n` must be passed!")
     else:
         est_cls = {
             "dl": DerSimonianLaird,

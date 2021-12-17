@@ -96,7 +96,7 @@ class MetaRegressionResults:
 
         else:
             raise ValueError(
-                "Invalid CI method '{}'; currently only 'QP' is " "available.".format(method)
+                "Invalid CI method '{}'; currently only 'QP' is available.".format(method)
             )
 
         return {

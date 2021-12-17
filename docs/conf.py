@@ -154,7 +154,7 @@ htmlhelp_basename = "pymaredoc"
 # The following is used by sphinx.ext.linkcode to provide links to github
 linkcode_resolve = make_linkcode_resolve(
     "pymare",
-    "https://github.com/neurostuff/" "pymare/blob/{revision}/" "{package}/{path}#L{lineno}",
+    "https://github.com/neurostuff/pymare/blob/{revision}/{package}/{path}#L{lineno}",
 )
 
 # -----------------------------------------------------------------------------

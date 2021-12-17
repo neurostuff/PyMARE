@@ -1,13 +1,12 @@
 """Statistical expressions."""
+import json
+import re
 from collections import defaultdict
 from itertools import chain
-import re
-import json
 from pathlib import Path
 
-from sympy import sympify, Symbol
+from sympy import Symbol, sympify
 from sympy.core.compatibility import exec_
-
 
 _locals = {}
 exec_("from sympy.stats import *", _locals)

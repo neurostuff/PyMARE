@@ -1,16 +1,16 @@
 """Tools for effect size computation/conversion."""
 
 import warnings
-from functools import partial
 from abc import ABCMeta
 from collections import defaultdict
+from functools import partial
 
 import numpy as np
-from sympy import sympify, lambdify, Symbol, solve
+from sympy import Symbol, lambdify, solve, sympify
 
-from .expressions import select_expressions
 from pymare import Dataset
 
+from .expressions import select_expressions
 
 SYMPY_MODULES = ["numpy", "scipy"]
 

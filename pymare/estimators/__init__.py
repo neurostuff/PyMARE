@@ -1,12 +1,12 @@
+from .combination import FisherCombinationTest, StoufferCombinationTest
 from .estimators import (
-    WeightedLeastSquares,
     DerSimonianLaird,
-    VarianceBasedLikelihoodEstimator,
+    Hedges,
     SampleSizeBasedLikelihoodEstimator,
     StanMetaRegression,
-    Hedges,
+    VarianceBasedLikelihoodEstimator,
+    WeightedLeastSquares,
 )
-from .combination import StoufferCombinationTest, FisherCombinationTest
 
 __all__ = [
     "WeightedLeastSquares",
