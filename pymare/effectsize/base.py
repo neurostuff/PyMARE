@@ -17,7 +17,8 @@ SYMPY_MODULES = ["numpy", "scipy"]
 def solve_system(system, known_vars=None):
     """Solve and evaluate a system of SymPy equations given known inputs.
 
-    Args:
+    Parameters
+    ----------
         system ([sympy.core.expr.Expr]): A list of SymPy expressions defining
             the system to solve.
         known_vars (dict, optional): A dictionary of known variables to use

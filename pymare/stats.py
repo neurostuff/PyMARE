@@ -95,20 +95,28 @@ def q_profile(y, v, X, alpha=0.05):
 
 
 def q_gen(y, v, X, tau2):
-    """Generalized form of Cochran's Q-statistic.
+    """Calculate a generalized form of Cochran's Q-statistic.
 
-    Args:
-        y (ndarray): 1d array of study-level estimates
-        v (ndarray): 1d array of study-level variances
-        X (ndarray): 1d or 2d array containing study-level predictors
-            (including intercept); has dimensions K x P, where K is the number
-            of studies and P is the number of predictor variables.
-        tau2 (float): Between-study variance. Must be >= 0.
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray`
+        1d array of study-level estimates
+    v : :obj:`numpy.ndarray`
+        1d array of study-level variances
+    X : :obj:`numpy.ndarray`
+        1d or 2d array containing study-level predictors
+        (including intercept); has dimensions K x P, where K is the number
+        of studies and P is the number of predictor variables.
+    tau2 : :obj:`float`
+        Between-study variance. Must be >= 0.
 
-    Returns:
+    Returns
+    -------
+    :obj:`float`
         A float giving the value of Cochran's Q-statistic.
 
-    References:
+    References
+    ----------
     Veroniki, A. A., Jackson, D., Viechtbauer, W., Bender, R., Bowden, J.,
     Knapp, G., Kuss, O., Higgins, J. P., Langan, D., & Salanti, G. (2016).
     Methods to estimate the between-study variance and its uncertainty in

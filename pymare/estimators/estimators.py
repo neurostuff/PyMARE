@@ -66,7 +66,8 @@ class BaseEstimator(metaclass=ABCMeta):
         A convenience interface that wraps fit() and automatically aligns the
         variables held in a Dataset with the required arguments.
 
-        Args:
+        Parameters
+        ----------
             dataset (Dataset): A PyMARE Dataset instance holding the data.
             args, kwargs: optional positional and keyword arguments to pass
                 onto the fit() method.

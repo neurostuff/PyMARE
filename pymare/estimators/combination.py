@@ -61,7 +61,8 @@ class StoufferCombinationTest(CombinationTest):
     Takes a set of independent z-scores and combines them via Stouffer's method
     to produce a fixed-effect estimate of the combined effect.
 
-    Args:
+    Parameters
+    ----------
         mode (str): The type of test to perform-- i.e., what null hypothesis to
             reject. See Winkler et al. (2016) for details. Valid options are:
                 * 'directed': tests a directional hypothesis--i.e., that the
