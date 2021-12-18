@@ -13,6 +13,7 @@ from pymare.effectsize import (
 
 @pytest.fixture(scope="module")
 def one_samp_data():
+    """Create one-sample data for tests."""
     return {
         "m": np.array([7, 5, 4]),
         "sd": np.sqrt(np.array([4.2, 1.2, 1.9])),
@@ -23,6 +24,7 @@ def one_samp_data():
 
 @pytest.fixture(scope="module")
 def two_samp_data():
+    """Create two-sample data for tests."""
     return {
         "m1": np.array([4, 2]),
         "sd1": np.sqrt(np.array([1, 9])),
@@ -34,6 +36,7 @@ def two_samp_data():
 
 
 def test_EffectSizeConverter_smoke_test(two_samp_data):
+    """Perform a smoke test on the effect size converters."""
     data = two_samp_data
     esc = OneSampleEffectSizeConverter(m=data["m1"], sd=data["sd1"], n=data["n1"])
     assert set(esc.known_vars.keys()) == {"m", "sd", "n"}
@@ -47,6 +50,7 @@ def test_EffectSizeConverter_smoke_test(two_samp_data):
 
 
 def test_esc_implicit_dtype_conversion():
+    """Test effect size conversion with implicit datatype conversion."""
     esc = OneSampleEffectSizeConverter(m=[10, 12, 18])
     assert "m" in esc.known_vars
     assert isinstance(esc.known_vars["m"], np.ndarray)
@@ -54,12 +58,14 @@ def test_esc_implicit_dtype_conversion():
 
 
 def test_EffectSizeConverter_from_df(two_samp_data):
+    """Test effect size conversion from a DataFrame."""
     df = pd.DataFrame(two_samp_data)
     esc = TwoSampleEffectSizeConverter(df)
     assert np.allclose(esc.get_smd(), np.array([-0.61065, -0.13707]), atol=1e-5)
 
 
 def test_EffectSizeConverter_to_dataset(two_samp_data):
+    """Test conversion of effect-size converter outputs to DataFrame."""
     esc = TwoSampleEffectSizeConverter(**two_samp_data)
     X = np.array([1, 2])
     dataset = esc.to_dataset(X=X, X_names=["dummy"])
@@ -68,6 +74,7 @@ def test_EffectSizeConverter_to_dataset(two_samp_data):
 
 
 def test_2d_array_conversion():
+    """Test conversion of 2D data."""
     shape = (10, 2)
     data = {
         "m": np.random.randint(10, size=shape),
@@ -87,6 +94,7 @@ def test_2d_array_conversion():
 
 
 def test_convert_r_and_n_to_rz():
+    """Test Fisher's R-to-Z transform."""
     r = [0.2, 0.16, 0.6]
     n = (68, 165, 17)
     esc = OneSampleEffectSizeConverter(r=r)
@@ -105,6 +113,7 @@ def test_convert_r_and_n_to_rz():
 
 
 def test_convert_r_to_itself():
+    """Test r-to-r conversion."""
     r = np.array([0.2, 0.16, 0.6])
     n = np.array((68, 165, 17))
     esc = OneSampleEffectSizeConverter(r=r)
@@ -123,6 +132,7 @@ def test_convert_r_to_itself():
 
 
 def test_compute_measure(one_samp_data, two_samp_data):
+    """Test the compute_measure function."""
     # Default args
     base_result = compute_measure("SM", **one_samp_data)
     assert isinstance(base_result, tuple)
@@ -138,7 +148,7 @@ def test_compute_measure(one_samp_data, two_samp_data):
         compute_measure("SM", comparison=2, **one_samp_data)
 
     # Ambiguous comparison type
-    with pytest.raises(ValueError, match="Requested measure \(D\)"):
+    with pytest.raises(ValueError, match=r"Requested measure \(D\)"):
         compute_measure("D", **one_samp_data, **two_samp_data)
 
     # Works with explicit comparison type: check for both comparison types

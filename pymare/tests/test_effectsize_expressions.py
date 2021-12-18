@@ -11,6 +11,7 @@ def _symbol_set(*args):
 
 
 def test_Expression_init():
+    """Test Expression initialization."""
     # Fails because SymPy can't parse expression
     with pytest.raises(SympifyError):
         Expression('This isn"t 29 a valid + expre55!on!')
@@ -27,6 +28,7 @@ def test_Expression_init():
 
 
 def test_select_expressions():
+    """Test select_expressions function."""
     exps = select_expressions("sd", {"d", "m"})
     assert len(exps) == 1
     assert exps[0].symbols == _symbol_set("sd", "d", "m")
