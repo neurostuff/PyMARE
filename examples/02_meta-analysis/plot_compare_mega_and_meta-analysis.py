@@ -11,8 +11,7 @@ Steps:
 
 1.  Make a toy dataset
 1.  Run mega-analysis (linear mixed effects model with random intercepts for site)
-1.  Group dataset by site and run OLS on each site separately to construct derived toy
-    meta-analysis dataset
+1.  Group dataset by site and run OLS on each site separately to construct meta-analysis dataset
 1.  Run meta-analysis with DerSimonian-Laird between-study variance estimator
 """
 import numpy as np
@@ -80,6 +79,7 @@ for site_name, site_df in data.groupby("site"):
     coefficients["sample_size"] = site_df.shape[0]
     temp_df = pd.DataFrame(coefficients).T
     meta_df.append(temp_df)
+
 # Combine across sites and convert objects to floats
 meta_df = pd.concat(meta_df).reset_index(drop=True)
 meta_df = meta_df.convert_dtypes()
@@ -95,8 +95,8 @@ from pymare.estimators import DerSimonianLaird
 
 metamodel = DerSimonianLaird()
 dset = Dataset(
-    y=meta_df[["age", "educ"]].values,
-    v=meta_df[["age_var", "educ_var"]].values,
+    y=meta_df[["age", "educ"]].values.astype(float),
+    v=meta_df[["age_var", "educ_var"]].values.astype(float),
     add_intercept=True,
 )
 metamodel.fit_dataset(dset)
