@@ -69,16 +69,17 @@ class StoufferCombinationTest(CombinationTest):
     ----------
     mode : {"directed", "undirected", "concordant"}, optional
         The type of test to perform-- i.e., what null hypothesis to
-        reject. See Winkler et al. (2016) for details. Valid options are:
+        reject. See Winkler et al. (2016) for details.
+        Valid options are:
 
-            -  'directed': tests a directional hypothesis--i.e., that the
-                observed value is consistently greater than 0 in the input
-                studies. This is the default.
-            -   'undirected': tests an undirected hypothesis--i.e., that the
-                observed value differs from 0 in the input studies, but
-                allowing the direction of the deviation to vary by study.
-            -   'concordant': equivalent to two directed tests, one for each
-                sign, with correction for 2 tests.
+        -   'directed': tests a directional hypothesis--i.e., that the
+            observed value is consistently greater than 0 in the input
+            studies. This is the default.
+        -   'undirected': tests an undirected hypothesis--i.e., that the
+            observed value differs from 0 in the input studies, but
+            allowing the direction of the deviation to vary by study.
+        -   'concordant': equivalent to two directed tests, one for each
+            sign, with correction for 2 tests.
 
     Notes
     -----

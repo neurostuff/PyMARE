@@ -444,7 +444,7 @@ def compute_measure(
         necessary in future, and provides a way of imposing constraints on
         code embedded in larger pipelines. Valid values:
 
-            -   'infer' (*default): Infer the type of comparison from the input
+            -   'infer' (default): Infer the type of comparison from the input
                 arguments.
             -   1: One-group comparison. Must be accompanied by some/all of the
                 following named variables: m, sd, n, r.
@@ -493,7 +493,7 @@ def compute_measure(
 
     Returns
     -------
-    A tuple, dict, or pymare.Dataset, depending on `return_type`.
+    :obj:`tuple` or :obj:`dict` or :obj:`~pymare.core.Dataset`, depending on ``return_type``.
     """
     var_args = dict(m=m, sd=sd, n=n, r=r, m1=m1, m2=m2, sd1=sd1, sd2=sd2, n1=n1, n2=n2)
     var_args = {k: v for k, v in var_args.items() if v is not None}
