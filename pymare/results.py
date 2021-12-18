@@ -362,7 +362,7 @@ class PermutationTestResults:
 
         Parameters
         ----------
-        kwargs : :obj:`dict`, optional
+        **kwargs
             Keyword arguments to pass onto to_df() calls of parent
             results class (e.g., in case of MetaRegressionResults class,
             `alpha` is available).
@@ -414,7 +414,7 @@ class BayesianMetaRegressionResults:
         include_theta : :obj:`bool`, optional
             Whether or not to include the estimated group-level means in the summary.
             Defaults to False.
-        kwargs : :obj:`dict`, optional
+        **kwargs
             Optional keyword arguments to pass onto ArviZ's summary().
 
         Returns
@@ -438,7 +438,7 @@ class BayesianMetaRegressionResults:
             The type of ArviZ plot to generate. Can be any named function of the form "plot_{}" in
             the ArviZ namespace (e.g., 'trace', 'forest', 'posterior', etc.).
             Defaults to 'trace'.
-        kwargs : :obj:`dict`, optional
+        **kwargs
             Optional keyword arguments passed onto the corresponding
             ArviZ plotting function (see ArviZ docs for details).
 
