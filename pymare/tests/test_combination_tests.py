@@ -1,10 +1,10 @@
+"""Tests for pymare.estimators.combination."""
 import numpy as np
-import scipy.stats as ss
 import pytest
+import scipy.stats as ss
 
-from pymare.estimators import StoufferCombinationTest, FisherCombinationTest
 from pymare import Dataset
-
+from pymare.estimators import FisherCombinationTest, StoufferCombinationTest
 
 _z1 = np.array([2.1, 0.7, -0.2, 4.1, 3.8])[:, None]
 _z2 = np.c_[_z1, np.array([-0.6, -1.61, -2.3, -0.8, -4.01])[:, None]]
@@ -27,6 +27,7 @@ _params = [
 
 @pytest.mark.parametrize("Cls,data,mode,expected", _params)
 def test_combination_test(Cls, data, mode, expected):
+    """Test CombinationTest Estimators with numpy data."""
     results = Cls(mode).fit(data).params_
     z = ss.norm.isf(results["p"])
     assert np.allclose(z, expected, atol=1e-5)
@@ -34,6 +35,7 @@ def test_combination_test(Cls, data, mode, expected):
 
 @pytest.mark.parametrize("Cls,data,mode,expected", _params)
 def test_combination_test_from_dataset(Cls, data, mode, expected):
+    """Test CombinationTest Estimators with PyMARE Datasets."""
     dset = Dataset(y=data)
     est = Cls(mode).fit_dataset(dset)
     results = est.summary()

@@ -6,20 +6,28 @@ from scipy.optimize import Bounds, minimize
 
 
 def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False):
-    """2-D weighted least squares.
+    """Perform 2-D weighted least squares.
 
-    Args:
-        y (NDArray): 2-d array of estimates (studies x parallel datasets)
-        v (NDArray): 2-d array of sampling variances
-        X (NDArray): Fixed effect design matrix
-        tau2 (float): tau^2 estimate to use for weights
-        return_cov (bool): Whether or not to return the inverse cov matrix
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray`
+        2-d array of estimates (studies x parallel datasets)
+    v : :obj:`numpy.ndarray`
+        2-d array of sampling variances
+    X : :obj:`numpy.ndarray`
+        Fixed effect design matrix
+    tau2 : :obj:`float`, optional
+        tau^2 estimate to use for weights
+    return_cov : :obj:`bool`, optional
+        Whether or not to return the inverse cov matrix.
+        Default = False.
 
-    Returns:
+    Returns
+    -------
+    params[, cov]
         If return_cov is True, returns both fixed parameter estimates and the
         inverse covariance matrix; if False, only the parameter estimates.
     """
-
     w = 1.0 / (v + tau2)
 
     # Einsum indices: k = studies, p = predictors, i = parallel iterates
@@ -52,29 +60,38 @@ def ensure_2d(arr):
 def q_profile(y, v, X, alpha=0.05):
     """Get the CI for tau^2 via the Q-Profile method (Viechtbauer, 2007).
 
-    Args:
-        y (ndarray): 1d array of study-level estimates
-        v (ndarray): 1d array of study-level variances
-        X (ndarray): 1d or 2d array containing study-level predictors
-            (including intercept); has dimensions K x P, where K is the number
-            of studies and P is the number of predictor variables.
-        alpha (float, optional): alpha value defining the coverage of the CIs,
-            where width(CI) = 1 - alpha. Defaults to 0.05.
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K,)
+        1d array of study-level estimates
+    v : :obj:`numpy.ndarray` of shape (K,)
+        1d array of study-level variances
+    X : :obj:`numpy.ndarray` of shape (K[, P])
+        1d or 2d array containing study-level predictors
+        (including intercept); has dimensions K x P, where K is the number
+        of studies and P is the number of predictor variables.
+    alpha : :obj:`float`, optional
+        alpha value defining the coverage of the CIs,
+        where width(CI) = 1 - alpha. Defaults to 0.05.
 
-    Returns:
+    Returns
+    -------
+    :obj:`dict`
         A dictionary with keys 'ci_l' and 'ci_u', corresponding to the lower
         and upper bounds of the tau^2 confidence interval, respectively.
 
-    Notes:
-        Following the Viechtbauer implementation, this method returns the
-        interval that gives an equal probability mass at both tails (i.e.,
-        P(tau^2 <= lower_bound)  == P(tau^2 >= upper_bound) == alpha/2), and
-        *not* the smallest possible range of tau^2 values that provides the
-        desired coverage.
+    Notes
+    -----
+    Following the Viechtbauer implementation, this method returns the
+    interval that gives an equal probability mass at both tails (i.e.,
+    P(tau^2 <= lower_bound)  == P(tau^2 >= upper_bound) == alpha/2), and
+    *not* the smallest possible range of tau^2 values that provides the
+    desired coverage.
 
-    References:
-        Viechtbauer, W. (2007). Confidence intervals for the amount of
-        heterogeneity in meta-analysis. Statistics in Medicine, 26(1), 37-52.
+    References
+    ----------
+    Viechtbauer, W. (2007). Confidence intervals for the amount of
+    heterogeneity in meta-analysis. Statistics in Medicine, 26(1), 37-52.
     """
     k, p = X.shape
     df = k - p
@@ -95,24 +112,32 @@ def q_profile(y, v, X, alpha=0.05):
 
 
 def q_gen(y, v, X, tau2):
-    """Generalized form of Cochran's Q-statistic.
+    """Calculate a generalized form of Cochran's Q-statistic.
 
-    Args:
-        y (ndarray): 1d array of study-level estimates
-        v (ndarray): 1d array of study-level variances
-        X (ndarray): 1d or 2d array containing study-level predictors
-            (including intercept); has dimensions K x P, where K is the number
-            of studies and P is the number of predictor variables.
-        tau2 (float): Between-study variance. Must be >= 0.
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray`
+        1d array of study-level estimates
+    v : :obj:`numpy.ndarray`
+        1d array of study-level variances
+    X : :obj:`numpy.ndarray`
+        1d or 2d array containing study-level predictors
+        (including intercept); has dimensions K x P, where K is the number
+        of studies and P is the number of predictor variables.
+    tau2 : :obj:`float`
+        Between-study variance. Must be >= 0.
 
-    Returns:
+    Returns
+    -------
+    :obj:`float`
         A float giving the value of Cochran's Q-statistic.
 
-    References:
+    References
+    ----------
     Veroniki, A. A., Jackson, D., Viechtbauer, W., Bender, R., Bowden, J.,
     Knapp, G., Kuss, O., Higgins, J. P., Langan, D., & Salanti, G. (2016).
     Methods to estimate the between-study variance and its uncertainty in
-    meta-analysis. Research synthesis methods, 7(1), 55–79.
+    meta-analysis. Research synthesis methods, 7(1), 55-79.
     https://doi.org/10.1002/jrsm.1164
     """
     if np.any(tau2 < 0):

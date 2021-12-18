@@ -1,3 +1,4 @@
+"""Tests for pymare.core."""
 import numpy as np
 import pandas as pd
 
@@ -5,6 +6,7 @@ from pymare import Dataset, meta_regression
 
 
 def test_dataset_init(variables):
+    """Test Dataset creation from numpy arrays."""
     dataset = Dataset(*variables, X_names=["bork"])
 
     n = len(variables[0])
@@ -17,6 +19,7 @@ def test_dataset_init(variables):
 
 
 def test_dataset_init_from_df(variables):
+    """Test Dataset creation from a DataFrame."""
     df = pd.DataFrame({"y": [2, 4, 6], "v_alt": [100, 100, 100], "X1": [5, 2, 1], "X7": [9, 8, 7]})
     dataset = Dataset(v="v_alt", X=["X1", "X7"], data=df)
     assert dataset.X.shape == (3, 3)
@@ -26,6 +29,7 @@ def test_dataset_init_from_df(variables):
 
 
 def test_meta_regression_1(variables):
+    """Test meta_regression function."""
     results = meta_regression(*variables, X_names=["my_cov"], method="REML")
     beta, tau2 = results.fe_params, results.tau2
     assert np.allclose(beta.ravel(), [-0.1066, 0.7700], atol=1e-4)
@@ -35,6 +39,7 @@ def test_meta_regression_1(variables):
 
 
 def test_meta_regression_2(dataset_n):
+    """Test meta_regression function."""
     y, n = dataset_n.y, dataset_n.n
     df = meta_regression(y=y, n=n).to_df()
     assert df.shape == (1, 7)

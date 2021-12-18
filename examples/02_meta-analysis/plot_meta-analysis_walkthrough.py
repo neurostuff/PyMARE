@@ -113,7 +113,7 @@ fig.tight_layout()
 ###############################################################################
 # Create a Dataset object containing the data
 # --------------------------------------------
-dset = pymare.Dataset(y=y, X=None, v=v, n=n, add_intercept=True)
+dset = pymare.core.Dataset(y=y, X=None, v=v, n=n, add_intercept=True)
 
 # Here is a dictionary to house results across models
 results = {}
@@ -123,8 +123,8 @@ results = {}
 # -----------------------------------------------------------------------------
 # When you have ``z`` or ``p``:
 #
-# - :class:`pymare.estimators.Stouffers`
-# - :class:`pymare.estimators.Fishers`
+# - :class:`pymare.estimators.StoufferCombinationTest`
+# - :class:`pymare.estimators.FisherCombinationTest`
 #
 # When you have ``y`` and ``v`` and don't want to estimate between-study variance:
 #
@@ -149,7 +149,7 @@ results = {}
 # `````````````````````````````````````````````````````````````````````````````
 # The two combination models in PyMARE are Stouffer's and Fisher's Tests.
 #
-# Notice that these models don't use :class:`pymare.core.Dataset` objects.
+# Notice that these models don't use :class:`~pymare.core.Dataset` objects.
 stouff = pymare.estimators.StoufferCombinationTest()
 stouff.fit(z[:, None])
 print("Stouffers")

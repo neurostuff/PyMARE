@@ -7,16 +7,17 @@
  Creating a dataset
 ===================
 
-In PyMARE, operations are performed on :class:`pymare.core.Dataset` objects.
+In PyMARE, operations are performed on :class:`~pymare.core.Dataset` objects.
 Datasets are very lightweight objects that store the data used for
 meta-analyses, including study-level estimates (y), variances (v),
 predictors (X), and sample sizes (n).
 """
+from pprint import pprint
+
 ###############################################################################
 # Start with the necessary imports
 # --------------------------------
 import pandas as pd
-from pprint import pprint
 
 from pymare import core
 

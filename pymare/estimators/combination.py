@@ -1,3 +1,4 @@
+"""Estimators for combination (p/z) tests."""
 import warnings
 from abc import abstractmethod
 
@@ -27,12 +28,14 @@ class CombinationTest(BaseEstimator):
 
     @abstractmethod
     def p_value(self, z, *args, **kwargs):
+        """Calculate p-values."""
         pass
 
     def _z_to_p(self, z):
         return ss.norm.sf(z)
 
     def fit(self, z, *args, **kwargs):
+        """Fit the estimator to z-values."""
         if self.mode == "concordant":
             ose = self.__class__(mode="directed")
             p1 = ose.p_value(z, *args, **kwargs)
@@ -46,6 +49,7 @@ class CombinationTest(BaseEstimator):
         return self
 
     def summary(self):
+        """Generate a summary of the estimator results."""
         if not hasattr(self, "params_"):
             name = self.__class__.__name__
             raise ValueError(
@@ -61,44 +65,51 @@ class StoufferCombinationTest(CombinationTest):
     Takes a set of independent z-scores and combines them via Stouffer's method
     to produce a fixed-effect estimate of the combined effect.
 
-    Args:
-        mode (str): The type of test to perform-- i.e., what null hypothesis to
-            reject. See Winkler et al. (2016) for details. Valid options are:
-                * 'directed': tests a directional hypothesis--i.e., that the
-                    observed value is consistently greater than 0 in the input
-                    studies.
-                * 'undirected': tests an undirected hypothesis--i.e., that the
-                    observed value differs from 0 in the input studies, but
-                    allowing the direction of the deviation to vary by study.
-                * 'concordant': equivalent to two directed tests, one for each
-                    sign, with correction for 2 tests.
+    Parameters
+    ----------
+    mode : {"directed", "undirected", "concordant"}, optional
+        The type of test to perform-- i.e., what null hypothesis to
+        reject. See Winkler et al. (2016) for details.
+        Valid options are:
 
-    Notes:
-        (1) All input z-scores are assumed to correspond to one-sided p-values.
-            Do NOT pass in z-scores that have been directly converted from
-            two-tailed p-values, as these do not preserve directional
-            information.
-        (2) The 'directed' and 'undirected' modes are NOT the same as
-            one-tailed and two-tailed tests. In general, users who want to test
-            directed hypotheses should use the 'directed' mode, and users who
-            want to test for consistent effects in either the positive or
-            negative direction should use the 'concordant' mode. The
-            'undirected' mode tests a fairly uncommon null that doesn't
-            constrain the sign of effects to be consistent across studies
-            (one can think of it as a test of extremity). In the vast majority
-            of meta-analysis applications, this mode is not appropriate, and
-            users should instead opt for 'directed' or 'concordant'.
-        (3) This estimator does not support meta-regression; any moderators
-            passed in to fit() as the X array will be ignored.
+        -   'directed': tests a directional hypothesis--i.e., that the
+            observed value is consistently greater than 0 in the input
+            studies. This is the default.
+        -   'undirected': tests an undirected hypothesis--i.e., that the
+            observed value differs from 0 in the input studies, but
+            allowing the direction of the deviation to vary by study.
+        -   'concordant': equivalent to two directed tests, one for each
+            sign, with correction for 2 tests.
+
+    Notes
+    -----
+    (1) All input z-scores are assumed to correspond to one-sided p-values.
+        Do NOT pass in z-scores that have been directly converted from
+        two-tailed p-values, as these do not preserve directional
+        information.
+    (2) The 'directed' and 'undirected' modes are NOT the same as
+        one-tailed and two-tailed tests. In general, users who want to test
+        directed hypotheses should use the 'directed' mode, and users who
+        want to test for consistent effects in either the positive or
+        negative direction should use the 'concordant' mode. The
+        'undirected' mode tests a fairly uncommon null that doesn't
+        constrain the sign of effects to be consistent across studies
+        (one can think of it as a test of extremity). In the vast majority
+        of meta-analysis applications, this mode is not appropriate, and
+        users should instead opt for 'directed' or 'concordant'.
+    (3) This estimator does not support meta-regression; any moderators
+        passed in to fit() as the X array will be ignored.
     """
 
     # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
     _dataset_attr_map = {"z": "y", "w": "v"}
 
     def fit(self, z, w=None):
+        """Fit the estimator to z-values, optionally with weights."""
         return super().fit(z, w=w)
 
     def p_value(self, z, w=None):
+        """Calculate p-values."""
         if w is None:
             w = np.ones_like(z)
         cz = (z * w).sum(0) / np.sqrt((w ** 2).sum(0))
@@ -111,41 +122,44 @@ class FisherCombinationTest(CombinationTest):
     Takes a set of independent z-scores and combines them via Fisher's method
     to produce a fixed-effect estimate of the combined effect.
 
-    Args:
-        mode (str): The type of test to perform-- i.e., what null hypothesis to
-            reject. See Winkler et al. (2016) for details. Valid options are:
-                * 'directed': tests a directional hypothesis--i.e., that the
-                    observed value is consistently greater than 0 in the input
-                    studies.
-                * 'undirected': tests an undirected hypothesis--i.e., that the
-                    observed value differs from 0 in the input studies, but
-                    allowing the direction of the deviation to vary by study.
-                * 'concordant': equivalent to two directed tests, one for each
-                    sign, with correction for 2 tests.
+    mode : {"directed", "undirected", "concordant"}, optional
+        The type of test to perform-- i.e., what null hypothesis to
+        reject. See Winkler et al. (2016) for details. Valid options are:
 
-    Notes:
-        (1) All input z-scores are assumed to correspond to one-sided p-values.
-            Do NOT pass in z-scores that have been directly converted from
-            two-tailed p-values, as these do not preserve directional
-            information.
-        (2) The 'directed' and 'undirected' modes are NOT the same as
-            one-tailed and two-tailed tests. In general, users who want to test
-            directed hypotheses should use the 'directed' mode, and users who
-            want to test for consistent effects in either the positive or
-            negative direction should use the 'concordant' mode. The
-            'undirected' mode tests a fairly uncommon null that doesn't
-            constrain the sign of effects to be consistent across studies
-            (one can think of it as a test of extremity). In the vast majority
-            of meta-analysis applications, this mode is not appropriate, and
-            users should instead opt for 'directed' or 'concordant'.
-        (3) This estimator does not support meta-regression; any moderators
-            passed in to fit() as the X array will be ignored.
+            -  'directed': tests a directional hypothesis--i.e., that the
+                observed value is consistently greater than 0 in the input
+                studies. This is the default.
+            -   'undirected': tests an undirected hypothesis--i.e., that the
+                observed value differs from 0 in the input studies, but
+                allowing the direction of the deviation to vary by study.
+            -   'concordant': equivalent to two directed tests, one for each
+                sign, with correction for 2 tests.
+
+    Notes
+    -----
+    (1) All input z-scores are assumed to correspond to one-sided p-values.
+        Do NOT pass in z-scores that have been directly converted from
+        two-tailed p-values, as these do not preserve directional
+        information.
+    (2) The 'directed' and 'undirected' modes are NOT the same as
+        one-tailed and two-tailed tests. In general, users who want to test
+        directed hypotheses should use the 'directed' mode, and users who
+        want to test for consistent effects in either the positive or
+        negative direction should use the 'concordant' mode. The
+        'undirected' mode tests a fairly uncommon null that doesn't
+        constrain the sign of effects to be consistent across studies
+        (one can think of it as a test of extremity). In the vast majority
+        of meta-analysis applications, this mode is not appropriate, and
+        users should instead opt for 'directed' or 'concordant'.
+    (3) This estimator does not support meta-regression; any moderators
+        passed in to fit() as the X array will be ignored.
     """
 
     # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
     _dataset_attr_map = {"z": "y"}
 
     def p_value(self, z):
+        """Calculate p-values."""
         p = self._z_to_p(z)
         chi2 = -2 * np.log(p).sum(0)
         return ss.chi2.sf(chi2, 2 * z.shape[0])
