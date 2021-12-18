@@ -19,20 +19,24 @@ def solve_system(system, known_vars=None):
 
     Parameters
     ----------
-        system ([sympy.core.expr.Expr]): A list of SymPy expressions defining
-            the system to solve.
-        known_vars (dict, optional): A dictionary of known variables to use
-            when evaluating the solution. Keys are the names of parameters
-            (e.g., 'sem', 't'), values are numerical data types (including
-            numpy arrays).
+    system : :obj:`list` of :obj:`sympy.core.expr.Expr`
+        A list of SymPy expressions defining the system to solve.
+    known_vars : None or :obj:`dict`, optional
+        A dictionary of known variables to use
+        when evaluating the solution. Keys are the names of parameters
+        (e.g., 'sem', 't'), values are numerical data types (including
+        numpy arrays). Default is None.
 
-    Returns:
+    Returns
+    -------
+    :obj:`dict`
         A dictionary of newly computed values, where the keys are parameter
         names and the values are numerical data types.
 
-    Notes:
-        The returned dictionary contains only keys that were not passed in as
-        input (i.e., already known variables will be ignored).
+    Notes
+    -----
+    The returned dictionary contains only keys that were not passed in as
+    input (i.e., already known variables will be ignored).
     """
     system = system.copy()
 
@@ -124,12 +128,15 @@ class EffectSizeConverter(metaclass=ABCMeta):
     def update_data(self, incremental=False, **kwargs):
         """Update instance data.
 
-        Args:
-            incremental (bool): If True, updates data incrementally (i.e.,
-                existing data will be preserved unless they're overwritten by
-                incoming keys). If False, all existing data is dropped first.
-            kwargs: Data values or arrays; keys are the names of the
-                quantities. All inputs to __init__ are valid.
+        Parameters
+        ----------
+        incremental : :obj:`bool`, optional
+            If True, updates data incrementally (i.e., existing data will be preserved unless
+            they're overwritten by incoming keys). If False, all existing data is dropped first.
+            Default is False.
+        **kwargs
+            Data values or arrays; keys are the names of the quantities.
+            All inputs to ``__init__`` are valid.
         """
         if not incremental:
             self.known_vars = {}
@@ -172,21 +179,25 @@ class EffectSizeConverter(metaclass=ABCMeta):
     def get(self, stat, error=True):
         """Compute and return values for the specified statistic, if possible.
 
-        Args:
-            stat (str): The name of the quantity to retrieve.
-            error (bool): Specifies behavior in the event that the requested
-                quantity cannot be computed. If True (default), raises an
-                exception. If False, returns None.
+        Parameters
+        ----------
+        stat : :obj:`str`
+            The name of the quantity to retrieve.
+        error : :obj:`bool`, optional
+            Specifies behavior in the event that the requested quantity cannot be computed.
+            If True (default), raises an exception. If False, returns None.
 
-        Returns:
-            A float or ndarray containing the requested parameter values, if
-            successfully computed.
+        Returns
+        -------
+        :obj:`float` or :obj:`numpy.ndarray`
+            A float or ndarray containing the requested parameter values, if successfully computed.
 
-        Notes:
-            All values computed via get() are internally cached. Do not try to
-            update the instance's known values directly; any change to input
-            data require either initialization of a new instance, or a call to
-            update_data().
+        Notes
+        -----
+        All values computed via get() are internally cached. Do not try to
+        update the instance's known values directly; any change to input
+        data require either initialization of a new instance, or a call to
+        update_data().
         """
         stat = stat.lower()
 
@@ -211,24 +222,33 @@ class EffectSizeConverter(metaclass=ABCMeta):
 class OneSampleEffectSizeConverter(EffectSizeConverter):
     """Effect size converter for metric involving a single group/set of scores.
 
-    Args:
-        data (DataFrame): Optional pandas DataFrame to extract variables from.
-            Column names must match the controlled names listed below for
-            kwargs. If additional kwargs are provided, they will take
-            precedence over the values in the data frame.
-        m (array-like): Means or other continuous estimates
-        sd (array-like): Standard deviations
-        n (array-like): Sample sizes
-        r (array-like): Correlation coefficients
-        **kwargs: Optional keyword arguments providing additional inputs. All
-            values must be floats, 1d ndarrays, or any iterable that can be
-            converted to an ndarray. All variables must have the same length.
+    Parameters
+    ----------
+    data : None or :obj:`pandas.DataFrame`, optional
+        Optional pandas DataFrame to extract variables from.
+        Column names must match the controlled names listed below for
+        kwargs. If additional kwargs are provided, they will take
+        precedence over the values in the data frame.
+        Default is None.
+    m : None or :obj:`numpy.ndarray`, optional
+        Means or other continuous estimates
+    sd : None or :obj:`numpy.ndarray`, optional
+        Standard deviations
+    n : None or :obj:`numpy.ndarray`, optional
+        Sample sizes
+    r : None or :obj:`numpy.ndarray`, optional
+        Correlation coefficients
+    **kwargs
+        Optional keyword arguments providing additional inputs. All
+        values must be floats, 1d ndarrays, or any iterable that can be
+        converted to an ndarray. All variables must have the same length.
 
-    Notes:
-        All input variables are assumed to reflect study- or analysis-level
-        summaries, and are _not_ individual data points. E.g., do not pass in
-        a vector of point estimates as `m` and a scalar for the SDs `sd`.
-        The lengths of all inputs must match.
+    Notes
+    -----
+    All input variables are assumed to reflect study- or analysis-level
+    summaries, and are _not_ individual data points. E.g., do not pass in
+    a vector of point estimates as `m` and a scalar for the SDs `sd`.
+    The lengths of all inputs must match.
     """
 
     _type = 1
@@ -239,29 +259,34 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
     def to_dataset(self, measure="RM", **kwargs):
         """Get a Pymare Dataset with y and v mapped to the specified measure.
 
-        Args:
-            measure (str): The measure to map to the Dataset's y and v
-                attributes (where y is the desired measure, and v is its
-                variance). Valid values include:
-                    * 'RM': Raw mean of the group.
-                    * 'SM': Standardized mean. This is often called Hedges g.
-                      (one-sample), or equivalently, Cohen's one-sample d with
-                      a bias correction applied.
-                    * 'D': Cohen's d. Note that no bias correction is applied
-                      (use 'SM' instead).
-                    * 'R': Raw correlation coefficient.
-                    * 'ZR': Fisher z-transformed correlation coefficient.
-            kwargs: Optional keyword arguments to pass onto the Dataset
-                initializer. Provides a way of supplementing the generated y
-                and v arrays with additional arguments (e.g., X, X_names, n).
-                See pymare.Dataset docs for details.
+        Parameters
+        ----------
+        measure : {"RM", "SM", "D", "R", "ZR"}, optional
+            The measure to map to the Dataset's y and v attributes
+            (where y is the desired measure, and v is its variance). Valid values include:
 
-        Returns:
-            A pymare.Dataset instance.
+                - 'RM': Raw mean of the group. This is the default.
+                - 'SM': Standardized mean. This is often called Hedges g.
+                    (one-sample), or equivalently, Cohen's one-sample d with
+                    a bias correction applied.
+                - 'D': Cohen's d. Note that no bias correction is applied
+                    (use 'SM' instead).
+                - 'R': Raw correlation coefficient.
+                - 'ZR': Fisher z-transformed correlation coefficient.
+        **kwargs
+            Optional keyword arguments to pass onto the Dataset
+            initializer. Provides a way of supplementing the generated y
+            and v arrays with additional arguments (e.g., X, X_names, n).
+            See pymare.Dataset docs for details.
 
-        Notes:
-            Measures 'RM', 'SM', and 'D' require m, sd, and n as inputs.
-            Measures 'R' and 'ZR' require r and n as inputs.
+        Returns
+        -------
+        :obj:`~pymare.core.Dataset`
+
+        Notes
+        -----
+        Measures 'RM', 'SM', and 'D' require m, sd, and n as inputs.
+        Measures 'R' and 'ZR' require r and n as inputs.
         """
         return super().to_dataset(measure, **kwargs)
 
@@ -269,31 +294,41 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
 class TwoSampleEffectSizeConverter(EffectSizeConverter):
     """Effect size converter for two-sample comparisons.
 
-    Args:
-        data (DataFrame): Optional pandas DataFrame to extract variables from.
-            Column names must match the controlled names listed below for
-            kwargs. If additional kwargs are provided, they will take
-            precedence over the values in the data frame.
-        m1 (array-like): Means for group 1
-        m2 (array-like): Means for group 2
-        sd1 (array-like): Standard deviations for group 1
-        sd2 (array-like): Standard deviations for group 2
-        n1 (array-like): Sample sizes for group 1
-        n2 (array-like): Sample sizes for group 2
-        **kwargs: Optional keyword arguments providing additional inputs. All
-            values must be floats, 1d ndarrays, or any iterable that can be
-            converted to an ndarray.
+    Parameters
+    ----------
+    data : None or :obj:`pandas.DataFrame`, optional
+        Optional pandas DataFrame to extract variables from.
+        Column names must match the controlled names listed below for
+        kwargs. If additional kwargs are provided, they will take
+        precedence over the values in the data frame.
+    m1 : None or :obj:`numpy.ndarray`, optional
+        Means for group 1
+    m2 : None or :obj:`numpy.ndarray`, optional
+        Means for group 2
+    sd1 : None or :obj:`numpy.ndarray`, optional
+        Standard deviations for group 1
+    sd2 : None or :obj:`numpy.ndarray`, optional
+        Standard deviations for group 2
+    n1 : None or :obj:`numpy.ndarray`, optional
+        Sample sizes for group 1
+    n2 : None or :obj:`numpy.ndarray`, optional
+        Sample sizes for group 2
+    **kwargs
+        Optional keyword arguments providing additional inputs. All
+        values must be floats, 1d ndarrays, or any iterable that can be
+        converted to an ndarray.
 
-    Notes:
-        All input variables are assumed to reflect study- or analysis-level
-        summaries, and are _not_ individual data points. E.g., do not pass in
-        a vector of point estimates as `m1` and a scalar for the SDs `sd1`.
-        The lengths of all inputs must match. All variables must be passed in
-        as pairs (e.g., if m1 is provided, m2 must also be provided).
+    Notes
+    -----
+    All input variables are assumed to reflect study- or analysis-level
+    summaries, and are _not_ individual data points. E.g., do not pass in
+    a vector of point estimates as `m1` and a scalar for the SDs `sd1`.
+    The lengths of all inputs must match. All variables must be passed in
+    as pairs (e.g., if m1 is provided, m2 must also be provided).
 
-        When using the TwoSampleEffectSizeConverter, it is assumed that the
-        variable pairs are from independent samples. Paired-sampled comparisons
-        are not currently supported.
+    When using the TwoSampleEffectSizeConverter, it is assumed that the
+    variable pairs are from independent samples. Paired-sampled comparisons
+    are not currently supported.
     """
 
     _type = 2
@@ -320,27 +355,34 @@ class TwoSampleEffectSizeConverter(EffectSizeConverter):
     def to_dataset(self, measure="SMD", **kwargs):
         """Get a Pymare Dataset with y and v mapped to the specified measure.
 
-        Args:
-            measure (str): The measure to map to the Dataset's y and v
-                attributes (where y is the desired measure, and v is its
-                variance). Valid values include:
-                    * 'RMD': Raw mean difference between groups.
-                    * 'SMD': Standardized mean difference between groups. This
-                      is often called Hedges g, or equivalently, Cohen's d with
-                      a bias correction applied.
-                    * 'D': Cohen's d. Note that no bias correction is applied
-                      (use 'SMD' instead).
-            kwargs: Optional keyword arguments to pass onto the Dataset
-                initializer. Provides a way of supplementing the generated y
-                and v arrays with additional arguments (e.g., X, X_names, n).
-                See pymare.Dataset docs for details.
+        Parameters
+        ----------
+        measure : {"SMD", "RMD", "D"}, optional
+            The measure to map to the Dataset's y and v
+            attributes (where y is the desired measure, and v is its
+            variance). Valid values include:
 
-        Returns:
-            A pymare.Dataset instance.
+                -   'SMD': Standardized mean difference between groups. This
+                    is often called Hedges g, or equivalently, Cohen's d with
+                    a bias correction applied.
+                    This is the default.
+                -   'RMD': Raw mean difference between groups.
+                -   'D': Cohen's d. Note that no bias correction is applied
+                    (use 'SMD' instead).
+        **kwargs
+            Optional keyword arguments to pass onto the Dataset
+            initializer. Provides a way of supplementing the generated y
+            and v arrays with additional arguments (e.g., X, X_names, n).
+            See pymare.Dataset docs for details.
 
-        Notes:
-            All measures require that m1, m2, sd1, sd2, n1, and n2 be passed in
-            as inputs (or be solvable from the passed inputs).
+        Returns
+        -------
+        :obj:`~pymare.core.Dataset`
+
+        Notes
+        -----
+        All measures require that m1, m2, sd1, sd2, n1, and n2 be passed in
+        as inputs (or be solvable from the passed inputs).
         """
         return super().to_dataset(measure, **kwargs)
 
@@ -364,72 +406,92 @@ def compute_measure(
 ):
     """Wrapper that auto-detects and applies the right converter class.
 
-    Args:
-        measure (str): The desired output effect size measure. Valid values are
-            listed below, with the required named inputs in parentheses:
-            * 'RM' (m, sd, n): Raw mean of the group.
-            * 'SM' (m, sd, n): Standardized mean. This is often called Hedges
+    Parameters
+    ----------
+    measure : {"RM", "SM", "R", "ZR", "RMD", "SMD", "D"}
+        The desired output effect size measure. Valid values are
+        listed below, with the required named inputs in parentheses:
+
+            -   'RM' (m, sd, n): Raw mean of the group.
+            -   'SM' (m, sd, n): Standardized mean. This is often called Hedges
                 g. (one-sample), or equivalently, Cohen's one-sample d with a
                 bias correction applied.
-            * 'R' (r, n): Raw correlation coefficient.
-            * 'ZR' (r, n): Fisher z-transformed correlation coefficient.
-            * 'RMD' (m1, m2, sd1, sd2, n1, n2): Raw mean difference between
+            -   'R' (r, n): Raw correlation coefficient.
+            -   'ZR' (r, n): Fisher z-transformed correlation coefficient.
+            -   'RMD' (m1, m2, sd1, sd2, n1, n2): Raw mean difference between
                 groups.
-            * 'SMD' (m1, m2, sd1, sd2, n1, n2): Standardized mean difference
+            -   'SMD' (m1, m2, sd1, sd2, n1, n2): Standardized mean difference
                 between groups. This is often called Hedges g, or equivalently,
                 Cohen's d with a bias correction applied.
-            * 'D' (m, sd, n, or m1, m2, sd1, sd2, n1, n2): Cohen's d. No bias
+            -   'D' (m, sd, n, or m1, m2, sd1, sd2, n1, n2): Cohen's d. No bias
                 correction is applied (for that, use 'SM' or 'SMD' instead).
                 Note that 'D' can be either one-sample or two-sample. This is
                 specified in type, or (if type=='infer'), inferred from the
                 passed arguments.
-        data (DataFrame, optional): A pandas DataFrame to extract variables
-            from. Column names must match the names of other args ('m', 'sd',
-            'n2', etc.). If both a DataFrame and keyword arguments are
-            provided, the two will be merged, with variables passed as separate
-            arguments taking precedence over DataFrame columns in the event of
-            a clash.
-        comparison (str, int, optional): The type of originating comparison.
-            This is currently unnecessary, as the type can be deterministically
-            inferred from the input arguments and measure, but may become
-            necessary in future, and provides a way of imposing constraints on
-            code embedded in larger pipelines. Valid values:
-                'infer' (*default): Infer the type of comparison from the input
-                arguments. Currently
-            1: One-group comparison. Must be accompanied by some/all of the
+    data : None or :obj:`pandas.DataFrame`, optional
+        A pandas DataFrame to extract variables
+        from. Column names must match the names of other args ('m', 'sd',
+        'n2', etc.). If both a DataFrame and keyword arguments are
+        provided, the two will be merged, with variables passed as separate
+        arguments taking precedence over DataFrame columns in the event of
+        a clash.
+    comparison : {"infer", 1, 2}, optional
+        The type of originating comparison.
+        This is currently unnecessary, as the type can be deterministically
+        inferred from the input arguments and measure, but may become
+        necessary in future, and provides a way of imposing constraints on
+        code embedded in larger pipelines. Valid values:
+
+            -   'infer' (*default): Infer the type of comparison from the input
+                arguments.
+            -   1: One-group comparison. Must be accompanied by some/all of the
                 following named variables: m, sd, n, r.
-            2: Two-group comparison. Independent samples are assumed. Must be
+            -   2: Two-group comparison. Independent samples are assumed. Must be
                 accompanied by some/all of the following named variables: m1,
                 m2, sd1, sd2, n1, n2.
-        return_type (str, optional): Controls what gets returned. Valid values:
-            'tuple': A 2-tuple, where the first element is a 1-d array
-                containing the computed estimates (i.e., y), and the second
-                element is a 1-d array containing the associated sampling
-                variances.
-            'dict': A dictionary with keys 'y' and 'v' that map to the arrays
-                described for 'tuple'.
-            'dataset': A pymare Dataset instance, with y and v attributes set
-                to the corresponding arrays. Note that additional keyword
-                arguments can be passed onto the Dataset init via kwargs.
-            'converter': The EffectSizeConverter class internally initialized
-                to handle the desired computation. The target measures will
-                have already been computed (and hence, cached), and can be
-                retrieved via get_('{measure}') and get_('v_{measure}')
-        m (array-like): Means or other estimates in single-group case
-        sd (array-like): Standard deviations in single-group case
-        n (array-like): Sample sizes in single-group case
-        r (array-like): Correlation coefficients
-        m1 (array-like): Means for group 1
-        m2 (array-like): Means for group 2
-        sd1 (array-like): Standard deviations for group 1
-        sd2 (array-like): Standard deviations for group 2
-        n1 (array-like): Sample sizes for group 1
-        n2 (array-like): Sample sizes for group 2
-        dataset_kwargs (optional): Optional keyword arguments passed on to the
-            Dataset initializer. Ignored unless return_type == 'dataset'.
+    return_type : {"tuple", "dict", "dataset", "converter"}, optional
+        Controls what gets returned. Valid values:
 
-        Returns:
-            A tuple, dict, or pymare.Dataset, depending on `return_type`.
+        -   'tuple': A 2-tuple, where the first element is a 1-d array
+            containing the computed estimates (i.e., y), and the second
+            element is a 1-d array containing the associated sampling
+            variances.
+        -   'dict': A dictionary with keys 'y' and 'v' that map to the arrays
+            described for 'tuple'.
+        -   'dataset': A pymare Dataset instance, with y and v attributes set
+            to the corresponding arrays. Note that additional keyword
+            arguments can be passed onto the Dataset init via kwargs.
+        -   'converter': The EffectSizeConverter class internally initialized
+            to handle the desired computation. The target measures will
+            have already been computed (and hence, cached), and can be
+            retrieved via get_('{measure}') and get_('v_{measure}')
+    m : None or :obj:`numpy.ndarray`, optional
+        Means or other estimates in single-group case
+    sd : None or :obj:`numpy.ndarray`, optional
+        Standard deviations in single-group case
+    n : None or :obj:`numpy.ndarray`, optional
+        Sample sizes in single-group case
+    r : None or :obj:`numpy.ndarray`, optional
+        Correlation coefficients
+    m1 : None or :obj:`numpy.ndarray`, optional
+        Means for group 1
+    m2 : None or :obj:`numpy.ndarray`, optional
+        Means for group 2
+    sd1 : None or :obj:`numpy.ndarray`, optional
+        Standard deviations for group 1
+    sd2 : None or :obj:`numpy.ndarray`, optional
+        Standard deviations for group 2
+    n1 : None or :obj:`numpy.ndarray`, optional
+        Sample sizes for group 1
+    n2 : None or :obj:`numpy.ndarray`, optional
+        Sample sizes for group 2
+    **dataset_kwargs
+        Optional keyword arguments passed on to the Dataset initializer.
+        Ignored unless return_type == 'dataset'.
+
+    Returns
+    -------
+    A tuple, dict, or pymare.Dataset, depending on `return_type`.
     """
 
     var_args = dict(m=m, sd=sd, n=n, r=r, m1=m1, m2=m2, sd1=sd1, sd2=sd2, n1=n1, n2=n2)
