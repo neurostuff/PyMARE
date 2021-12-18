@@ -28,12 +28,14 @@ class CombinationTest(BaseEstimator):
 
     @abstractmethod
     def p_value(self, z, *args, **kwargs):
+        """Calculate p-values."""
         pass
 
     def _z_to_p(self, z):
         return ss.norm.sf(z)
 
     def fit(self, z, *args, **kwargs):
+        """Fit the estimator to z-values."""
         if self.mode == "concordant":
             ose = self.__class__(mode="directed")
             p1 = ose.p_value(z, *args, **kwargs)
@@ -47,6 +49,7 @@ class CombinationTest(BaseEstimator):
         return self
 
     def summary(self):
+        """Generate a summary of the estimator results."""
         if not hasattr(self, "params_"):
             name = self.__class__.__name__
             raise ValueError(
@@ -101,9 +104,11 @@ class StoufferCombinationTest(CombinationTest):
     _dataset_attr_map = {"z": "y", "w": "v"}
 
     def fit(self, z, w=None):
+        """Fit the estimator to z-values, optionally with weights."""
         return super().fit(z, w=w)
 
     def p_value(self, z, w=None):
+        """Calculate p-values."""
         if w is None:
             w = np.ones_like(z)
         cz = (z * w).sum(0) / np.sqrt((w ** 2).sum(0))
@@ -153,6 +158,7 @@ class FisherCombinationTest(CombinationTest):
     _dataset_attr_map = {"z": "y"}
 
     def p_value(self, z):
+        """Calculate p-values."""
         p = self._z_to_p(z)
         chi2 = -2 * np.log(p).sum(0)
         return ss.chi2.sf(chi2, 2 * z.shape[0])

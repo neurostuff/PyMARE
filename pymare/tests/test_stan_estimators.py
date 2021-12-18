@@ -6,6 +6,7 @@ from pymare.estimators import StanMetaRegression
 
 @pytest.mark.skip(reason="StanMetaRegression won't work with Python 3.7+.")
 def test_stan_estimator(dataset):
+    """Run smoke test for StanMetaRegression."""
     # no ground truth here, so we use sanity checks and rough bounds
     est = StanMetaRegression(iter=3000).fit_dataset(dataset)
     results = est.summary()
@@ -19,6 +20,7 @@ def test_stan_estimator(dataset):
 
 @pytest.mark.skip(reason="StanMetaRegression won't work with Python 3.7+.")
 def test_stan_2d_input_failure(dataset_2d):
+    """Run smoke test for StanMetaRegression on 2D data."""
     with pytest.raises(ValueError) as exc:
         StanMetaRegression(iter=500).fit_dataset(dataset_2d)
     assert str(exc.value).startswith("The StanMetaRegression")

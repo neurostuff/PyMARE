@@ -121,6 +121,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
         return kwargs
 
     def __getattr__(self, key):
+        """Access an instance attribute."""
         if key.startswith("get_"):
             stat = key.replace("get_", "")
             return partial(self.get, stat=stat)
@@ -167,6 +168,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
         return system
 
     def to_dataset(self, measure, **kwargs):
+        """Convert conversion results to a Dataset."""
         measure = measure.lower()
         y = self.get(measure)
         v = self.get("v_{}".format(measure), error=False)
@@ -404,7 +406,7 @@ def compute_measure(
     n2=None,
     **dataset_kwargs,
 ):
-    """Wrapper that auto-detects and applies the right converter class.
+    """Auto-detect and apply the right converter class.
 
     Parameters
     ----------
@@ -493,7 +495,6 @@ def compute_measure(
     -------
     A tuple, dict, or pymare.Dataset, depending on `return_type`.
     """
-
     var_args = dict(m=m, sd=sd, n=n, r=r, m1=m1, m2=m2, sd1=sd1, sd2=sd2, n1=n1, n2=n2)
     var_args = {k: v for k, v in var_args.items() if v is not None}
 

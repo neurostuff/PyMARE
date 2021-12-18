@@ -51,6 +51,7 @@ def _loopable(wrapped, instance, args, kwargs):
 
 
 class BaseEstimator(metaclass=ABCMeta):
+    """A base class for Estimators."""
 
     # A class-level mapping from Dataset attributes to fit() arguments. Used by
     # fit_dataset() for estimators that take non-standard arguments (e.g., 'z'
@@ -61,10 +62,11 @@ class BaseEstimator(metaclass=ABCMeta):
 
     @abstractmethod
     def fit(self, *args, **kwargs):
+        """Fit the estimator to data."""
         pass
 
     def fit_dataset(self, dataset, *args, **kwargs):
-        """Applies the current estimator to the passed Dataset container.
+        """Apply the current estimator to the passed Dataset container.
 
         A convenience interface that wraps fit() and automatically aligns the
         variables held in a Dataset with the required arguments.
@@ -134,6 +136,7 @@ class BaseEstimator(metaclass=ABCMeta):
         return self.params_["sigma2"] / dataset.n
 
     def summary(self):
+        """Generate a MetaRegressionResults object for the fitted estimator."""
         if not hasattr(self, "params_"):
             name = self.__class__.__name__
             raise ValueError(
@@ -178,6 +181,7 @@ class WeightedLeastSquares(BaseEstimator):
         self.tau2 = tau2
 
     def fit(self, y, X, v=None):
+        """Fit the estimator to data."""
         if v is None:
             v = np.ones_like(y)
         beta, inv_cov = weighted_least_squares(y, v, X, self.tau2, return_cov=True)
@@ -208,7 +212,7 @@ class DerSimonianLaird(BaseEstimator):
     """
 
     def fit(self, y, v, X):
-
+        """Fit the estimator to data."""
         y = ensure_2d(y)
         v = ensure_2d(v)
 
@@ -254,6 +258,7 @@ class Hedges(BaseEstimator):
     """
 
     def fit(self, y, v, X):
+        """Fit the estimator to data."""
         k, p = X.shape[:2]
         _unit_v = np.ones_like(y)
         beta, inv_cov = weighted_least_squares(y, _unit_v, X, return_cov=True)
@@ -305,6 +310,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 
     @_loopable
     def fit(self, y, v, X):
+        """Fit the estimator to data."""
         # use D-L estimate for initial values
         est_DL = DerSimonianLaird().fit(y, v, X).params_
         beta = est_DL["fe_params"]
@@ -343,8 +349,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 
 
 class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
-    """Likelihood-based estimator for estimates with known sample sizes but
-    unknown sampling variances.
+    """Likelihood-based estimator for data with known sample sizes but unknown sampling variances.
 
     Iteratively estimates the between-subject variance tau^2 and fixed effect
     betas using the specified likelihood-based estimator (ML or REML).
@@ -382,6 +387,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
 
     @_loopable
     def fit(self, y, n, X):
+        """Fit the estimator to data."""
         if n.std() < np.sqrt(np.finfo(float).eps):
             raise ValueError(
                 "Sample size-based likelihood estimator cannot "
@@ -564,6 +570,7 @@ class StanMetaRegression(BaseEstimator):
         return self
 
     def summary(self, ci=95):
+        """Generate a BayesianMetaRegressionResults object from the fitted estimator."""
         if self.result_ is None:
             name = self.__class__.__name__
             raise ValueError(
