@@ -83,7 +83,7 @@ for site_name, site_df in data.groupby("site"):
 # Combine across sites and convert objects to floats
 meta_df = pd.concat(meta_df).reset_index(drop=True)
 meta_df = meta_df.convert_dtypes()
-print(meta_df.to_markdown())
+meta_df
 
 ###############################################################################
 # The meta-analysis
@@ -101,5 +101,8 @@ dset = Dataset(
 metamodel.fit_dataset(dset)
 
 ###############################################################################
+from pprint import pprint
+
 summary = metamodel.summary()
-summary.get_fe_stats()
+results = summary.get_fe_stats()
+pprint(results)
