@@ -1,3 +1,4 @@
+"""Estimators for combination (p/z) tests."""
 import warnings
 from abc import abstractmethod
 
