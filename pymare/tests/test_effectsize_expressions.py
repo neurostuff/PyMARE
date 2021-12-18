@@ -1,6 +1,7 @@
+"""Tests for pymare.effectsize.expressions."""
 import pytest
-from sympy.core.sympify import SympifyError
 from sympy import Symbol
+from sympy.core.sympify import SympifyError
 
 from pymare.effectsize.expressions import Expression, select_expressions
 

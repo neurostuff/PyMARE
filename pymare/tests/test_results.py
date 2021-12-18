@@ -1,21 +1,22 @@
-import pytest
+"""Tests for pymare.results."""
 import numpy as np
+import pytest
 
 from pymare import Dataset
-from pymare.results import (
-    MetaRegressionResults,
-    CombinationTestResults,
-    BayesianMetaRegressionResults,
-)
 from pymare.estimators import (
-    WeightedLeastSquares,
     DerSimonianLaird,
-    VarianceBasedLikelihoodEstimator,
+    FisherCombinationTest,
+    Hedges,
     SampleSizeBasedLikelihoodEstimator,
     StanMetaRegression,
-    Hedges,
     StoufferCombinationTest,
-    FisherCombinationTest,
+    VarianceBasedLikelihoodEstimator,
+    WeightedLeastSquares,
+)
+from pymare.results import (
+    BayesianMetaRegressionResults,
+    CombinationTestResults,
+    MetaRegressionResults,
 )
 
 

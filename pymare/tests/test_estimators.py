@@ -1,14 +1,15 @@
+"""Tests for pymare.estimators.estimators."""
 import numpy as np
 import pytest
-from pymare.estimators import (
-    WeightedLeastSquares,
-    DerSimonianLaird,
-    VarianceBasedLikelihoodEstimator,
-    SampleSizeBasedLikelihoodEstimator,
-    StanMetaRegression,
-    Hedges,
-)
+
 from pymare import Dataset
+from pymare.estimators import (
+    DerSimonianLaird,
+    Hedges,
+    SampleSizeBasedLikelihoodEstimator,
+    VarianceBasedLikelihoodEstimator,
+    WeightedLeastSquares,
+)
 
 
 def test_weighted_least_squares_estimator(dataset):

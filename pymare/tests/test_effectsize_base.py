@@ -1,15 +1,14 @@
-import pytest
+"""Tests for pymare.effectsize.base."""
 import numpy as np
 import pandas as pd
+import pytest
 
+from pymare import Dataset
 from pymare.effectsize import (
     OneSampleEffectSizeConverter,
-    solve_system,
-    select_expressions,
-    compute_measure,
     TwoSampleEffectSizeConverter,
+    compute_measure,
 )
-from pymare import Dataset
 
 
 @pytest.fixture(scope="module")

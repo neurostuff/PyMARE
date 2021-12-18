@@ -1,3 +1,4 @@
+"""Tests for pymare.stats."""
 from pymare.stats import q_gen, q_profile
 
 
