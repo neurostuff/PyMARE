@@ -10,9 +10,9 @@
 Steps:
 
 1.  Make a toy dataset
-1.  Run mega-analysis (linear mixed effects model with random intercepts for site)
-1.  Group dataset by site and run OLS on each site separately to construct meta-analysis dataset
-1.  Run meta-analysis with DerSimonian-Laird between-study variance estimator
+2.  Run mega-analysis (linear mixed effects model with random intercepts for site)
+3.  Group dataset by site and run OLS on each site separately to construct meta-analysis dataset
+4.  Run meta-analysis with DerSimonian-Laird between-study variance estimator
 """
 import numpy as np
 import statsmodels.api as sm
@@ -85,12 +85,11 @@ meta_df = pd.concat(meta_df).reset_index(drop=True)
 meta_df = meta_df.convert_dtypes()
 print(meta_df.to_markdown())
 
-from pymare import Dataset
-
 ###############################################################################
 # The meta-analysis
 # --------------------------------------------
 # Are age and education significant predictors of TV news watching across the literature?
+from pymare import Dataset
 from pymare.estimators import DerSimonianLaird
 
 metamodel = DerSimonianLaird()
