@@ -159,7 +159,7 @@ def meta_regression(
         Ignored if ``method == 'Stan'``.
     alpha : :obj:`float`, optional
         Desired alpha level (CIs will have 1 - alpha coverage). Default is 0.05.
-    kwargs : :obj:`dict`, optional
+    **kwargs
         Optional keyword arguments to pass onto the chosen estimator.
 
     Returns
