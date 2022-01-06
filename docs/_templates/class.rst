@@ -4,12 +4,13 @@
 .. currentmodule:: {{ module }}
 
 .. autoclass:: {{ objname }}
-
+   :members:
+   :inherited-members:
+   :show-inheritance:
    {% block methods %}
-   .. automethod:: __init__
    {% endblock %}
 
-.. include:: {{module}}.{{objname}}.examples
+.. include:: {{fullname}}.examples
 
 .. raw:: html
 
