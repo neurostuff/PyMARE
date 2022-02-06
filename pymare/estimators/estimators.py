@@ -228,7 +228,7 @@ class DerSimonianLaird(BaseEstimator):
 
         # Einsum indices: k = studies, p = predictors, i = parallel iterates.
         # q is a dummy for 2nd p when p x p covariance matrix is passed.
-        Xw2 = np.einsum("kp,ki->ipk", X, w ** 2)
+        Xw2 = np.einsum("kp,ki->ipk", X, w**2)
         pXw2 = np.einsum("ipk,qpi->iqk", Xw2, inv_cov)
         A = w_sum - np.trace(pXw2.dot(X), axis1=1, axis2=2)
         tau_dl = (Q - (k - p)) / A

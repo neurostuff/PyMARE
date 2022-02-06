@@ -112,7 +112,7 @@ class StoufferCombinationTest(CombinationTest):
         """Calculate p-values."""
         if w is None:
             w = np.ones_like(z)
-        cz = (z * w).sum(0) / np.sqrt((w ** 2).sum(0))
+        cz = (z * w).sum(0) / np.sqrt((w**2).sum(0))
         return ss.norm.sf(cz)
 
 

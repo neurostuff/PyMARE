@@ -179,7 +179,7 @@ class MetaRegressionResults:
         if has_mods:
             n_exact = np.math.factorial(n_obs)
         else:
-            n_exact = 2 ** n_obs
+            n_exact = 2**n_obs
             if n_exact < n_perm:
                 perms = np.array(list(itertools.product([-1, 1], repeat=n_obs))).T
 
@@ -308,7 +308,7 @@ class CombinationTestResults:
         p_p = np.zeros_like(self.z)
 
         # Calculate # of permutations and determine whether to use exact test
-        n_exact = 2 ** n_obs
+        n_exact = 2**n_obs
         if n_exact < n_perm:
             perms = np.array(list(itertools.product([-1, 1], repeat=n_obs))).T
             exact = True
