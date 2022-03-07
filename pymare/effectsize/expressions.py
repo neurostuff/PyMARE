@@ -5,10 +5,6 @@ from itertools import chain
 from pathlib import Path
 
 from sympy import Symbol, sympify
-from sympy.core.compatibility import exec_
-
-_locals = {}
-exec_("from sympy.stats import *", _locals)
 
 
 class Expression:
@@ -26,9 +22,12 @@ class Expression:
     """
 
     def __init__(self, expression, description=None, type=0):
+        self._locals = {}
+        exec("from sympy.stats import *", self._locals)
+
         self.expr = expression
         self.description = description
-        self.sympy = sympify(expression, locals=_locals)
+        self.sympy = sympify(expression, locals=self._locals)
         self.type = type
         self.symbols = self.sympy.free_symbols
 
