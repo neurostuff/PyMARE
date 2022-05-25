@@ -17,7 +17,8 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False):
     X : :obj:`numpy.ndarray`
         Fixed effect design matrix
     tau2 : :obj:`float`, optional
-        tau^2 estimate to use for weights
+        tau^2 estimate to use for weights.
+        Default = 0.
     return_cov : :obj:`bool`, optional
         Whether or not to return the inverse cov matrix.
         Default = False.
@@ -48,17 +49,20 @@ def ensure_2d(arr):
     """Ensure the passed array has 2 dimensions."""
     if arr is None:
         return arr
+
     try:
         arr = np.array(arr)
     except:
         return arr
+
     if arr.ndim == 1:
         arr = arr[:, None]
+
     return arr
 
 
 def q_profile(y, v, X, alpha=0.05):
-    """Get the CI for tau^2 via the Q-Profile method (Viechtbauer, 2007).
+    """Get the CI for tau^2 via the Q-Profile method.
 
     Parameters
     ----------
@@ -72,7 +76,7 @@ def q_profile(y, v, X, alpha=0.05):
         of studies and P is the number of predictor variables.
     alpha : :obj:`float`, optional
         alpha value defining the coverage of the CIs,
-        where width(CI) = 1 - alpha. Defaults to 0.05.
+        where width(CI) = 1 - alpha. Default = 0.05.
 
     Returns
     -------
@@ -82,16 +86,14 @@ def q_profile(y, v, X, alpha=0.05):
 
     Notes
     -----
-    Following the Viechtbauer implementation, this method returns the
-    interval that gives an equal probability mass at both tails (i.e.,
-    P(tau^2 <= lower_bound)  == P(tau^2 >= upper_bound) == alpha/2), and
-    *not* the smallest possible range of tau^2 values that provides the
-    desired coverage.
+    Following the :footcite:t:`viechtbauer2007confidence` implementation,
+    this method returns the interval that gives an equal probability mass at both tails
+    (i.e., ``P(tau^2 <= lower_bound)  == P(tau^2 >= upper_bound) == alpha/2``),
+    and *not* the smallest possible range of tau^2 values that provides the desired coverage.
 
     References
     ----------
-    Viechtbauer, W. (2007). Confidence intervals for the amount of
-    heterogeneity in meta-analysis. Statistics in Medicine, 26(1), 37-52.
+    .. footbibliography::
     """
     k, p = X.shape
     df = k - p
@@ -114,6 +116,8 @@ def q_profile(y, v, X, alpha=0.05):
 def q_gen(y, v, X, tau2):
     """Calculate a generalized form of Cochran's Q-statistic.
 
+    This version of the Q statistic is described in :footcite:t:`veroniki2016methods`.
+
     Parameters
     ----------
     y : :obj:`numpy.ndarray`
@@ -134,14 +138,11 @@ def q_gen(y, v, X, tau2):
 
     References
     ----------
-    Veroniki, A. A., Jackson, D., Viechtbauer, W., Bender, R., Bowden, J.,
-    Knapp, G., Kuss, O., Higgins, J. P., Langan, D., & Salanti, G. (2016).
-    Methods to estimate the between-study variance and its uncertainty in
-    meta-analysis. Research synthesis methods, 7(1), 55-79.
-    https://doi.org/10.1002/jrsm.1164
+    .. footbibliography::
     """
     if np.any(tau2 < 0):
         raise ValueError("Value of tau^2 must be >= 0.")
+
     beta = weighted_least_squares(y, v, X, tau2)
     w = 1.0 / (v + tau2)
     return (w * (y - X.dot(beta)) ** 2).sum(0)

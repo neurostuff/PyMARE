@@ -52,7 +52,27 @@ class MetaRegressionResults:
 
     @lru_cache(maxsize=16)
     def get_fe_stats(self, alpha=0.05):
-        """Get fixed-effect statistics."""
+        """Get fixed-effect statistics.
+
+        Parameters
+        ----------
+        alpha : :obj:`float`, optional
+            Default = 0.05.
+
+        Returns
+        -------
+        :obj:`dict`
+            A dictionary of fixed-effect statistics.
+            The dictionary has the following keys:
+
+            =========== ==========================================================================
+            est         The parameter estimate for the regressor.
+            se          The standard error of the estimate.
+            z           The z score of the estimate.
+            p           The p value the estimate.
+            ci_l/ci_u   Lower and upper bounds of the estimate.
+            =========== ==========================================================================
+        """
         beta, se = self.fe_params, self.fe_se
         z_se = ss.norm.ppf(1 - alpha / 2)
         z = beta / se
@@ -70,7 +90,31 @@ class MetaRegressionResults:
 
     @lru_cache(maxsize=16)
     def get_re_stats(self, method="QP", alpha=0.05):
-        """Get random-effect statistics."""
+        """Get random-effect statistics.
+
+        Parameters
+        ----------
+        method : {"QP"}, optional
+            Method for estimating the confidence interval of the tau^2 estimate.
+            Default = "QP" :footcite:p:`viechtbauer2007confidence`.
+        alpha : :obj:`float`, optional
+            Default = 0.05.
+
+        Returns
+        -------
+        :obj:`dict`
+            A dictionary of random-effect statistics.
+            The dictionary has the following keys:
+
+            =========== ==========================================================================
+            tau^2       The parameter estimate for the regressor.
+            ci_l/ci_u   Lower and upper bounds of the tau^2 estimate.
+            =========== ==========================================================================
+
+        References
+        ----------
+        .. footbibliography::
+        """
         if method == "QP":
             n_iters = np.atleast_2d(self.tau2).shape[1]
             if n_iters > 10:
@@ -111,7 +155,31 @@ class MetaRegressionResults:
 
     @lru_cache(maxsize=16)
     def get_heterogeneity_stats(self):
-        """Get heterogeneity statistics."""
+        """Get heterogeneity statistics.
+
+        Returns
+        -------
+        :obj:`dict`
+            A dictionary with the associated heterogeneity statistics.
+            The keys to this dictionary are:
+
+            ======= ==============================================================================
+            Q       Cochran's Q :footcite:p:`cochran1954combination`.
+                    This measure follows a chi-squared distribution, with n - k degrees of
+                    freedom, where n is the number of studies and k is the number of regressors.
+            p(Q)    P values associated with the Cochran's Q values.
+            I^2     The proportion of the variance in study estimates that is due to heterogeneity
+                    instead of sampling error :footcite:p:`higgins2002quantifying`.
+                    This measure is bounded from 0 to 100.
+            H       The ratio of the standard deviation of the estimated overall effect size from
+                    a random-effects meta-analysis compared to the standard deviation from a
+                    fixed-effect meta-analysis :footcite:p:`higgins2002quantifying`.
+            ======= ==============================================================================
+
+        References
+        ----------
+        .. footbibliography::
+        """
         v = self.estimator.get_v(self.dataset)
         q_fe = q_gen(self.dataset.y, v, self.dataset.X, 0)
         df = self.dataset.y.shape[0] - self.dataset.X.shape[1]
@@ -121,7 +189,34 @@ class MetaRegressionResults:
         return {"Q": q_fe, "p(Q)": p, "I^2": i2, "H": h}
 
     def to_df(self, alpha=0.05):
-        """Return a pandas DataFrame summarizing fixed effect results."""
+        """Return a pandas DataFrame summarizing fixed effect results.
+
+        .. warning::
+
+            This method only works for one-dimensional results.
+
+        Parameters
+        ----------
+        alpha : :obj:`float`, optional
+            Default = 0.05.
+
+        Returns
+        -------
+        df : :obj:`pandas.DataFrame`
+            DataFrame summarizing fixed effect results.
+            The DataFrame will have one row for each regressor, and the following columns:
+
+            =========== ==========================================================================
+            name        Name of the regressor.
+            estimate    The parameter estimate for the regressor.
+            se          The standard error of the estimate.
+            z-score     The z score of the estimate.
+            p-value     The p value the estimate.
+            ci_+        Lower and upper bounds of the estimate. There will be two columns, with
+                        names based on the ``alpha`` value. For example, if ``alpha = 0.05``,
+                        the CI columns will be ``"ci_0.025"`` and ``"ci_0.975"``.
+            =========== ==========================================================================
+        """
         b_shape = self.fe_params.shape
         if len(b_shape) > 1 and b_shape[1] > 1:
             raise ValueError(
@@ -129,6 +224,7 @@ class MetaRegressionResults:
                 "table cannot be displayed for multidimensional "
                 "results at the moment."
             )
+
         fe_stats = self.get_fe_stats(alpha).items()
         df = pd.DataFrame({k: v.ravel() for k, v in fe_stats})
         df["name"] = self.dataset.X_names
@@ -146,7 +242,7 @@ class MetaRegressionResults:
         n_perm : :obj:`int`, optional
             Number of permutations to generate. The actual number used may be smaller in the event
             of an exact test (see below), but will never be larger.
-            Default is 1000.
+            Default = 1000.
 
         Returns
         -------
@@ -248,9 +344,9 @@ class CombinationTestResults:
     dataset : :obj:`~pymare.core.Dataset`
         A Dataset instance containing the inputs to the estimator.
     z : :obj:`numpy.ndarray`, optional
-        Array of z-scores. Default is None.
+        Array of z-scores. Default = None.
     p : :obj:`numpy.ndarray`, optional
-        Array of right-tailed p-values. Default is None.
+        Array of right-tailed p-values. Default = None.
     """
 
     def __init__(self, estimator, dataset, z=None, p=None):
@@ -285,7 +381,7 @@ class CombinationTestResults:
         n_perm : :obj:`int`, optional
             Number of permutations to generate. The actual number used may be smaller in the event
             of an exact test (see below), but will never be larger.
-            Default is 1000.
+            Default = 1000.
 
         Returns
         -------
@@ -294,13 +390,13 @@ class CombinationTestResults:
 
         Notes
         -----
-            If the number of possible permutations is smaller than n_perm, an
-            exact test will be conducted. Otherwise an approximate test will be
-            conducted by randomly shuffling the outcomes n_perm times (or, for
-            intercept-only models, by randomly flipping their signs). Permuted
-            datasets are processed in parallel. This means that one can often
-            set very high n_perm values (e.g., 100k) with little performance
-            degradation.
+        If the number of possible permutations is smaller than n_perm, an
+        exact test will be conducted. Otherwise an approximate test will be
+        conducted by randomly shuffling the outcomes n_perm times (or, for
+        intercept-only models, by randomly flipping their signs). Permuted
+        datasets are processed in parallel. This means that one can often
+        set very high n_perm values (e.g., 100k) with little performance
+        degradation.
         """
         n_obs, n_datasets = self.dataset.y.shape
 
@@ -391,7 +487,7 @@ class BayesianMetaRegressionResults:
     dataset : :obj:`~pymare.core.Dataset`
         A Dataset instance containing the inputs to the estimator.
     ci : :obj:`float`, optional
-        Desired width of highest posterior density (HPD) interval. Defaults to 95.0 (95%).
+        Desired width of highest posterior density (HPD) interval. Default = 95.0 (95%).
     """
 
     def __init__(self, data, dataset, ci=95.0):
@@ -413,7 +509,7 @@ class BayesianMetaRegressionResults:
         ----------
         include_theta : :obj:`bool`, optional
             Whether or not to include the estimated group-level means in the summary.
-            Defaults to False.
+            Default = False.
         **kwargs
             Optional keyword arguments to pass onto ArviZ's summary().
 
@@ -437,7 +533,7 @@ class BayesianMetaRegressionResults:
         kind : :obj:`str`, optional
             The type of ArviZ plot to generate. Can be any named function of the form "plot_{}" in
             the ArviZ namespace (e.g., 'trace', 'forest', 'posterior', etc.).
-            Defaults to 'trace'.
+            Default = 'trace'.
         **kwargs
             Optional keyword arguments passed onto the corresponding
             ArviZ plotting function (see ArviZ docs for details).

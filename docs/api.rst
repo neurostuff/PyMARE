@@ -91,7 +91,6 @@ API
 
    :template: function.rst
    effectsize.solve_system
-   effectsize.Expression
    effectsize.select_expressions
    effectsize.compute_measure
 
