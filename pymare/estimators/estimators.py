@@ -35,9 +35,11 @@ def _loopable(wrapped, instance, args, kwargs):
         iter_kwargs["y"] = kwargs["y"][:, i, None]
         if "v" in kwargs:
             iter_kwargs["v"] = kwargs["v"][:, i, None]
+
         if "n" in kwargs:
             n = kwargs["n"][:, i, None] if kwargs["n"].shape[1] > 1 else kwargs["n"]
             iter_kwargs["n"] = n
+
         wrapped(**iter_kwargs)
         param_dicts.append(instance.params_.copy())
 
@@ -120,6 +122,7 @@ class BaseEstimator(metaclass=ABCMeta):
         """
         if dataset.v is not None:
             return dataset.v
+
         # Estimate sampling variances from sigma^2 and n if available.
         if dataset.n is None:
             raise ValueError(
@@ -127,12 +130,14 @@ class BaseEstimator(metaclass=ABCMeta):
                 " and no estimate of v is possible without sample"
                 " sizes (n)."
             )
+
         if "sigma2" not in self.params_:
             raise ValueError(
                 "Dataset does not contain sampling variances (v),"
                 " and no estimate of v is possible because no "
                 "sigma^2 parameter was found."
             )
+
         return self.params_["sigma2"] / dataset.n
 
     def summary(self):
@@ -143,6 +148,7 @@ class BaseEstimator(metaclass=ABCMeta):
                 "This {} instance hasn't been fitted yet. Please "
                 "call fit() before summary().".format(name)
             )
+
         p = self.params_
         return MetaRegressionResults(self, self.dataset_, p["fe_params"], p["inv_cov"], p["tau2"])
 
@@ -183,6 +189,7 @@ class WeightedLeastSquares(BaseEstimator):
         """Fit the estimator to data."""
         if v is None:
             v = np.ones_like(y)
+
         beta, inv_cov = weighted_least_squares(y, v, X, self.tau2, return_cov=True)
         self.params_ = {"fe_params": beta, "tau2": self.tau2, "inv_cov": inv_cov}
         return self
@@ -278,8 +285,8 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
     Parameters
     ----------
     method : {"ML", "REML"}, optional
-        The estimation method to use. Either 'ML' (for
-        maximum-likelihood) or 'REML' (restricted maximum-likelihood).
+        The estimation method to use.
+        Either 'ML' (for maximum-likelihood) or 'REML' (restricted maximum-likelihood).
         Default = 'ML'.
     **kwargs
         Keyword arguments to pass to the SciPy minimizer.
@@ -299,6 +306,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
             raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
+
         self._nll_func = nll_func
         self.kwargs = kwargs
 
@@ -351,8 +359,8 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     Parameters
     ----------
     method : {"ML", "REML"}, optional
-        The estimation method to use. Either 'ML' (for maximum-likelihood) or
-        'REML' (restricted maximum-likelihood).
+        The estimation method to use.
+        Either 'ML' (for maximum-likelihood) or 'REML' (restricted maximum-likelihood).
         Default = 'ML'.
     **kwargs
         Keyword arguments to pass to the SciPy minimizer.
@@ -374,6 +382,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
             raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
+
         self._nll_func = nll_func
         self.kwargs = kwargs
 
@@ -385,10 +394,12 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
                 "Sample size-based likelihood estimator cannot "
                 "work with all-equal sample sizes."
             )
+
         if n.std() < n.mean() / 10:
             raise Warning(
                 "Sample sizes are too close, sample size-based likelihood estimator may fail."
             )
+
         # set tau^2 to 0 and compute starting values
         tau2 = 0.0
         k, p = X.shape
