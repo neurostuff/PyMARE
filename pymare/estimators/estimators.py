@@ -116,7 +116,7 @@ class BaseEstimator(metaclass=ABCMeta):
 
         Notes
         -----
-        This is equivalent to directly accessing `dataset.v` when variances are present,
+        This is equivalent to directly accessing ``dataset.v`` when variances are present,
         but affords a way of estimating v from sample size (n) for any estimator that implicitly
         estimates a sigma^2 parameter.
         """
