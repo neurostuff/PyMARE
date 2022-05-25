@@ -113,3 +113,5 @@ API
    stats.ensure_2d
    stats.q_profile
    stats.q_gen
+   stats.bonferroni
+   stats.fdr
