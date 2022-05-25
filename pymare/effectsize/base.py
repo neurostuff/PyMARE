@@ -25,7 +25,7 @@ def solve_system(system, known_vars=None):
         A dictionary of known variables to use
         when evaluating the solution. Keys are the names of parameters
         (e.g., 'sem', 't'), values are numerical data types (including
-        numpy arrays). Default is None.
+        numpy arrays). Default = None.
 
     Returns
     -------
@@ -134,7 +134,7 @@ class EffectSizeConverter(metaclass=ABCMeta):
         incremental : :obj:`bool`, optional
             If True, updates data incrementally (i.e., existing data will be preserved unless
             they're overwritten by incoming keys). If False, all existing data is dropped first.
-            Default is False.
+            Default = False.
         **kwargs
             Data values or arrays; keys are the names of the quantities.
             All inputs to ``__init__`` are valid.
@@ -231,7 +231,7 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
         Column names must match the controlled names listed below for
         kwargs. If additional kwargs are provided, they will take
         precedence over the values in the data frame.
-        Default is None.
+        Default = None.
     m : None or :obj:`numpy.ndarray`, optional
         Means or other continuous estimates
     sd : None or :obj:`numpy.ndarray`, optional

@@ -150,31 +150,30 @@ class BaseEstimator(metaclass=ABCMeta):
 class WeightedLeastSquares(BaseEstimator):
     """Weighted least-squares meta-regression.
 
-    Provides the weighted least-squares estimate of the fixed effects given
-    known/assumed between-study variance tau^2. When tau^2 = 0 (default), the
-    model is the standard inverse-weighted fixed-effects meta-regression.
+    Provides the weighted least-squares estimate of the fixed effects given known/assumed
+    between-study variance tau^2, as described in :footcite:t:`brockwell2001comparison`.
+    When tau^2 = 0 (default), the model is the standard inverse-weighted fixed-effects
+    meta-regression.
 
     Parameters
     ----------
     tau2 : :obj:`float` or :obj:`numpy.ndarray` of shape (d), optional
         Assumed/known value of tau^2. Must be >= 0.
         If an array, must have ``d`` elements, where ``d`` refers to the number of datasets.
-        Defaults to 0.
+        Default = 0.
 
     Notes
     -----
-    This estimator accepts 2-D inputs for y and v--i.e., it can produce
-    estimates simultaneously for multiple independent sets of y/v values
-    (use the 2nd dimension for the parallel iterates). The X matrix must be
-    identical for all iterates. If no v argument is passed to fit(), unit
-    weights will be used, resulting in the ordinary least-squares (OLS)
-    solution.
+    This estimator accepts 2-D inputs for ``y`` and ``v``--i.e., it can produce estimates
+    simultaneously for multiple independent sets of ``y``/``v`` values
+    (use the 2nd dimension for the parallel iterates).
+    The ``X`` matrix must be identical for all iterates.
+    If no ``v`` argument is passed to :meth:`fit`, unit weights will be used, resulting in the
+    ordinary least-squares (OLS) solution.
 
     References
     ----------
-    Brockwell, S. E., & Gordon, I. R. (2001). A comparison of statistical
-    methods for meta-analysis. Statistics in Medicine, 20(6), 825-840.
-    https://doi.org/10.1002/sim.650
+    .. footbibliography::
     """
 
     def __init__(self, tau2=0.0):
@@ -192,23 +191,19 @@ class WeightedLeastSquares(BaseEstimator):
 class DerSimonianLaird(BaseEstimator):
     """DerSimonian-Laird meta-regression estimator.
 
-    Estimates the between-subject variance tau^2 using the DerSimonian-Laird
-    (1986) method-of-moments approach.
+    Estimates the between-subject variance tau^2 using the :footcite:t:`dersimonian1986meta`
+    method-of-moments approach.
 
     Notes
     -----
-    This estimator accepts 2-D inputs for y and v--i.e., it can produce
-    estimates simultaneously for multiple independent sets of y/v values
-    (use the 2nd dimension for the parallel iterates). The X matrix must be
-    identical for all iterates.
+    This estimator accepts 2-D inputs for ``y`` and ``v``--i.e., it can produce estimates
+    simultaneously for multiple independent sets of ``y``/``v`` values
+    (use the 2nd dimension for the parallel iterates).
+    The ``X`` matrix must be identical for all iterates.
 
     References
     ----------
-    DerSimonian, R., & Laird, N. (1986). Meta-analysis in clinical trials.
-    Controlled clinical trials, 7(3), 177-188.
-    Kosmidis, I., Guolo, A., & Varin, C. (2017). Improving the accuracy of
-    likelihood-based inference in meta-analysis and meta-regression.
-    Biometrika, 104(2), 489-496. https://doi.org/10.1093/biomet/asx001
+    .. footbibliography::
     """
 
     def fit(self, y, v, X):
@@ -221,7 +216,7 @@ class DerSimonianLaird(BaseEstimator):
         # Estimate initial betas with WLS, assuming tau^2=0
         beta_wls, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
 
-        # Cochrane's Q
+        # Cochran's Q
         w = 1.0 / v
         w_sum = w.sum(0)
         Q = (w * (y - X.dot(beta_wls)) ** 2).sum(0)
@@ -243,18 +238,19 @@ class DerSimonianLaird(BaseEstimator):
 class Hedges(BaseEstimator):
     """Hedges meta-regression estimator.
 
-    Estimates the between-subject variance tau^2 using the Hedges & Olkin (1985) approach.
+    Estimates the between-subject variance tau^2 using the :footcite:t:`hedges2014statistical`
+    approach.
 
     Notes
     -----
-    This estimator accepts 2-D inputs for y and v--i.e., it can produce
-    estimates simultaneously for multiple independent sets of y/v values
-    (use the 2nd dimension for the parallel iterates). The X matrix must be
-    identical for all iterates.
+    This estimator accepts 2-D inputs for ``y`` and ``v``--i.e., it can produce estimates
+    simultaneously for multiple independent sets of ``y``/``v`` values
+    (use the 2nd dimension for the parallel iterates).
+    The ``X`` matrix must be identical for all iterates.
 
     References
     ----------
-    Hedges LV, Olkin I. 1985. Statistical Methods for Meta-Analysis.
+    .. footbibliography::
     """
 
     def fit(self, y, v, X):
@@ -274,31 +270,29 @@ class Hedges(BaseEstimator):
 class VarianceBasedLikelihoodEstimator(BaseEstimator):
     """Likelihood-based estimator for estimates with known variances.
 
-    Iteratively estimates the between-subject variance tau^2 and fixed effect
-    coefficients using the specified likelihood-based estimator (ML or REML).
+    Initially estimates the between-subject variance tau^2 and fixed effect coefficients
+    using :footcite:t:`dersimonian1986meta` method-of-moments approach, and then
+    iteratively estimates them using the specified likelihood-based estimator (ML or REML)
+    :footcite:p:`kosmidis2017improving`.
 
     Parameters
     ----------
     method : {"ML", "REML"}, optional
         The estimation method to use. Either 'ML' (for
         maximum-likelihood) or 'REML' (restricted maximum-likelihood).
-        Defaults to 'ML'.
+        Default = 'ML'.
     **kwargs
         Keyword arguments to pass to the SciPy minimizer.
 
     Notes
     -----
-    The ML and REML solutions are obtained via SciPy's scalar function
-    minimizer (:func:`scipy.optimize.minimize`). Parameters to ``minimize()`` can be
-    passed in as keyword arguments.
+    The ML and REML solutions are obtained via SciPy's scalar function minimizer
+    (:func:`scipy.optimize.minimize`).
+    Parameters to ``minimize()`` can be passed in as keyword arguments.
 
     References
     ----------
-    DerSimonian, R., & Laird, N. (1986). Meta-analysis in clinical trials.
-    Controlled clinical trials, 7(3), 177-188.
-    Kosmidis, I., Guolo, A., & Varin, C. (2017). Improving the accuracy of
-    likelihood-based inference in meta-analysis and meta-regression.
-    Biometrika, 104(2), 489-496. https://doi.org/10.1093/biomet/asx001
+    .. footbibliography::
     """
 
     def __init__(self, method="ml", **kwargs):
@@ -351,31 +345,29 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     """Likelihood-based estimator for data with known sample sizes but unknown sampling variances.
 
-    Iteratively estimates the between-subject variance tau^2 and fixed effect
-    betas using the specified likelihood-based estimator (ML or REML).
+    Iteratively estimates the between-subject variance tau^2 and fixed effect betas using the
+    specified likelihood-based estimator (ML or REML) :footcite:p:`sangnawakij2019meta`.
 
     Parameters
     ----------
     method : {"ML", "REML"}, optional
-        The estimation method to use. Either 'ML' (for
-        maximum-likelihood) or 'REML' (restricted maximum-likelihood).
-        Defaults to 'ML'.
+        The estimation method to use. Either 'ML' (for maximum-likelihood) or
+        'REML' (restricted maximum-likelihood).
+        Default = 'ML'.
     **kwargs
         Keyword arguments to pass to the SciPy minimizer.
 
     Notes
     -----
-    Homogeneity of sigma^2 across studies is assumed. The ML and REML
-    solutions are obtained via SciPy's scalar function minimizer
-    (scipy.optimize.minimize). Parameters to minimize() can be passed in as
-    keyword arguments.
+    Homogeneity of sigma^2 across studies is assumed.
+
+    The ML and REML solutions are obtained via SciPy's scalar function minimizer
+    (:func:`scipy.optimize.minimize`).
+    Parameters to ``minimize()`` can be passed in as keyword arguments.
 
     References
     ----------
-    Sangnawakij, P., Böhning, D., Niwitpong, S. A., Adams, S., Stanton, M.,
-    & Holling, H. (2019). Meta-analysis without study-specific variance
-    information: Heterogeneity case. Statistical Methods in Medical Research,
-    28(1), 196-210. https://doi.org/10.1177/0962280217718867
+    .. footbibliography::
     """
 
     def __init__(self, method="ml", **kwargs):
