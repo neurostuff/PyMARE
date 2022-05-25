@@ -154,7 +154,7 @@ def bonferroni(p_values):
     This correction is based on the one described in :footcite:t:`bonferroni1936teoria` and
     :footcite:t:`shaffer1995multiple`.
 
-    .. versionadded:: 0.0.12
+    .. versionadded:: 0.0.4
 
     Parameters
     ----------
@@ -178,7 +178,7 @@ def bonferroni(p_values):
 def fdr(p_values, q=0.05, method="bh"):
     """Perform FDR correction on p values.
 
-    .. versionchanged:: 0.0.12
+    .. versionchanged:: 0.0.4
 
         Replace thresholding function with one that calculates adjusted p values.
 
