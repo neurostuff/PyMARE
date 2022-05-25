@@ -178,9 +178,7 @@ def bonferroni(p_values):
 def fdr(p_values, q=0.05, method="bh"):
     """Perform FDR correction on p values.
 
-    .. versionchanged:: 0.0.4
-
-        Replace thresholding function with one that calculates adjusted p values.
+    .. versionadded:: 0.0.4
 
     Parameters
     ----------
