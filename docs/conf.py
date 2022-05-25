@@ -168,6 +168,7 @@ intersphinx_mapping = {
     "sklearn": ("https://scikit-learn.org/stable", (None, "./_intersphinx/sklearn-objects.inv")),
     "matplotlib": ("https://matplotlib.org/", (None, "https://matplotlib.org/objects.inv")),
     "pandas": ("https://pandas.pydata.org/pandas-docs/stable/", None),
+    "statsmodels": ("http://www.statsmodels.org/stable/", None),
 }
 
 sphinx_gallery_conf = {
