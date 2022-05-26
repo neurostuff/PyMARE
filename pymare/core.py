@@ -71,6 +71,9 @@ class Dataset:
             v = data.loc[:, v or "v"].values
             X_names = X or "X"
             X = data.loc[:, X_names].values
+            # n is optional
+            if (n is not None) or ("n" in data.columns):
+                n = data.loc[:, n or "n"].values
 
         self.y = ensure_2d(y)
         self.v = ensure_2d(v)
