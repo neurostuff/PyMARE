@@ -35,6 +35,11 @@ def michael2013():
     metadata : :obj:`dict`
         A dictionary with metadata about the columns in the dataset.
 
+    Notes
+    -----
+    For more information about this dataset, see metadat's documentation:
+    https://wviechtb.github.io/metadat/reference/dat.michael2013.html
+
     References
     ----------
     .. footbibliography::
