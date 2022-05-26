@@ -5,7 +5,7 @@ from pymare import datasets
 
 
 def test_michael2013():
-    """Test the Michael 2013 dataset."""
+    """Ensure that the Michael 2013 dataset is loadable."""
     data, meta = datasets.michael2013()
     assert isinstance(data, pd.DataFrame)
     assert data.shape == (12, 13)
