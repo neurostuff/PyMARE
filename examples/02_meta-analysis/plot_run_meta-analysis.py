@@ -26,6 +26,7 @@ from pymare import core, datasets, estimators
 # an intercept.
 data, meta = datasets.michael2013()
 dset = core.Dataset(data=data, y="yi", v="vi", X=None, add_intercept=True)
+dset.to_df()
 
 ###############################################################################
 # Now we fit a model
