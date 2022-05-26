@@ -22,6 +22,24 @@ def test_dataset_init(variables):
     assert isinstance(df, pd.DataFrame)
 
 
+def test_dataset_init_2D():
+    """Test Dataset creation from 2D numpy arrays."""
+    n_studies, n_tests = 100, 10
+    y = np.random.random((n_studies, n_tests))
+    v = np.random.random((n_studies, n_tests))
+    n = np.random.random((n_studies, n_tests))
+    X = np.random.random((n_studies, 2))
+    X_names = ["X1", "X2"]
+    dataset = Dataset(y=y, v=v, n=n, X=X, X_names=X_names)
+
+    assert dataset.y.shape == (n_studies, n_tests)
+    assert dataset.X.shape == (n_studies, 3)
+    assert dataset.X_names == ["intercept", "X1", "X2"]
+
+    df = dataset.to_df()
+    assert isinstance(df, pd.DataFrame)
+
+
 def test_dataset_init_from_df(variables):
     """Test Dataset creation from a DataFrame."""
     df = pd.DataFrame(
