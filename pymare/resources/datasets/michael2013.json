@@ -1,0 +1,62 @@
+{
+    "Study": {
+        "LongName": "Study Name",
+        "Description": "Name of the study: Citation - Experiment - Subgroup."
+    },
+    "No_brain_n": {
+        "LongName": "No-Brain-Image Sample Size",
+        "Description": "Sample size for no-brain-image condition."
+    },
+    "No_brain_m": {
+        "LongName": "No-Brain-Image Mean Agreement Rating",
+        "Description": "Mean agreement rating for no-brain-image condition."
+    },
+    "No_brain_s": {
+        "LongName": "No-Brain-Image Standard Deviation",
+        "Description": "Standard deviation for no-brain-image condition."
+    },
+    "Brain_n": {
+        "LongName": "Brain-Image Sample Size",
+        "Description": "Sample size for brain-image condition."
+    },
+    "Brain_m": {
+        "LongName": "Brain-Image Mean Agreement Rating",
+        "Description": "Mean agreement rating for brain-image condition."
+    },
+    "Brain_s": {
+        "LongName": "Brain-Image Standard Deviation",
+        "Description": "Standard deviation for brain-image condition."
+    },
+    "Included_Critique": {
+        "LongName": "Included Critique",
+        "Description": "Whether a critical commentary was included in the study or not.",
+        "Levelts": {
+            "Critique": "article included critical commentary on conclusions",
+            "No_Critique": "article did not include critical commentary on conclusions"
+        }
+    },
+    "Medium": {
+        "LongName": "Experiment Medium",
+        "Description": "The medium in which the experiment was conducted.",
+        "Levels": {
+            "Paper": "conducted in person",
+            "Online": "conducted online"
+        }
+    },
+    "Compensation": {
+        "LongName": "Compensation",
+        "Description": "Notes on compensation provided to participants."
+    },
+    "Participant_Pool": {
+        "LongName": "Participant Pool",
+        "Description": "Notes on where participants were recruited."
+    },
+    "yi": {
+        "LongName": "Mean Difference",
+        "Description": "Raw mean difference, calculated as Brain_m - No_brain_m."
+    },
+    "vi": {
+        "LongName": "Sampling Variance",
+        "Description": "Corresponding sampling variance."
+    }
+}

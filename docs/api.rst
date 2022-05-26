@@ -115,3 +115,33 @@ API
    stats.q_gen
    stats.bonferroni
    stats.fdr
+
+:mod:`pymare.datasets`: Meta-analytic datasets
+----------------------------------------------
+
+.. automodule:: pymare.datasets
+   :no-members:
+   :no-inherited-members:
+
+.. currentmodule:: pymare
+
+.. autosummary::
+   :toctree: generated/
+   :template: function.rst
+
+   datasets.michael2013
+
+:mod:`pymare.utils`: Miscellaneous utility functions
+----------------------------------------------------
+
+.. automodule:: pymare.utils
+   :no-members:
+   :no-inherited-members:
+
+.. currentmodule:: pymare
+
+.. autosummary::
+   :toctree: generated/
+   :template: function.rst
+
+   utils.get_resource_path
