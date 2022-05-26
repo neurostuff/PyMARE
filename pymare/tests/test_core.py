@@ -18,6 +18,9 @@ def test_dataset_init(variables):
     assert dataset.X.shape == (n, 1)
     assert dataset.X_names == ["bork"]
 
+    df = dataset.to_df()
+    assert isinstance(df, pd.DataFrame)
+
 
 def test_dataset_init_from_df(variables):
     """Test Dataset creation from a DataFrame."""
@@ -36,6 +39,9 @@ def test_dataset_init_from_df(variables):
     assert np.array_equal(dataset.y, np.array([[2, 4, 6]]).T)
     assert np.array_equal(dataset.v, np.array([[100, 100, 100]]).T)
     assert np.array_equal(dataset.n, np.array([[10, 20, 30]]).T)
+
+    df2 = dataset.to_df()
+    assert isinstance(df2, pd.DataFrame)
 
     # y is undefined
     df = pd.DataFrame({"v": [100, 100, 100], "X": [5, 2, 1], "n": [10, 20, 30]})
