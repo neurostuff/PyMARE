@@ -1,6 +1,7 @@
 """Tests for pymare.core."""
 import numpy as np
 import pandas as pd
+import pytest
 
 from pymare import Dataset, meta_regression
 
@@ -20,12 +21,55 @@ def test_dataset_init(variables):
 
 def test_dataset_init_from_df(variables):
     """Test Dataset creation from a DataFrame."""
-    df = pd.DataFrame({"y": [2, 4, 6], "v_alt": [100, 100, 100], "X1": [5, 2, 1], "X7": [9, 8, 7]})
-    dataset = Dataset(v="v_alt", X=["X1", "X7"], data=df)
+    df = pd.DataFrame(
+        {
+            "y": [2, 4, 6],
+            "v_alt": [100, 100, 100],
+            "sample_size": [10, 20, 30],
+            "X1": [5, 2, 1],
+            "X7": [9, 8, 7],
+        }
+    )
+    dataset = Dataset(v="v_alt", X=["X1", "X7"], n="sample_size", data=df)
     assert dataset.X.shape == (3, 3)
     assert dataset.X_names == ["intercept", "X1", "X7"]
     assert np.array_equal(dataset.y, np.array([[2, 4, 6]]).T)
     assert np.array_equal(dataset.v, np.array([[100, 100, 100]]).T)
+    assert np.array_equal(dataset.n, np.array([[10, 20, 30]]).T)
+
+    # y is undefined
+    df = pd.DataFrame({"v": [100, 100, 100], "X": [5, 2, 1], "n": [10, 20, 30]})
+    with pytest.raises(KeyError):
+        dataset = Dataset(data=df)
+
+    # X is undefined
+    df = pd.DataFrame({"y": [2, 4, 6], "v_alt": [100, 100, 100], "n": [10, 20, 30]})
+    dataset = Dataset(v="v_alt", data=df)
+    assert dataset.X.shape == (3, 1)
+    assert dataset.X_names == ["intercept"]
+    assert np.array_equal(dataset.y, np.array([[2, 4, 6]]).T)
+    assert np.array_equal(dataset.v, np.array([[100, 100, 100]]).T)
+
+    # X is undefined, but add_intercept is False
+    df = pd.DataFrame({"y": [2, 4, 6], "v_alt": [100, 100, 100], "n": [10, 20, 30]})
+    with pytest.raises(ValueError):
+        dataset = Dataset(v="v_alt", data=df, add_intercept=False)
+
+    # v is undefined
+    df = pd.DataFrame({"y": [2, 4, 6], "X": [5, 2, 1], "n": [10, 20, 30]})
+    dataset = Dataset(data=df)
+    assert dataset.X.shape == (3, 2)
+    assert dataset.X_names == ["intercept", "X"]
+    assert dataset.v is None
+    assert np.array_equal(dataset.y, np.array([[2, 4, 6]]).T)
+
+    # v is undefined
+    df = pd.DataFrame({"y": [2, 4, 6], "X": [5, 2, 1], "v": [10, 20, 30]})
+    dataset = Dataset(data=df)
+    assert dataset.X.shape == (3, 2)
+    assert dataset.X_names == ["intercept", "X"]
+    assert dataset.n is None
+    assert np.array_equal(dataset.y, np.array([[2, 4, 6]]).T)
 
 
 def test_meta_regression_1(variables):
