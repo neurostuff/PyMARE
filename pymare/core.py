@@ -133,10 +133,12 @@ class Dataset:
         else:
             all_dfs = []
             for i_set in range(self.y.shape[1]):
-                df = pd.DataFrame({
-                    "set": np.full(self.y.shape[0], i_set),
-                    "y": self.y[:, i_set],
-                })
+                df = pd.DataFrame(
+                    {
+                        "set": np.full(self.y.shape[0], i_set),
+                        "y": self.y[:, i_set],
+                    }
+                )
 
                 if self.v is not None:
                     df["v"] = self.v[:, i_set]
