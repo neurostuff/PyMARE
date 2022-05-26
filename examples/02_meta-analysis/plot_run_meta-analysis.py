@@ -3,31 +3,48 @@
 """
 .. _meta_basics:
 
-=======================
-Running a meta-analysis
-=======================
+=====================================
+The Basics of Running a Meta-Analysis
+=====================================
 
-PyMARE implements a range of meta-analytic estimators.
+Here we walk through the basic steps of running a meta-analysis with PyMARE.
 """
 ###############################################################################
 # Start with the necessary imports
 # -----------------------------------------------------------------------------
+from pprint import pprint
+
 from pymare import core, datasets, estimators
 
 ###############################################################################
-# Here we load a dataset
+# Load the data
 # -----------------------------------------------------------------------------
-# We will use the Michael 2013 dataset.
+# We will use the :footcite:t:`michael2013non` dataset, which comes from the
+# metadat library :footcite:p:`white2022metadat`.
 #
-# We only want ot do a mean analysis, so we won't have any covariates except for
+# We only want to do a mean analysis, so we won't have any covariates except for
 # an intercept.
 data, meta = datasets.michael2013()
-data["total_sample_size"] = data["No_brain_n"] + data["Brain_n"]
-dset = core.Dataset(data=data, y="yi", v="vi", n="total_sample_size", X=None, add_intercept=True)
+dset = core.Dataset(data=data, y="yi", v="vi", X=None, add_intercept=True)
 
 ###############################################################################
 # Now we fit a model
 # -----------------------------------------------------------------------------
 est = estimators.WeightedLeastSquares().fit_dataset(dset)
 results = est.summary()
-print(results.to_df())
+results.to_df()
+
+###############################################################################
+# We can also extract some useful information from the results object
+# -----------------------------------------------------------------------------
+# Here we'll take a look at the heterogeneity statistics.
+pprint(results.get_heterogeneity_stats())
+
+###############################################################################
+# We can also estimate the confidence interval for :math:`\tau^2`.
+pprint(results.get_re_stats())
+
+###############################################################################
+# References
+# -----------------------------------------------------------------------------
+# .. footbibliography::
