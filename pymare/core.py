@@ -111,6 +111,50 @@ class Dataset:
 
         return X.values, X.columns.tolist()
 
+    def to_df(self):
+        """Convert the dataset to a pandas DataFrame.
+
+        Returns
+        -------
+        :obj:`pandas.DataFrame`
+            A DataFrame containing the y, v, X, and n values.
+        """
+        if self.y.shape[1] == 1:
+            df = pd.DataFrame({"y": self.y[:, 0]})
+
+            if self.v is not None:
+                df["v"] = self.v[:, 0]
+
+            if self.n is not None:
+                df["n"] = self.n[:, 0]
+
+            df[self.X_names] = self.X
+
+        else:
+            all_dfs = []
+            for i_set in range(self.y.shape[1]):
+                df = pd.DataFrame(
+                    {
+                        "set": np.full(self.y.shape[0], i_set),
+                        "y": self.y[:, i_set],
+                    }
+                )
+
+                if self.v is not None:
+                    df["v"] = self.v[:, i_set]
+
+                if self.n is not None:
+                    df["n"] = self.n[:, i_set]
+
+                # X is the same across sets
+                df[self.X_names] = self.X
+
+                all_dfs.append(df)
+
+            df = pd.concat(all_dfs, axis=0)
+
+        return df
+
 
 def meta_regression(
     y=None,
