@@ -46,6 +46,10 @@ pprint(results.get_heterogeneity_stats())
 pprint(results.get_re_stats())
 
 ###############################################################################
+perm_results = results.permutation_test(n_perm=1000)
+perm_results.to_df()
+
+###############################################################################
 # References
 # -----------------------------------------------------------------------------
 # .. footbibliography::
