@@ -32,11 +32,11 @@ dset.to_df()
 # Now we fit a model
 # -----------------------------------------------------------------------------
 # You must first initialize the estimator, after which you can use
-# :func:`~pymare.estimators.fit` to fit the model to numpy arrays, or
-# :func:`~pymare.estimators.fit_dataset` to fit it to a
+# :meth:`~pymare.estimators.BaseEstimator.fit` to fit the model to numpy arrays,
+# or :meth:`~pymare.estimators.BaseEstimator.fit_dataset` to fit it to a
 # :class:`~pymare.core.Dataset`.
 #
-# The :func:`~pymare.estimators.summary` function will return a
+# The :meth:`~pymare.estimators.BaseEstimator.summary` function will return a
 # :class:`~pymare.results.MetaRegressionResults` object, which contains the
 # results of the analysis.
 est = estimators.WeightedLeastSquares().fit_dataset(dset)
