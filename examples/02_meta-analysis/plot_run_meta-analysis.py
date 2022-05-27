@@ -31,6 +31,14 @@ dset.to_df()
 ###############################################################################
 # Now we fit a model
 # -----------------------------------------------------------------------------
+# You must first initialize the estimator, after which you can use
+# :func:`~pymare.estimators.fit` to fit the model to numpy arrays, or
+# :func:`~pymare.estimators.fit_dataset` to fit it to a
+# :class:`~pymare.core.Dataset`.
+#
+# The :func:`~pymare.estimators.summary` function will return a
+# :class:`~pymare.results.MetaRegressionResults` object, which contains the
+# results of the analysis.
 est = estimators.WeightedLeastSquares().fit_dataset(dset)
 results = est.summary()
 results.to_df()
@@ -38,14 +46,18 @@ results.to_df()
 ###############################################################################
 # We can also extract some useful information from the results object
 # -----------------------------------------------------------------------------
-# Here we'll take a look at the heterogeneity statistics.
+# The :meth:`~pymare.results.MetaRegressionResults.get_heterogeneity_stats`
+# method will calculate heterogeneity statistics.
 pprint(results.get_heterogeneity_stats())
 
 ###############################################################################
-# We can also estimate the confidence interval for :math:`\tau^2`.
+# The :meth:`~pymare.results.MetaRegressionResults.get_re_stats` method will
+# estimate the confidence interval for :math:`\tau^2`.
 pprint(results.get_re_stats())
 
 ###############################################################################
+# The :meth:`~pymare.results.MetaRegressionResults.permutation_test` method
+# will run a permutation test to estimate more accurate p-values.
 perm_results = results.permutation_test(n_perm=1000)
 perm_results.to_df()
 
