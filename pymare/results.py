@@ -116,18 +116,18 @@ class MetaRegressionResults:
         .. footbibliography::
         """
         if method == "QP":
-            n_iters = np.atleast_2d(self.tau2).shape[1]
-            if n_iters > 10:
+            n_datasets = np.atleast_2d(self.tau2).shape[1]
+            if n_datasets > 10:
                 warn(
                     "Method 'QP' is not parallelized; it may take a while to "
-                    "compute CIs for {} parallel tau^2 values.".format(n_iters)
+                    f"compute CIs for {n_datasets} parallel tau^2 values."
                 )
 
             # Make sure we have an estimate of v if it wasn't observed
             v = self.estimator.get_v(self.dataset)
 
             cis = []
-            for i in range(n_iters):
+            for i in range(n_datasets):
                 args = {
                     "y": self.dataset.y[:, i],
                     "v": v[:, i],
@@ -266,6 +266,11 @@ class MetaRegressionResults:
         fe_stats = self.get_fe_stats()
         re_stats = self.get_re_stats()
 
+        # Ensure that tau2 is an array
+        tau2 = re_stats["tau^2"]
+        if not isinstance(tau2, (list, tuple, np.ndarray)):
+            tau2 = np.full(n_datasets, tau2)
+
         # create results arrays
         fe_p = np.zeros_like(self.fe_params)
         rfx = self.tau2 is not None
@@ -323,7 +328,7 @@ class MetaRegressionResults:
                 fe_obs = fe_obs[:, None]
             fe_p[:, i] = (np.abs(fe_obs) < np.abs(params["fe_params"])).mean(1)
             if rfx:
-                abs_obs = np.abs(re_stats["tau^2"][i])
+                abs_obs = np.abs(tau2[i])
                 tau_p[i] = (abs_obs < np.abs(params["tau2"])).mean()
 
         # p-values can't be smaller than 1/n_perm
