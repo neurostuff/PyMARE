@@ -27,6 +27,8 @@ from scipy import stats
 from pymare import core, estimators
 from pymare.stats import var_to_ci
 
+sns.set_style("whitegrid")
+
 ###############################################################################
 # Here we simulate a dataset
 # -----------------------------------------------------------------------------
@@ -56,7 +58,7 @@ p = stats.norm.sf(abs(z)) * 2
 ###############################################################################
 # Plot variable distributions
 # -----------------------------------------------------------------------------
-fig, axes = plt.subplots(nrows=5, figsize=(16, 10))
+fig, axes = plt.subplots(nrows=5, figsize=(6, 5))
 sns.distplot(y, ax=axes[0], bins=20)
 axes[0].set_title("y")
 sns.distplot(v, ax=axes[1], bins=20)
@@ -76,7 +78,7 @@ fig.tight_layout()
 # -----------------------------------
 # Here we can show study-wise mean effect and CIs, along with the true effect
 # and CI corresponding to the between-study variance.
-fig, ax = plt.subplots(figsize=(8, 16))
+fig, ax = plt.subplots(figsize=(6, 14))
 study_ticks = np.arange(N_STUDIES)
 
 # Get 95% CI for individual studies
@@ -236,7 +238,7 @@ print(sb_reml_summary.to_df().T)
 ###############################################################################
 # Let's check out our results!
 # `````````````````````````````````````````````````````````````````````````````
-fig, ax = plt.subplots(figsize=(8, 8))
+fig, ax = plt.subplots(figsize=(6, 6))
 
 for i, (estimator_name, summary_df) in enumerate(results.items()):
     ax.scatter((summary_df.loc[0, "estimate"],), (i + 1,), label=estimator_name)
