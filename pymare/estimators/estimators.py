@@ -141,7 +141,12 @@ class BaseEstimator(metaclass=ABCMeta):
         return self.params_["sigma2"] / dataset.n
 
     def summary(self):
-        """Generate a MetaRegressionResults object for the fitted estimator."""
+        """Generate a MetaRegressionResults object for the fitted estimator.
+
+        Returns
+        -------
+        :obj:`~pymare.results.MetaRegressionResults`
+        """
         if not hasattr(self, "params_"):
             name = self.__class__.__name__
             raise ValueError(
