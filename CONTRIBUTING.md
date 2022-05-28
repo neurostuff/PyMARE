@@ -18,8 +18,7 @@ By starting the governance structure early in our development, we hope to welcom
 We are committed to continuing to update the governance structures as necessary.
 Every member of the ``PyMARE`` community is encouraged to comment on these processes and suggest improvements.
 
-As the first interim [Benevolent Dictator for Life (BDFL)](https://en.wikipedia.org/wiki/Benevolent_dictator_for_life), Tal Yarkoni is ultimately responsible for any major decisions pertaining to ``PyMARE`` development.
-However, all potential changes are explicitly and openly discussed in the described channels of communication, and we strive for consensus amongst all community members.
+All potential changes to ``PyMARE`` are explicitly and openly discussed in the described channels of communication, and we strive for consensus amongst all community members.
 
 ## Code of conduct
 
