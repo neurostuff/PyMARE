@@ -233,3 +233,9 @@ def fdr(p_values, q=0.05, method="bh"):
     p_adjusted = p_adjusted[revert_idx]
 
     return p_adjusted
+
+
+def var_to_ci(y, v, n):
+    """Convert sampling variance to 95% CI."""
+    term = 1.96 * np.sqrt(v) / np.sqrt(n)
+    return y - term, y + term

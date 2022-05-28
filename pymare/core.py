@@ -5,6 +5,8 @@ from functools import partial
 import numpy as np
 import pandas as pd
 
+from pymare.utils import _listify
+
 from .estimators import (
     DerSimonianLaird,
     Hedges,
@@ -65,12 +67,25 @@ class Dataset:
                 "data argument."
             )
 
+        if (X is None) and (not add_intercept):
+            raise ValueError("If no X matrix is provided, add_intercept must be True!")
+
         # Extract columns from DataFrame
         if data is not None:
             y = data.loc[:, y or "y"].values
-            v = data.loc[:, v or "v"].values
-            X_names = X or "X"
-            X = data.loc[:, X_names].values
+
+            # v is optional
+            if (v is not None) or ("v" in data.columns):
+                v = data.loc[:, v or "v"].values
+
+            # X is optional
+            if (X is not None) or ("X" in data.columns):
+                X_names = X or "X"
+                X = data.loc[:, X_names].values
+
+            # n is optional
+            if (n is not None) or ("n" in data.columns):
+                n = data.loc[:, n or "n"].values
 
         self.y = ensure_2d(y)
         self.v = ensure_2d(v)
@@ -85,13 +100,60 @@ class Dataset:
                 "No fixed predictors found. If no X matrix is "
                 "provided, add_intercept must be True!"
             )
+
         X = pd.DataFrame(X)
         if names is not None:
-            X.columns = names
+            X.columns = _listify(names)
+
         if add_intercept:
             intercept = pd.DataFrame({"intercept": np.ones(len(self.y))})
             X = pd.concat([intercept, X], axis=1)
+
         return X.values, X.columns.tolist()
+
+    def to_df(self):
+        """Convert the dataset to a pandas DataFrame.
+
+        Returns
+        -------
+        :obj:`pandas.DataFrame`
+            A DataFrame containing the y, v, X, and n values.
+        """
+        if self.y.shape[1] == 1:
+            df = pd.DataFrame({"y": self.y[:, 0]})
+
+            if self.v is not None:
+                df["v"] = self.v[:, 0]
+
+            if self.n is not None:
+                df["n"] = self.n[:, 0]
+
+            df[self.X_names] = self.X
+
+        else:
+            all_dfs = []
+            for i_set in range(self.y.shape[1]):
+                df = pd.DataFrame(
+                    {
+                        "set": np.full(self.y.shape[0], i_set),
+                        "y": self.y[:, i_set],
+                    }
+                )
+
+                if self.v is not None:
+                    df["v"] = self.v[:, i_set]
+
+                if self.n is not None:
+                    df["n"] = self.n[:, i_set]
+
+                # X is the same across sets
+                df[self.X_names] = self.X
+
+                all_dfs.append(df)
+
+            df = pd.concat(all_dfs, axis=0)
+
+        return df
 
 
 def meta_regression(
