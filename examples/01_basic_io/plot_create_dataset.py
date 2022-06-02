@@ -26,6 +26,9 @@ from pymare import core
 #
 # ``y`` refers to the study-level estimates, ``v`` to the variances,
 # ``X`` to any study-level regressors, and ``n`` to the sample sizes.
+#
+# Not all Estimators require all of these arguments, so not all need to be
+# used in a given Dataset.
 y = [2, 4, 6]
 v = [100, 100, 100]
 X = [[5, 9], [2, 8], [1, 7]]
@@ -33,6 +36,10 @@ X = [[5, 9], [2, 8], [1, 7]]
 dataset = core.Dataset(y=y, v=v, X=X, X_names=["X1", "X7"])
 
 pprint(vars(dataset))
+
+###############################################################################
+# Datasets have the :meth:`~pymare.core.Dataset.to_df` method.
+dataset.to_df()
 
 ###############################################################################
 # Datasets can also be created from pandas DataFrames
@@ -54,19 +61,24 @@ pprint(vars(dataset))
 # Datasets can also contain parallel "datasets"
 # ---------------------------------------------
 y = [
-    [2, 4, 6],  # estimates for first "dataset"
-    [3, 2, 1],  # estimates for second "dataset"
+    [2, 4, 6],  # Estimates for first study's three datasets.
+    [3, 2, 1],  # Estimates for second study's three datasets.
 ]
 v = [
-    [100, 100, 100],  # variance for first "dataset"'s estimates
-    [8, 4, 2],  # variance for second "dataset"'s estimates
+    [100, 100, 100],  # Estimate variances for first study's three datasets.
+    [8, 4, 2],  # Estimate variances for second study's three datasets.
 ]
-X = [  # all "dataset"s must have the same regressors
-    [5, 9],
-    [2, 8],
-    [1, 7],
+X = [
+    [5, 9],  # Predictors for first study. Same across all three datasets.
+    [2, 8],  # Predictors for second study. Same across all three datasets.
 ]
 
 dataset = core.Dataset(y=y, v=v, X=X, X_names=["X1", "X7"])
 
 pprint(vars(dataset))
+
+from pymare import estimators
+
+est = estimators.WeightedLeastSquares().fit_dataset(dataset)
+results = est.summary()
+pprint(results.get_fe_stats())
