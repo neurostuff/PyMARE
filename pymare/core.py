@@ -5,6 +5,8 @@ from functools import partial
 import numpy as np
 import pandas as pd
 
+from pymare.utils import _listify
+
 from .estimators import (
     DerSimonianLaird,
     Hedges,
@@ -24,34 +26,34 @@ class Dataset:
     y : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
         1d array of study-level estimates with length K, or the name of the column in data
         containing the y values.
-        Default is None.
+        Default = None.
     v : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
         1d array of study-level variances with length K, or the name of the column in data
         containing v values.
-        Default is None.
+        Default = None.
     X : None or :obj:`numpy.ndarray` of shape (K,[P]) or :obj:`list` of :obj:`str`, optional
         1d or 2d array containing study-level predictors (dimensions K x P),
         or a list of strings giving the names of the columns in data containing the X values.
-        Default is None.
+        Default = None.
     n : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
         1d array of study-level sample sizes (length K), or the name of the corresponding column
         in ``data``.
-        Default is None.
+        Default = None.
     data : None or :obj:`pandas.DataFrame`, optional
         A pandas DataFrame containing y, v, X, and/or n values.
         By default, columns are expected to have the same names as arguments
         (e.g., the y values will be expected in the 'y' column).
         This can be modified by passing strings giving column names to any of the ``y``, ``v``,
         ``X``, or ``n`` arguments.
-        Default is None.
+        Default = None.
     X_names : None or :obj:`list` of :obj:`str`, optional
         List of length P containing the names of the predictors.
         Ignored if ``data`` is provided (use ``X`` to specify columns).
-        Default is None.
+        Default = None.
     add_intercept : :obj:`bool`, optional
         If True, an intercept column is automatically added to the predictor matrix.
         If False, the predictors matrix is passed as-is to estimators.
-        Default is True.
+        Default = True.
     """
 
     def __init__(
@@ -65,12 +67,25 @@ class Dataset:
                 "data argument."
             )
 
+        if (X is None) and (not add_intercept):
+            raise ValueError("If no X matrix is provided, add_intercept must be True!")
+
         # Extract columns from DataFrame
         if data is not None:
             y = data.loc[:, y or "y"].values
-            v = data.loc[:, v or "v"].values
-            X_names = X or "X"
-            X = data.loc[:, X_names].values
+
+            # v is optional
+            if (v is not None) or ("v" in data.columns):
+                v = data.loc[:, v or "v"].values
+
+            # X is optional
+            if (X is not None) or ("X" in data.columns):
+                X_names = X or "X"
+                X = data.loc[:, X_names].values
+
+            # n is optional
+            if (n is not None) or ("n" in data.columns):
+                n = data.loc[:, n or "n"].values
 
         self.y = ensure_2d(y)
         self.v = ensure_2d(v)
@@ -85,13 +100,60 @@ class Dataset:
                 "No fixed predictors found. If no X matrix is "
                 "provided, add_intercept must be True!"
             )
+
         X = pd.DataFrame(X)
         if names is not None:
-            X.columns = names
+            X.columns = _listify(names)
+
         if add_intercept:
             intercept = pd.DataFrame({"intercept": np.ones(len(self.y))})
             X = pd.concat([intercept, X], axis=1)
+
         return X.values, X.columns.tolist()
+
+    def to_df(self):
+        """Convert the dataset to a pandas DataFrame.
+
+        Returns
+        -------
+        :obj:`pandas.DataFrame`
+            A DataFrame containing the y, v, X, and n values.
+        """
+        if self.y.shape[1] == 1:
+            df = pd.DataFrame({"y": self.y[:, 0]})
+
+            if self.v is not None:
+                df["v"] = self.v[:, 0]
+
+            if self.n is not None:
+                df["n"] = self.n[:, 0]
+
+            df[self.X_names] = self.X
+
+        else:
+            all_dfs = []
+            for i_set in range(self.y.shape[1]):
+                df = pd.DataFrame(
+                    {
+                        "set": np.full(self.y.shape[0], i_set),
+                        "y": self.y[:, i_set],
+                    }
+                )
+
+                if self.v is not None:
+                    df["v"] = self.v[:, i_set]
+
+                if self.n is not None:
+                    df["n"] = self.n[:, i_set]
+
+                # X is the same across sets
+                df[self.X_names] = self.X
+
+                all_dfs.append(df)
+
+            df = pd.concat(all_dfs, axis=0)
+
+        return df
 
 
 def meta_regression(
@@ -114,19 +176,19 @@ def meta_regression(
     y : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
         1d array of study-level estimates with length K, or the name of the column in data
         containing the y values.
-        Default is None.
+        Default = None.
     v : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
         1d array of study-level variances with length K, or the name of the column in data
         containing v values.
-        Default is None.
+        Default = None.
     X : None or :obj:`numpy.ndarray` of shape (K,[P]) or :obj:`list` of :obj:`str`, optional
         1d or 2d array containing study-level predictors (dimensions K x P),
         or a list of strings giving the names of the columns in data containing the X values.
-        Default is None.
+        Default = None.
     n : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
         1d array of study-level sample sizes (length K), or the name of the corresponding column
         in ``data``.
-        Default is None.
+        Default = None.
     data : None or :obj:`pandas.DataFrame` or :obj:`~pymare.core.Dataset`, optional
         If a Dataset instance is passed, the y, v, X, n and associated arguments are ignored,
         and data is passed directly to the selected estimator.
@@ -138,13 +200,13 @@ def meta_regression(
     X_names : None or :obj:`list` of :obj:`str`, optional
         List of length P containing the names of the predictors.
         Ignored if ``data`` is provided (use ``X`` to specify columns).
-        Default is None.
+        Default = None.
     add_intercept : :obj:`bool`, optional
         If True, an intercept column is automatically added to the predictor matrix.
         If False, the predictors matrix is passed as-is to estimators.
-        Default is True.
+        Default = True.
     method : {"ML", "REML", "DL", "HE", "WLS", "FE", "Stan"}, optional
-        Name of estimation method. Default is 'ML'.
+        Name of estimation method. Default = 'ML'.
         Supported estimators include:
 
             - 'ML': Maximum-likelihood estimator
@@ -155,10 +217,10 @@ def meta_regression(
             - 'Stan': Full Bayesian MCMC estimation via Stan
     ci_method : {"QP"}, optional
         Estimation method to use when computing uncertainty estimates.
-        Currently only 'QP' is supported. Default is 'QP'.
+        Currently only 'QP' is supported. Default = 'QP'.
         Ignored if ``method == 'Stan'``.
     alpha : :obj:`float`, optional
-        Desired alpha level (CIs will have 1 - alpha coverage). Default is 0.05.
+        Desired alpha level (CIs will have 1 - alpha coverage). Default = 0.05.
     **kwargs
         Optional keyword arguments to pass onto the chosen estimator.
 

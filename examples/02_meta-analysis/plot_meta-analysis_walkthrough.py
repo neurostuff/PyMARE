@@ -1,7 +1,7 @@
 # emacs: -*- mode: python-mode; py-indent-offset: 4; tab-width: 4; indent-tabs-mode: nil -*-
 # ex: set sts=4 ts=4 sw=4 et:
 r"""
-.. _meta1:
+.. _meta_walkthrough:
 
 ================================================
  Run Estimators on a simulated dataset
@@ -24,15 +24,10 @@ import numpy as np
 import seaborn as sns
 from scipy import stats
 
-import pymare
+from pymare import core, estimators
+from pymare.stats import var_to_ci
 
-
-# A small function to make things easier later on
-def var_to_ci(y, v, n):
-    """Convert sampling variance to 95% CI"""
-    term = 1.96 * np.sqrt(v) / np.sqrt(n)
-    return y - term, y + term
-
+sns.set_style("whitegrid")
 
 ###############################################################################
 # Here we simulate a dataset
@@ -63,7 +58,7 @@ p = stats.norm.sf(abs(z)) * 2
 ###############################################################################
 # Plot variable distributions
 # -----------------------------------------------------------------------------
-fig, axes = plt.subplots(nrows=5, figsize=(16, 10))
+fig, axes = plt.subplots(nrows=5, figsize=(6, 5))
 sns.distplot(y, ax=axes[0], bins=20)
 axes[0].set_title("y")
 sns.distplot(v, ax=axes[1], bins=20)
@@ -83,7 +78,7 @@ fig.tight_layout()
 # -----------------------------------
 # Here we can show study-wise mean effect and CIs, along with the true effect
 # and CI corresponding to the between-study variance.
-fig, ax = plt.subplots(figsize=(8, 16))
+fig, ax = plt.subplots(figsize=(6, 14))
 study_ticks = np.arange(N_STUDIES)
 
 # Get 95% CI for individual studies
@@ -113,7 +108,7 @@ fig.tight_layout()
 ###############################################################################
 # Create a Dataset object containing the data
 # --------------------------------------------
-dset = pymare.core.Dataset(y=y, X=None, v=v, n=n, add_intercept=True)
+dset = core.Dataset(y=y, X=None, v=v, n=n, add_intercept=True)
 
 # Here is a dictionary to house results across models
 results = {}
@@ -150,13 +145,13 @@ results = {}
 # The two combination models in PyMARE are Stouffer's and Fisher's Tests.
 #
 # Notice that these models don't use :class:`~pymare.core.Dataset` objects.
-stouff = pymare.estimators.StoufferCombinationTest()
+stouff = estimators.StoufferCombinationTest()
 stouff.fit(z[:, None])
 print("Stouffers")
 print("p: {}".format(stouff.params_["p"]))
 print()
 
-fisher = pymare.estimators.FisherCombinationTest()
+fisher = estimators.FisherCombinationTest()
 fisher.fit(z[:, None])
 print("Fishers")
 print("p: {}".format(fisher.params_["p"]))
@@ -166,7 +161,7 @@ print("p: {}".format(fisher.params_["p"]))
 # `````````````````````````````````````````````````````````````````````````````
 # This estimator does not attempt to estimate between-study variance.
 # Instead, it takes ``tau2`` (:math:`\tau^{2}`) as an argument.
-wls = pymare.estimators.WeightedLeastSquares()
+wls = estimators.WeightedLeastSquares()
 wls.fit_dataset(dset)
 wls_summary = wls.summary()
 results["Weighted Least Squares"] = wls_summary.to_df()
@@ -184,7 +179,7 @@ print(wls_summary.to_df().T)
 # estimating between-study variance, while ``VarianceBasedLikelihoodEstimator``
 # can use either maximum-likelihood (ML) or restricted maximum-likelihood (REML)
 # to iteratively estimate it.
-dsl = pymare.estimators.DerSimonianLaird()
+dsl = estimators.DerSimonianLaird()
 dsl.fit_dataset(dset)
 dsl_summary = dsl.summary()
 results["DerSimonian-Laird"] = dsl_summary.to_df()
@@ -192,7 +187,7 @@ print("DerSimonian-Laird")
 print(dsl_summary.to_df().T)
 print()
 
-hedge = pymare.estimators.Hedges()
+hedge = estimators.Hedges()
 hedge.fit_dataset(dset)
 hedge_summary = hedge.summary()
 results["Hedges"] = hedge_summary.to_df()
@@ -200,7 +195,7 @@ print("Hedges")
 print(hedge_summary.to_df().T)
 print()
 
-vb_ml = pymare.estimators.VarianceBasedLikelihoodEstimator(method="ML")
+vb_ml = estimators.VarianceBasedLikelihoodEstimator(method="ML")
 vb_ml.fit_dataset(dset)
 vb_ml_summary = vb_ml.summary()
 results["Variance-Based with ML"] = vb_ml_summary.to_df()
@@ -208,7 +203,7 @@ print("Variance-Based with ML")
 print(vb_ml_summary.to_df().T)
 print()
 
-vb_reml = pymare.estimators.VarianceBasedLikelihoodEstimator(method="REML")
+vb_reml = estimators.VarianceBasedLikelihoodEstimator(method="REML")
 vb_reml.fit_dataset(dset)
 vb_reml_summary = vb_reml.summary()
 results["Variance-Based with REML"] = vb_reml_summary.to_df()
@@ -219,7 +214,7 @@ print()
 # The ``SampleSizeBasedLikelihoodEstimator`` estimates between-study variance
 # using ``y`` and ``n``, but assumes within-study variance is homogenous
 # across studies.
-sb_ml = pymare.estimators.SampleSizeBasedLikelihoodEstimator(method="ML")
+sb_ml = estimators.SampleSizeBasedLikelihoodEstimator(method="ML")
 sb_ml.fit_dataset(dset)
 sb_ml_summary = sb_ml.summary()
 results["Sample Size-Based with ML"] = sb_ml_summary.to_df()
@@ -227,7 +222,7 @@ print("Sample Size-Based with ML")
 print(sb_ml_summary.to_df().T)
 print()
 
-sb_reml = pymare.estimators.SampleSizeBasedLikelihoodEstimator(method="REML")
+sb_reml = estimators.SampleSizeBasedLikelihoodEstimator(method="REML")
 sb_reml.fit_dataset(dset)
 sb_reml_summary = sb_reml.summary()
 results["Sample Size-Based with REML"] = sb_reml_summary.to_df()
@@ -243,7 +238,7 @@ print(sb_reml_summary.to_df().T)
 ###############################################################################
 # Let's check out our results!
 # `````````````````````````````````````````````````````````````````````````````
-fig, ax = plt.subplots(figsize=(8, 8))
+fig, ax = plt.subplots(figsize=(6, 6))
 
 for i, (estimator_name, summary_df) in enumerate(results.items()):
     ax.scatter((summary_df.loc[0, "estimate"],), (i + 1,), label=estimator_name)
