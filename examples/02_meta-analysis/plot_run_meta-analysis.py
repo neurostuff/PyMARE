@@ -37,6 +37,21 @@ dset.to_df()
 # :meth:`~pymare.estimators.estimators.BaseEstimator.fit_dataset` to fit it to
 # a :class:`~pymare.core.Dataset`.
 #
+# .. tip::
+#   We generally recommend using
+#   :meth:`~pymare.estimators.estimators.BaseEstimator.fit_dataset` over
+#   :meth:`~pymare.estimators.estimators.BaseEstimator.fit`.
+#
+#   There are a number of methods, such as
+#   :meth:`~pymare.results.MetaRegressionResults.get_heterogeneity_stats` and
+#   :meth:`~pymare.results.MetaRegressionResults.permutation_test`,
+#   which only work when the Estimator is fitted to a Dataset.
+#
+#   However, :meth:`~pymare.estimators.estimators.BaseEstimator.fit` requires
+#   less memory than :meth:`~pymare.estimators.estimators.BaseEstimator.fit_dataset`,
+#   so it can be useful for large-scale meta-analyses,
+#   such as neuroimaging image-based meta-analyses.
+#
 # The :meth:`~pymare.estimators.estimators.BaseEstimator.summary` function
 # will return a :class:`~pymare.results.MetaRegressionResults` object,
 # which contains the results of the analysis.

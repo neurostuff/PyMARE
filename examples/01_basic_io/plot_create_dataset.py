@@ -58,27 +58,26 @@ dataset = core.Dataset(v="v_alt", X=["X1", "X7"], data=df, add_intercept=False)
 pprint(vars(dataset))
 
 ###############################################################################
-# Datasets can also contain parallel "datasets"
-# ---------------------------------------------
+# Datasets can also contain multiple dependent variables
+# ------------------------------------------------------
+# These variables are analyzed in parallel, but as unrelated variables,
+# rather than as potentially correlated ones.
+#
+# This is particularly useful for image-based neuroimaging meta-analyses.
+# For more information about this, see `NiMARE <https://nimare.readthedocs.io>`_.
 y = [
-    [2, 4, 6],  # Estimates for first study's three datasets.
-    [3, 2, 1],  # Estimates for second study's three datasets.
+    [2, 4, 6],  # Estimates for first study's three outcome variables.
+    [3, 2, 1],  # Estimates for second study's three outcome variables.
 ]
 v = [
-    [100, 100, 100],  # Estimate variances for first study's three datasets.
-    [8, 4, 2],  # Estimate variances for second study's three datasets.
+    [100, 100, 100],  # Estimate variances for first study's three outcome variables.
+    [8, 4, 2],  # Estimate variances for second study's three outcome variables.
 ]
 X = [
-    [5, 9],  # Predictors for first study. Same across all three datasets.
-    [2, 8],  # Predictors for second study. Same across all three datasets.
+    [5, 9],  # Predictors for first study. Same across all three outcome variables.
+    [2, 8],  # Predictors for second study. Same across all three outcome variables.
 ]
 
 dataset = core.Dataset(y=y, v=v, X=X, X_names=["X1", "X7"])
 
 pprint(vars(dataset))
-
-from pymare import estimators
-
-est = estimators.WeightedLeastSquares().fit_dataset(dataset)
-results = est.summary()
-pprint(results.get_fe_stats())
