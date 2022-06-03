@@ -356,7 +356,6 @@ class MetaRegressionResults:
                 "A summary table cannot be displayed for multidimensional results at the moment."
             )
 
-        fe_stats = self.get_fe_stats()
         re_stats = self.get_re_stats()
         heterogeneity_stats = self.get_heterogeneity_stats()
 
