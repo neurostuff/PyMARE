@@ -191,7 +191,21 @@ class WeightedLeastSquares(BaseEstimator):
         self.tau2 = tau2
 
     def fit(self, y, X, v=None):
-        """Fit the estimator to data."""
+        """Fit the estimator to data.
+
+        Parameters
+        ----------
+        y : :obj:`numpy.ndarray` of shape (n, d)
+            The dependent variable(s) (y).
+        X : :obj:`numpy.ndarray` of shape (n, p)
+            The independent variable(s) (X).
+        v : :obj:`numpy.ndarray` of shape (n, d), optional
+            Sampling variances. If not provided, unit weights will be used.
+
+        Returns
+        -------
+        :obj:`~pymare.estimators.WeightedLeastSquares`
+        """
         # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
         self.dataset_ = None
 
@@ -222,7 +236,21 @@ class DerSimonianLaird(BaseEstimator):
     """
 
     def fit(self, y, v, X):
-        """Fit the estimator to data."""
+        """Fit the estimator to data.
+
+        Parameters
+        ----------
+        y : :obj:`numpy.ndarray` of shape (n, d)
+            The dependent variable(s) (y).
+        v : :obj:`numpy.ndarray` of shape (n, d)
+            Sampling variances.
+        X : :obj:`numpy.ndarray` of shape (n, p)
+            The independent variable(s) (X).
+
+        Returns
+        -------
+        :obj:`~pymare.estimators.DerSimonianLaird`
+        """
         # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
         self.dataset_ = None
 
@@ -272,7 +300,22 @@ class Hedges(BaseEstimator):
     """
 
     def fit(self, y, v, X):
-        """Fit the estimator to data."""
+        """Fit the estimator to data.
+
+
+        Parameters
+        ----------
+        y : :obj:`numpy.ndarray` of shape (n, d)
+            The dependent variable(s) (y).
+        v : :obj:`numpy.ndarray` of shape (n, d)
+            Sampling variances.
+        X : :obj:`numpy.ndarray` of shape (n, p)
+            The independent variable(s) (X).
+
+        Returns
+        -------
+        :obj:`~pymare.estimators.Hedges`
+        """
         # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
         self.dataset_ = None
 
@@ -326,7 +369,21 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 
     @_loopable
     def fit(self, y, v, X):
-        """Fit the estimator to data."""
+        """Fit the estimator to data.
+
+        Parameters
+        ----------
+        y : :obj:`numpy.ndarray` of shape (n, d)
+            The dependent variable(s) (y).
+        v : :obj:`numpy.ndarray` of shape (n, d)
+            Sampling variances.
+        X : :obj:`numpy.ndarray` of shape (n, p)
+            The independent variable(s) (X).
+
+        Returns
+        -------
+        :obj:`~pymare.estimators.VarianceBasedLikelihoodEstimator`
+        """
         # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
         self.dataset_ = None
 
@@ -405,7 +462,21 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
 
     @_loopable
     def fit(self, y, n, X):
-        """Fit the estimator to data."""
+        """Fit the estimator to data.
+
+        Parameters
+        ----------
+        y : :obj:`numpy.ndarray` of shape (n, d)
+            The dependent variable(s) (y).
+        n : :obj:`numpy.ndarray` of shape (n, d)
+            Sample sizes.
+        X : :obj:`numpy.ndarray` of shape (n, p)
+            The independent variable(s) (X).
+
+        Returns
+        -------
+        :obj:`~pymare.estimators.SampleSizeBasedLikelihoodEstimator`
+        """
         # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
         self.dataset_ = None
 
