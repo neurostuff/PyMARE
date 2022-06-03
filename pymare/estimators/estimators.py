@@ -302,7 +302,6 @@ class Hedges(BaseEstimator):
     def fit(self, y, v, X):
         """Fit the estimator to data.
 
-
         Parameters
         ----------
         y : :obj:`numpy.ndarray` of shape (n, d)
