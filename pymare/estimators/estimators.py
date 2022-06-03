@@ -192,6 +192,9 @@ class WeightedLeastSquares(BaseEstimator):
 
     def fit(self, y, X, v=None):
         """Fit the estimator to data."""
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         if v is None:
             v = np.ones_like(y)
 
@@ -220,6 +223,9 @@ class DerSimonianLaird(BaseEstimator):
 
     def fit(self, y, v, X):
         """Fit the estimator to data."""
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         y = ensure_2d(y)
         v = ensure_2d(v)
 
@@ -267,6 +273,9 @@ class Hedges(BaseEstimator):
 
     def fit(self, y, v, X):
         """Fit the estimator to data."""
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         k, p = X.shape[:2]
         _unit_v = np.ones_like(y)
         beta, inv_cov = weighted_least_squares(y, _unit_v, X, return_cov=True)
@@ -318,6 +327,9 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
     @_loopable
     def fit(self, y, v, X):
         """Fit the estimator to data."""
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         # use D-L estimate for initial values
         est_DL = DerSimonianLaird().fit(y, v, X).params_
         beta = est_DL["fe_params"]
@@ -394,6 +406,9 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     @_loopable
     def fit(self, y, n, X):
         """Fit the estimator to data."""
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         if n.std() < np.sqrt(np.finfo(float).eps):
             raise ValueError(
                 "Sample size-based likelihood estimator cannot "
@@ -550,6 +565,9 @@ class StanMetaRegression(BaseEstimator):
         `groups` argument can be used to specify the nesting structure
         (i.e., which rows in `y`, `v`, and `X` belong to each study).
         """
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         if y.ndim > 1 and y.shape[1] > 1:
             raise ValueError(
                 "The StanMetaRegression estimator currently does "
