@@ -14,8 +14,6 @@ Here we walk through the basic steps of running a meta-analysis with PyMARE.
 # -----------------------------------------------------------------------------
 from pprint import pprint
 
-from pymare import core, datasets, estimators
-
 ###############################################################################
 # Load the data
 # -----------------------------------------------------------------------------
@@ -24,8 +22,14 @@ from pymare import core, datasets, estimators
 #
 # We only want to do a mean analysis, so we won't have any covariates except for
 # an intercept.
+import numpy as np
+
+from pymare import core, datasets, estimators
+
 data, meta = datasets.michael2013()
-dset = core.Dataset(data=data, y="yi", v="vi", X=None, add_intercept=True)
+data["age"] = np.random.randint(1, 100, size=data.shape[0])
+data["n_houses"] = np.random.randint(1, 10, size=data.shape[0])
+dset = core.Dataset(data=data, y="yi", v="vi", X=["age", "n_houses"], add_intercept=True)
 dset.to_df()
 
 ###############################################################################
@@ -61,6 +65,9 @@ pprint(results.get_re_stats())
 # will run a permutation test to estimate more accurate p-values.
 perm_results = results.permutation_test(n_perm=1000)
 perm_results.to_df()
+
+###############################################################################
+print(results.summary())
 
 ###############################################################################
 # References

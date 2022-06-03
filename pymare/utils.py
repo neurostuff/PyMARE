@@ -19,3 +19,16 @@ def _listify(obj):
     This provides a simple way to accept flexible arguments.
     """
     return obj if isinstance(obj, (list, tuple, type(None), np.ndarray)) else [obj]
+
+
+def _get_sig_code(p_value):
+    if p_value < 0.001:
+        return "***"
+    elif p_value < 0.01:
+        return "**"
+    elif p_value < 0.05:
+        return "*"
+    elif p_value < 0.1:
+        return "."
+    else:
+        return " "

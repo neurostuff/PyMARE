@@ -14,6 +14,7 @@ except ImportError:
     az = None
 
 from pymare.stats import q_gen, q_profile
+from pymare.utils import _get_sig_code
 
 
 class MetaRegressionResults:
@@ -337,6 +338,56 @@ class MetaRegressionResults:
             params["tau2_p"] = np.maximum(1 / n_perm, tau_p)
 
         return PermutationTestResults(self, params, n_perm, exact)
+
+    def summary(self):
+        """Print a summary of the results.
+
+        Returns
+        -------
+        :obj:`str`
+            A summary of the results, modeled after ``metafor``'s results.
+        """
+        n_obs, n_datasets = self.dataset.y.shape
+        df = n_obs - self.dataset.X.shape[1]
+
+        if n_datasets > 1:
+            raise ValueError(
+                "More than one set of results found! "
+                "A summary table cannot be displayed for multidimensional results at the moment."
+            )
+
+        fe_stats = self.get_fe_stats()
+        re_stats = self.get_re_stats()
+        heterogeneity_stats = self.get_heterogeneity_stats()
+
+        # Extract info
+        tau2 = re_stats["tau^2"]
+        if isinstance(tau2, (list, tuple, np.ndarray)):
+            tau2 = tau2[0]
+
+        tau2_se = "n/a"
+        tau2_estimator = self.estimator.__class__.__name__
+
+        model_results = self.to_df()
+        model_results[""] = model_results["p-value"].apply(_get_sig_code)
+
+        pattern = f"""Random-Effects Model (k = {n_obs}; tau^2 estimator: {tau2_estimator})
+
+tau^2 (estimated amount of total heterogeneity): {tau2:.04f} (SE = {tau2_se})
+tau (square root of estimated tau^2 value):      {np.sqrt(tau2):.04f}
+I^2 (total heterogeneity / total variability):   {heterogeneity_stats['I^2'][0]:.2f}%
+H^2 (total variability / sampling variability):  {heterogeneity_stats['H'][0] ** 2:.2f}
+
+Test for Heterogeneity:
+Q(df = {df}) = {heterogeneity_stats['Q'][0]:.04f}, p-val = {heterogeneity_stats['p(Q)'][0]:.04f}
+
+Model Results:
+
+{model_results.to_string(index=False, float_format="%.4f", na_rep="n/a")}
+
+---
+Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1"""
+        return pattern
 
 
 class CombinationTestResults:
