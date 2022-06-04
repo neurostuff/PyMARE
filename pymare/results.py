@@ -47,7 +47,10 @@ class MetaRegressionResults:
     @lru_cache(maxsize=1)
     def fe_se(self):
         """Get fixed-effect standard error."""
-        cov = np.atleast_3d(self.fe_cov)  # 3rd dim is for parallel datasets
+        cov = self.fe_cov.copy()
+        if cov.ndim == 2:
+            cov = cov[None, :, :]
+
         return np.sqrt(np.diagonal(cov)).T
 
     @lru_cache(maxsize=16)
