@@ -83,7 +83,6 @@ def test_combination_test_results_from_arrays(dataset):
     results = fitted_estimator.summary()
     assert isinstance(results, CombinationTestResults)
     assert results.p.shape == (1,)
-    assert fitted_estimator.dataset_ is None
 
     # fit overwrites dataset_ attribute with None
     assert fitted_estimator.dataset_ is None
