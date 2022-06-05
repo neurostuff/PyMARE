@@ -36,6 +36,9 @@ class CombinationTest(BaseEstimator):
 
     def fit(self, z, *args, **kwargs):
         """Fit the estimator to z-values."""
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         if self.mode == "concordant":
             ose = self.__class__(mode="directed")
             p1 = ose.p_value(z, *args, **kwargs)
