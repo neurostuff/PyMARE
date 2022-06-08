@@ -35,6 +35,12 @@ class MetaRegressionResults:
     tau2 : None or :obj:`numpy.ndarray` of shape (d,) or :obj:`float`, optional
         A 1-d array containing the estimated tau^2 value for each parallel dataset
         (or a float, for a single dataset). May be omitted by fixed-effects estimators.
+
+    Warning
+    -------
+    When an Estimator is fitted to arrays directly using the ``fit`` method, the Results object's
+    utility is limited.
+    Many methods will not work.
     """
 
     def __init__(self, estimator, dataset, fe_params, fe_cov, tau2=None):
@@ -48,7 +54,10 @@ class MetaRegressionResults:
     @lru_cache(maxsize=1)
     def fe_se(self):
         """Get fixed-effect standard error."""
-        cov = np.atleast_3d(self.fe_cov)  # 3rd dim is for parallel datasets
+        cov = self.fe_cov.copy()
+        if cov.ndim == 2:
+            cov = cov[None, :, :]
+
         return np.sqrt(np.diagonal(cov)).T
 
     @lru_cache(maxsize=16)
@@ -93,6 +102,11 @@ class MetaRegressionResults:
     def get_re_stats(self, method="QP", alpha=0.05):
         """Get random-effect statistics.
 
+        .. warning::
+
+            This method relies on the ``.dataset`` attribute, so the original Estimator must have
+            be fitted with ``fit_dataset``, not ``fit``.
+
         Parameters
         ----------
         method : {"QP"}, optional
@@ -116,6 +130,9 @@ class MetaRegressionResults:
         ----------
         .. footbibliography::
         """
+        if self.dataset is None:
+            raise ValueError("The Dataset is unavailable. This method requires a Dataset.")
+
         if method == "QP":
             n_datasets = np.atleast_2d(self.tau2).shape[1]
             if n_datasets > 10:
@@ -158,6 +175,11 @@ class MetaRegressionResults:
     def get_heterogeneity_stats(self):
         """Get heterogeneity statistics.
 
+        .. warning::
+
+            This method relies on the ``.dataset`` attribute, so the original Estimator must have
+            be fitted with ``fit_dataset``, not ``fit``.
+
         Returns
         -------
         :obj:`dict`
@@ -181,6 +203,9 @@ class MetaRegressionResults:
         ----------
         .. footbibliography::
         """
+        if self.dataset is None:
+            raise ValueError("The Dataset is unavailable. This method requires a Dataset.")
+
         v = self.estimator.get_v(self.dataset)
         q_fe = q_gen(self.dataset.y, v, self.dataset.X, 0)
         df = self.dataset.y.shape[0] - self.dataset.X.shape[1]
@@ -195,6 +220,11 @@ class MetaRegressionResults:
         .. warning::
 
             This method only works for one-dimensional results.
+
+        .. warning::
+
+            This method relies on the ``.dataset`` attribute, so the original Estimator must have
+            be fitted with ``fit_dataset``, not ``fit``.
 
         Parameters
         ----------
@@ -218,6 +248,9 @@ class MetaRegressionResults:
                         the CI columns will be ``"ci_0.025"`` and ``"ci_0.975"``.
             =========== ==========================================================================
         """
+        if self.dataset is None:
+            raise ValueError("The Dataset is unavailable. This method requires a Dataset.")
+
         b_shape = self.fe_params.shape
         if len(b_shape) > 1 and b_shape[1] > 1:
             raise ValueError(
@@ -237,6 +270,11 @@ class MetaRegressionResults:
 
     def permutation_test(self, n_perm=1000):
         """Run permutation test.
+
+        .. warning::
+
+            This method relies on the ``.dataset`` attribute, so the original Estimator must have
+            be fitted with ``fit_dataset``, not ``fit``.
 
         Parameters
         ----------
@@ -261,6 +299,9 @@ class MetaRegressionResults:
         This means that one can often set very high n_perm values (e.g., 100k) with little
         performance degradation.
         """
+        if self.dataset is None:
+            raise ValueError("The Dataset is unavailable. This method requires a Dataset.")
+
         n_obs, n_datasets = self.dataset.y.shape
         has_mods = self.dataset.X.shape[1] > 1
 
@@ -431,6 +472,11 @@ class CombinationTestResults:
     def permutation_test(self, n_perm=1000):
         """Run permutation test.
 
+        .. warning::
+
+            This method relies on the ``.dataset`` attribute, so the original Estimator must have
+            be fitted with ``fit_dataset``, not ``fit``.
+
         Parameters
         ----------
         n_perm : :obj:`int`, optional
@@ -453,6 +499,9 @@ class CombinationTestResults:
         set very high n_perm values (e.g., 100k) with little performance
         degradation.
         """
+        if self.dataset is None:
+            raise ValueError("The Dataset is unavailable. This method requires a Dataset.")
+
         n_obs, n_datasets = self.dataset.y.shape
 
         # create results arrays
