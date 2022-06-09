@@ -108,6 +108,7 @@ def test_meta_regression_results_init_1d(fitted_estimator):
     assert results.fe_params.shape == (2, 1)
     assert results.fe_cov.shape == (2, 2, 1)
     assert results.tau2.shape == (1,)
+    assert isinstance(results.summary(), str)
 
 
 def test_meta_regression_results_init_2d(results_2d):
@@ -116,6 +117,8 @@ def test_meta_regression_results_init_2d(results_2d):
     assert results_2d.fe_params.shape == (2, 3)
     assert results_2d.fe_cov.shape == (2, 2, 3)
     assert results_2d.tau2.shape == (1, 3)
+    with pytest.raises(ValueError):
+        results_2d.summary()
 
 
 def test_mrr_fe_se(results, results_2d):
