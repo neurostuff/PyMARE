@@ -5,7 +5,7 @@ from functools import partial
 import numpy as np
 import pandas as pd
 
-from pymare.utils import _listify
+from pymare.utils import _check_inputs_shape, _listify
 
 from .estimators import (
     DerSimonianLaird,
@@ -93,6 +93,10 @@ class Dataset:
         X, names = self._get_predictors(X, X_names, add_intercept)
         self.X = X
         self.X_names = names
+
+        _check_inputs_shape(self.y, self.X, "y", "X", row=True)
+        _check_inputs_shape(self.y, self.v, "y", "v", row=True, column=True)
+        _check_inputs_shape(self.y, self.n, "y", "n", row=True, column=True)
 
     def _get_predictors(self, X, names, add_intercept):
         if X is None and not add_intercept:
