@@ -35,3 +35,6 @@ def test_check_inputs_shape():
     # Raise error if neither row or column is True
     with pytest.raises(ValueError):
         utils._check_inputs_shape(y, n, "y", "n")
+
+    # Dataset may be initialized with n or v as None
+    utils._check_inputs_shape(y, None, "y", "n", row=True, column=True)
