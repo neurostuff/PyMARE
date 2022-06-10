@@ -2,6 +2,7 @@
 import os.path as op
 
 import numpy as np
+import pytest
 
 from pymare import utils
 
@@ -18,12 +19,19 @@ def test_check_inputs_shape():
     n_columns = 4
     n_pred = 3
     y = np.random.randint(1, 100, size=(n_rows, n_columns))
-    v = np.random.randint(1, 100, size=(n_rows, n_columns))
+    v = np.random.randint(1, 100, size=(n_rows + 1, n_columns))
     n = np.random.randint(1, 100, size=(n_rows, n_columns))
     X = np.random.randint(1, 100, size=(n_rows, n_pred))
     X_names = [f"X{x}" for x in range(n_pred)]
 
     utils._check_inputs_shape(y, X, "y", "X", row=True)
-    utils._check_inputs_shape(y, v, "y", "v", row=True, column=True)
     utils._check_inputs_shape(y, n, "y", "n", row=True, column=True)
     utils._check_inputs_shape(X, np.array(X_names)[None, :], "X", "X_names", column=True)
+
+    # Raise error if the number of rows and columns of v don't match y
+    with pytest.raises(ValueError):
+        utils._check_inputs_shape(y, v, "y", "v", row=True, column=True)
+
+    # Raise error if neither row or column is True
+    with pytest.raises(ValueError):
+        utils._check_inputs_shape(y, n, "y", "n")
