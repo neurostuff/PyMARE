@@ -55,6 +55,3 @@ def _check_inputs_shape(param1, param2, param1_name, param2_name, row=False, col
                 f"You provided {param1_name} with shape {param1.shape} and {param2_name} "
                 f"with shape {param2.shape}."
             )
-    elif (param1 is None) or (param2 is None):
-        # If param1 or param2 is None, we don't need to check the shape
-        pass
