@@ -1,10 +1,12 @@
 """Tests for estimators that use stan."""
+import sys
+
 import pytest
 
 from pymare.estimators import StanMetaRegression
 
 
-# @pytest.mark.skip(reason="StanMetaRegression won't work with Python 3.7+.")
+@pytest.mark.skipif(sys.version_info < (3, 7), reason="requires python3.7 or higher")
 def test_stan_estimator(dataset):
     """Run smoke test for StanMetaRegression."""
     # no ground truth here, so we use sanity checks and rough bounds
@@ -18,7 +20,7 @@ def test_stan_estimator(dataset):
     assert 3 < tau2 < 5
 
 
-# @pytest.mark.skip(reason="StanMetaRegression won't work with Python 3.7+.")
+@pytest.mark.skipif(sys.version_info < (3, 7), reason="requires python 3.7 or higher")
 def test_stan_2d_input_failure(dataset_2d):
     """Run smoke test for StanMetaRegression on 2D data."""
     with pytest.raises(ValueError) as exc:
