@@ -5,6 +5,7 @@ from inspect import getfullargspec
 from warnings import warn
 
 import numpy as np
+import stan
 import wrapt
 from scipy.optimize import Bounds, minimize
 
@@ -550,11 +551,6 @@ class StanMetaRegression(BaseEstimator):
     when fitting the meta-regression model repeatedly to different data;
     the separation of .compile() and .fit() steps allows one to compile
     the model only once.
-
-    Warning
-    -------
-    With changes to Stan in version 3, which requires Python 3.7, this class no longer works for
-    Python 3.7+. We will try to fix it in the future.
     """
 
     _result_cls = BayesianMetaRegressionResults
@@ -594,14 +590,7 @@ class StanMetaRegression(BaseEstimator):
             theta ~ normal(0, tau2);
         }
         """
-        try:
-            from pystan import StanModel
-        except ImportError:
-            raise ImportError(
-                "Please install pystan or, if using Python 3.7+, switch to Python 3.6."
-            )
-
-        self.model = StanModel(model_code=spec)
+        self.model = stan.build(spec, data=self.data)
 
     def fit(self, y, v, X, groups=None):
         """Run the Stan sampler and return results.
@@ -645,9 +634,6 @@ class StanMetaRegression(BaseEstimator):
                 "shape {}.".format(y.shape)
             )
 
-        if self.model is None:
-            self.compile()
-
         N = y.shape[0]
         groups = groups or np.arange(1, N + 1, dtype=int)
         K = len(np.unique(groups))
@@ -662,7 +648,13 @@ class StanMetaRegression(BaseEstimator):
             "sigma": v.ravel(),
         }
 
-        self.result_ = self.model.sampling(data=data, **self.sampling_kwargs)
+        self.data = data
+
+        if self.model is None:
+            self.compile()
+
+        # self.result_ = self.model.sampling(data=data, **self.sampling_kwargs)
+        self.result_ = self.model.sample(**self.sampling_kwargs)
         return self
 
     def summary(self, ci=95):
