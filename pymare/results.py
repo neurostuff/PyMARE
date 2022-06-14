@@ -4,10 +4,14 @@ from functools import lru_cache
 from inspect import getfullargspec
 from warnings import warn
 
-import arviz as az
 import numpy as np
 import pandas as pd
 import scipy.stats as ss
+
+try:
+    import arviz as az
+except ImportError:
+    az = None
 
 from pymare.stats import q_gen, q_profile
 

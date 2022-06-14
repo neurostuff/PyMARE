@@ -5,7 +5,6 @@ from inspect import getfullargspec
 from warnings import warn
 
 import numpy as np
-import stan
 import wrapt
 from scipy.optimize import Bounds, minimize
 
@@ -590,6 +589,11 @@ class StanMetaRegression(BaseEstimator):
             theta ~ normal(0, tau2);
         }
         """
+        try:
+            import stan
+        except ImportError:
+            raise ImportError("Please install pystan.")
+
         self.model = stan.build(spec, data=self.data)
 
     def fit(self, y, v, X, groups=None):
