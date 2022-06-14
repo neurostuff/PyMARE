@@ -1,5 +1,6 @@
 """Meta-regression estimator classes."""
 
+import sys
 from abc import ABCMeta, abstractmethod
 from inspect import getfullargspec
 from warnings import warn
@@ -550,6 +551,11 @@ class StanMetaRegression(BaseEstimator):
     when fitting the meta-regression model repeatedly to different data;
     the separation of .compile() and .fit() steps allows one to compile
     the model only once.
+
+    Warning
+    -------
+    :obj:`~pymare.estimators.StanMetaRegression` uses Pystan 3, which requires Python 3.7.
+    Pystan 3 should not be used with PyMARE and Python 3.6 or earlier.
     """
 
     _result_cls = BayesianMetaRegressionResults
@@ -558,6 +564,13 @@ class StanMetaRegression(BaseEstimator):
         self.sampling_kwargs = sampling_kwargs
         self.model = None
         self.result_ = None
+
+        if sys.version_info < (3, 7):
+            raise RuntimeError(
+                "StanMetaRegression uses Pystan 3, which requires python 3.7 or higher. "
+                f"You are running Python {sys.version_info.major}.{sys.version_info.minor}. "
+                "Pystan 3 should not be used with PyMARE and Python 3.6 or earlier."
+            )
 
     def compile(self):
         """Compile the Stan model."""
