@@ -109,7 +109,7 @@ def q_profile(y, v, X, alpha=0.05):
     ub_start = 2 * DerSimonianLaird().fit(y, v, X).params_["tau2"]
 
     lb = minimize(lambda x: (q_gen(*args, x) - l_crit) ** 2, [0], bounds=bds).x[0]
-    ub = minimize(lambda x: (q_gen(*args, x) - u_crit) ** 2, [ub_start], bounds=bds).x[0]
+    ub = minimize(lambda x: (q_gen(*args, x) - u_crit) ** 2, ub_start, bounds=bds).x[0]
     return {"ci_l": lb, "ci_u": ub}
 
 
