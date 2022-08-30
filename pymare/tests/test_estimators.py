@@ -15,8 +15,8 @@ from pymare.estimators import (
 def test_weighted_least_squares_estimator(dataset):
     """Test WeightedLeastSquares estimator."""
     # ground truth values are from metafor package in R
-    est = WeightedLeastSquares().fit_dataset(dataset)
-    results = est.summary()
+    est = WeightedLeastSquares().fit(dataset)
+    results = est.transform()
     beta, tau2 = results.fe_params, results.tau2
     fe_stats = results.get_fe_stats()
 
@@ -35,8 +35,8 @@ def test_weighted_least_squares_estimator(dataset):
     assert tau2 == 0.0
 
     # With non-zero tau^2
-    est = WeightedLeastSquares(8.0).fit_dataset(dataset)
-    results = est.summary()
+    est = WeightedLeastSquares(8.0).fit(dataset)
+    results = est.transform()
     beta, tau2 = results.fe_params, results.tau2
     assert np.allclose(beta.ravel(), [-0.1071, 0.7657], atol=1e-4)
     assert tau2 == 8.0
@@ -45,8 +45,8 @@ def test_weighted_least_squares_estimator(dataset):
 def test_dersimonian_laird_estimator(dataset):
     """Test DerSimonianLaird estimator."""
     # ground truth values are from metafor package in R
-    est = DerSimonianLaird().fit_dataset(dataset)
-    results = est.summary()
+    est = DerSimonianLaird().fit(dataset)
+    results = est.transform()
     beta, tau2 = results.fe_params, results.tau2
     fe_stats = results.get_fe_stats()
 
@@ -67,7 +67,8 @@ def test_dersimonian_laird_estimator(dataset):
 
 def test_2d_DL_estimator(dataset_2d):
     """Test DerSimonianLaird estimator on 2D Dataset."""
-    results = DerSimonianLaird().fit_dataset(dataset_2d).summary()
+    est = DerSimonianLaird().fit(dataset_2d)
+    results = est.transform()
     beta, tau2 = results.fe_params, results.tau2
     fe_stats = results.get_fe_stats()
 
@@ -97,8 +98,8 @@ def test_hedges_estimator(dataset):
     # ground truth values are from metafor package in R, except that metafor
     # always gives negligibly different values for tau2, likely due to
     # algorithmic differences in the computation.
-    est = Hedges().fit_dataset(dataset)
-    results = est.summary()
+    est = Hedges().fit(dataset)
+    results = est.transform()
     beta, tau2 = results.fe_params, results.tau2
     fe_stats = results.get_fe_stats()
 
@@ -119,7 +120,8 @@ def test_hedges_estimator(dataset):
 
 def test_2d_hedges(dataset_2d):
     """Test Hedges estimator on 2D Dataset."""
-    results = Hedges().fit_dataset(dataset_2d).summary()
+    est = Hedges().fit(dataset_2d)
+    results = est.transform()
     beta, tau2 = results.fe_params, results.tau2
     fe_stats = results.get_fe_stats()
 
@@ -146,8 +148,8 @@ def test_2d_hedges(dataset_2d):
 def test_variance_based_maximum_likelihood_estimator(dataset):
     """Test VarianceBasedLikelihoodEstimator estimator."""
     # ground truth values are from metafor package in R
-    est = VarianceBasedLikelihoodEstimator(method="ML").fit_dataset(dataset)
-    results = est.summary()
+    est = VarianceBasedLikelihoodEstimator(method="ML").fit(dataset)
+    results = est.transform()
     beta, tau2 = results.fe_params, results.tau2
     fe_stats = results.get_fe_stats()
 
@@ -169,8 +171,8 @@ def test_variance_based_maximum_likelihood_estimator(dataset):
 def test_variance_based_restricted_maximum_likelihood_estimator(dataset):
     """Test VarianceBasedLikelihoodEstimator estimator with REML."""
     # ground truth values are from metafor package in R
-    est = VarianceBasedLikelihoodEstimator(method="REML").fit_dataset(dataset)
-    results = est.summary()
+    est = VarianceBasedLikelihoodEstimator(method="REML").fit(dataset)
+    results = est.transform()
     beta, tau2 = results.fe_params, results.tau2
     fe_stats = results.get_fe_stats()
 
@@ -192,8 +194,8 @@ def test_variance_based_restricted_maximum_likelihood_estimator(dataset):
 def test_sample_size_based_maximum_likelihood_estimator(dataset_n):
     """Test SampleSizeBasedLikelihoodEstimator estimator."""
     # test values have not been verified for convergence with other packages
-    est = SampleSizeBasedLikelihoodEstimator(method="ML").fit_dataset(dataset_n)
-    results = est.summary()
+    est = SampleSizeBasedLikelihoodEstimator(method="ML").fit(dataset_n)
+    results = est.transform()
     beta = results.fe_params
     sigma2 = results.estimator.params_["sigma2"]
     tau2 = results.tau2
@@ -219,8 +221,8 @@ def test_sample_size_based_maximum_likelihood_estimator(dataset_n):
 def test_sample_size_based_restricted_maximum_likelihood_estimator(dataset_n):
     """Test SampleSizeBasedLikelihoodEstimator REML estimator."""
     # test values have not been verified for convergence with other packages
-    est = SampleSizeBasedLikelihoodEstimator(method="REML").fit_dataset(dataset_n)
-    results = est.summary()
+    est = SampleSizeBasedLikelihoodEstimator(method="REML").fit(dataset_n)
+    results = est.transform()
     beta = results.fe_params
     sigma2 = results.estimator.params_["sigma2"]
     tau2 = results.tau2
@@ -245,8 +247,8 @@ def test_sample_size_based_restricted_maximum_likelihood_estimator(dataset_n):
 
 def test_2d_looping(dataset_2d):
     """Test 2D looping in estimators."""
-    est = VarianceBasedLikelihoodEstimator().fit_dataset(dataset_2d)
-    results = est.summary()
+    est = VarianceBasedLikelihoodEstimator().fit(dataset_2d)
+    results = est.transform()
     beta, tau2 = results.fe_params, results.tau2
     fe_stats = results.get_fe_stats()
 
@@ -278,6 +280,6 @@ def test_2d_loop_warning(dataset_2d):
     dataset = Dataset(y, v)
     # Warning is raised when 2nd dim is > 10
     with pytest.warns(UserWarning, match="Input contains"):
-        est.fit_dataset(dataset)
+        est.fit(dataset)
     # But not when it's smaller
-    est.fit_dataset(dataset_2d)
+    est.fit(dataset_2d)

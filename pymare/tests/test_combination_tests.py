@@ -28,7 +28,7 @@ _params = [
 @pytest.mark.parametrize("Cls,data,mode,expected", _params)
 def test_combination_test(Cls, data, mode, expected):
     """Test CombinationTest Estimators with numpy data."""
-    results = Cls(mode).fit(data).params_
+    results = Cls(mode)._fit(data).params_
     z = ss.norm.isf(results["p"])
     assert np.allclose(z, expected, atol=1e-5)
 
@@ -37,7 +37,7 @@ def test_combination_test(Cls, data, mode, expected):
 def test_combination_test_from_dataset(Cls, data, mode, expected):
     """Test CombinationTest Estimators with PyMARE Datasets."""
     dset = Dataset(y=data)
-    est = Cls(mode).fit_dataset(dset)
-    results = est.summary()
+    est = Cls(mode).fit(dset)
+    results = est.transform()
     z = ss.norm.isf(results.p)
     assert np.allclose(z, expected, atol=1e-5)

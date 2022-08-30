@@ -1,6 +1,6 @@
 """Meta-regression estimator classes."""
 
-from abc import ABCMeta, abstractmethod
+from abc import ABCMeta
 from inspect import getfullargspec
 from warnings import warn
 
@@ -62,12 +62,7 @@ class BaseEstimator(metaclass=ABCMeta):
     # (e.g., 'z').
     _dataset_attr_map = {}
 
-    @abstractmethod
-    def fit(self, *args, **kwargs):
-        """Fit the estimator to data."""
-        pass
-
-    def fit_dataset(self, dataset, *args, **kwargs):
+    def fit(self, dataset, *args, **kwargs):
         """Apply the current estimator to the passed Dataset container.
 
         A convenience interface that wraps fit() and automatically aligns the
@@ -83,7 +78,7 @@ class BaseEstimator(metaclass=ABCMeta):
             Optional keyword arguments to pass onto the :meth:`~pymare.core.Dataset.fit` method.
         """
         all_kwargs = {}
-        spec = getfullargspec(self.fit)
+        spec = getfullargspec(self._fit)
         n_kw = len(spec.defaults) if spec.defaults else 0
         n_args = len(spec.args) - n_kw - 1
 
@@ -96,7 +91,7 @@ class BaseEstimator(metaclass=ABCMeta):
                 all_kwargs[name] = getattr(dataset, attr_name)
 
         all_kwargs.update(kwargs)
-        self.fit(*args, **all_kwargs)
+        self._fit(*args, **all_kwargs)
         self.dataset_ = dataset
 
         return self
@@ -140,7 +135,7 @@ class BaseEstimator(metaclass=ABCMeta):
 
         return self.params_["sigma2"] / dataset.n
 
-    def summary(self):
+    def transform(self):
         """Generate a MetaRegressionResults object for the fitted estimator.
 
         Returns
@@ -156,6 +151,27 @@ class BaseEstimator(metaclass=ABCMeta):
 
         p = self.params_
         return MetaRegressionResults(self, self.dataset_, p["fe_params"], p["inv_cov"], p["tau2"])
+
+    def fit_transform(self, dataset, *args, **kwargs):
+        """Fit to data, then transform it.
+
+        Fits transformer dataset and returns a MetaRegressionResults object for the
+        fitted estimator.
+
+        Parameters
+        ----------
+        dataset : :obj:`~pymare.core.Dataset`
+            A PyMARE Dataset instance holding the data.
+        *args
+            Optional positional arguments to pass onto the :meth:`~pymare.core.Dataset.fit` method.
+        **kwargs
+            Optional keyword arguments to pass onto the :meth:`~pymare.core.Dataset.fit` method.
+
+        Returns
+        -------
+        :obj:`~pymare.results.MetaRegressionResults`
+        """
+        return self.fit(dataset, *args, **kwargs).transform()
 
 
 class WeightedLeastSquares(BaseEstimator):
@@ -190,7 +206,7 @@ class WeightedLeastSquares(BaseEstimator):
     def __init__(self, tau2=0.0):
         self.tau2 = tau2
 
-    def fit(self, y, X, v=None):
+    def _fit(self, y, X, v=None):
         """Fit the estimator to data.
 
         Parameters
@@ -206,7 +222,7 @@ class WeightedLeastSquares(BaseEstimator):
         -------
         :obj:`~pymare.estimators.WeightedLeastSquares`
         """
-        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        # This resets the Estimator's dataset_ attribute. fit will overwrite if called.
         self.dataset_ = None
 
         if v is None:
@@ -235,7 +251,7 @@ class DerSimonianLaird(BaseEstimator):
     .. footbibliography::
     """
 
-    def fit(self, y, v, X):
+    def _fit(self, y, v, X):
         """Fit the estimator to data.
 
         Parameters
@@ -299,7 +315,7 @@ class Hedges(BaseEstimator):
     .. footbibliography::
     """
 
-    def fit(self, y, v, X):
+    def _fit(self, y, v, X):
         """Fit the estimator to data.
 
         Parameters
@@ -367,7 +383,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         self.kwargs = kwargs
 
     @_loopable
-    def fit(self, y, v, X):
+    def _fit(self, y, v, X):
         """Fit the estimator to data.
 
         Parameters
@@ -387,7 +403,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         self.dataset_ = None
 
         # use D-L estimate for initial values
-        est_DL = DerSimonianLaird().fit(y, v, X).params_
+        est_DL = DerSimonianLaird()._fit(y, v, X).params_
         beta = est_DL["fe_params"]
         tau2 = est_DL["tau2"]
 
@@ -460,7 +476,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         self.kwargs = kwargs
 
     @_loopable
-    def fit(self, y, n, X):
+    def _fit(self, y, n, X):
         """Fit the estimator to data.
 
         Parameters

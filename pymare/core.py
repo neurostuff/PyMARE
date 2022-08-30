@@ -260,5 +260,4 @@ def meta_regression(
 
     # Get estimates
     est = est_cls(**kwargs)
-    est.fit_dataset(data)
-    return est.summary()
+    return est.fit_transform(data)

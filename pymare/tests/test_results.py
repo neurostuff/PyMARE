@@ -17,20 +17,20 @@ from pymare.results import CombinationTestResults, MetaRegressionResults
 def fitted_estimator(dataset):
     """Create a fitted Estimator as a fixture."""
     est = DerSimonianLaird()
-    return est.fit_dataset(dataset)
+    return est.fit(dataset)
 
 
 @pytest.fixture
 def results(fitted_estimator):
     """Create a results object as a fixture."""
-    return fitted_estimator.summary()
+    return fitted_estimator.transform()
 
 
 @pytest.fixture
 def results_2d(fitted_estimator, dataset_2d):
     """Create a 2D results object as a fixture."""
     est = VarianceBasedLikelihoodEstimator()
-    return est.fit_dataset(dataset_2d).summary()
+    return est.fit_transform(dataset_2d)
 
 
 def test_meta_regression_results_from_arrays(dataset):
@@ -41,8 +41,8 @@ def test_meta_regression_results_from_arrays(dataset):
     See https://github.com/neurostuff/PyMARE/issues/52 for more info.
     """
     est = DerSimonianLaird()
-    fitted_estimator = est.fit(y=dataset.y, X=dataset.X, v=dataset.v)
-    results = fitted_estimator.summary()
+    fitted_estimator = est._fit(y=dataset.y, X=dataset.X, v=dataset.v)
+    results = fitted_estimator.transform()
     assert isinstance(results, MetaRegressionResults)
     assert results.fe_params.shape == (2, 1)
     assert results.fe_cov.shape == (2, 2, 1)
@@ -50,15 +50,15 @@ def test_meta_regression_results_from_arrays(dataset):
 
     # fit overwrites dataset_ attribute with None
     assert fitted_estimator.dataset_ is None
-    # fit_dataset overwrites it with the Dataset
-    fitted_estimator.fit_dataset(dataset)
+    # fit overwrites it with the Dataset
+    fitted_estimator.fit(dataset)
     assert isinstance(fitted_estimator.dataset_, Dataset)
     # fit sets it back to None
-    fitted_estimator.fit(y=dataset.y, X=dataset.X, v=dataset.v)
+    fitted_estimator._fit(y=dataset.y, X=dataset.X, v=dataset.v)
     assert fitted_estimator.dataset_ is None
 
     # Some methods are not available if fit was used
-    results = fitted_estimator.summary()
+    results = fitted_estimator.transform()
     with pytest.raises(ValueError):
         results.get_re_stats()
 
@@ -79,23 +79,23 @@ def test_combination_test_results_from_arrays(dataset):
     to fail when Estimators were fitted to arrays instead of Datasets.
     See https://github.com/neurostuff/PyMARE/issues/52 for more info.
     """
-    fitted_estimator = StoufferCombinationTest().fit(z=dataset.y)
-    results = fitted_estimator.summary()
+    fitted_estimator = StoufferCombinationTest()._fit(z=dataset.y)
+    results = fitted_estimator.transform()
     assert isinstance(results, CombinationTestResults)
     assert results.p.shape == (1,)
 
     # fit overwrites dataset_ attribute with None
     assert fitted_estimator.dataset_ is None
     # fit_dataset overwrites it with the Dataset
-    fitted_estimator.fit_dataset(dataset)
+    fitted_estimator.fit(dataset)
     assert isinstance(fitted_estimator.dataset_, Dataset)
     # fit sets it back to None
-    fitted_estimator.fit(z=dataset.y)
+    fitted_estimator._fit(z=dataset.y)
     assert fitted_estimator.dataset_ is None
 
     # Some methods are not available if fit was used
     with pytest.raises(ValueError):
-        fitted_estimator.summary().permutation_test(1000)
+        fitted_estimator.transform().permutation_test(1000)
 
 
 def test_meta_regression_results_init_1d(fitted_estimator):
@@ -104,7 +104,7 @@ def test_meta_regression_results_init_1d(fitted_estimator):
     results = MetaRegressionResults(
         est, est.dataset_, est.params_["fe_params"], est.params_["inv_cov"], est.params_["tau2"]
     )
-    assert isinstance(est.summary(), MetaRegressionResults)
+    assert isinstance(est.transform(), MetaRegressionResults)
     assert results.fe_params.shape == (2, 1)
     assert results.fe_cov.shape == (2, 2, 1)
     assert results.tau2.shape == (1,)
@@ -167,21 +167,29 @@ def test_mrr_to_df(results):
     assert np.allclose(df["p-value"].values, [0.9678, 0.4369], atol=1e-4)
 
 
-def test_estimator_summary(dataset):
-    """Test Estimator's summary method."""
+def test_estimator_transform(dataset):
+    """Test Estimator's transform method."""
     est = WeightedLeastSquares()
     # Fails if we haven't fitted yet
     with pytest.raises(ValueError):
-        est.summary()
+        est.transform()
 
-    est.fit_dataset(dataset)
-    summary = est.summary()
-    assert isinstance(summary, MetaRegressionResults)
+    est.fit(dataset)
+    transform = est.transform()
+    assert isinstance(transform, MetaRegressionResults)
+
+
+def test_estimator_fit_transform(dataset):
+    """Test Estimator's fit_transform method."""
+    est = WeightedLeastSquares()
+
+    transform = est.fit_transform(dataset)
+    assert isinstance(transform, MetaRegressionResults)
 
 
 def test_exact_perm_test_2d_no_mods(small_dataset_2d):
     """Test the exact permutation test on 2D data."""
-    results = DerSimonianLaird().fit_dataset(small_dataset_2d).summary()
+    results = DerSimonianLaird().fit(small_dataset_2d).transform()
     pmr = results.permutation_test(1000)
     assert pmr.n_perm == 8
     assert pmr.exact
@@ -203,7 +211,7 @@ def test_approx_perm_test_1d_with_mods(results):
 def test_exact_perm_test_1d_no_mods():
     """Test the exact permutation test on 1D data."""
     dataset = Dataset([1, 1, 2, 1.3], [1.5, 1, 2, 4])
-    results = DerSimonianLaird().fit_dataset(dataset).summary()
+    results = DerSimonianLaird().fit_transform(dataset)
     pmr = results.permutation_test(867)
     assert pmr.n_perm == 16
     assert pmr.exact
@@ -214,7 +222,7 @@ def test_exact_perm_test_1d_no_mods():
 
 def test_approx_perm_test_with_n_based_estimator(dataset_n):
     """Test the approximate permutation test on an sample size-based Estimator."""
-    results = SampleSizeBasedLikelihoodEstimator().fit_dataset(dataset_n).summary()
+    results = SampleSizeBasedLikelihoodEstimator().fit_transform(dataset_n)
     pmr = results.permutation_test(100)
     assert pmr.n_perm == 100
     assert not pmr.exact
@@ -226,7 +234,7 @@ def test_approx_perm_test_with_n_based_estimator(dataset_n):
 def test_stouffers_perm_test_exact():
     """Test the exact permutation test on Stouffers Estimator."""
     dataset = Dataset([1, 1, 2, 1.3], [1.5, 1, 2, 4])
-    results = StoufferCombinationTest().fit_dataset(dataset).summary()
+    results = StoufferCombinationTest().fit(dataset).transform()
     pmr = results.permutation_test(2000)
     assert pmr.n_perm == 16
     assert pmr.exact
@@ -239,7 +247,7 @@ def test_stouffers_perm_test_approx():
     """Test the approximate permutation test on Stouffers Estimator."""
     y = [2.8, -0.2, -1, 4.5, 1.9, 2.38, 0.6, 1.88, -0.4, 1.5, 3.163, 0.7]
     dataset = Dataset(y)
-    results = StoufferCombinationTest().fit_dataset(dataset).summary()
+    results = StoufferCombinationTest().fit(dataset).transform()
     pmr = results.permutation_test(2000)
     assert not pmr.exact
     assert pmr.n_perm == 2000
