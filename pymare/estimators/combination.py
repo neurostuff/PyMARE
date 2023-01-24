@@ -36,7 +36,7 @@ class CombinationTest(BaseEstimator):
 
     def _fit(self, z, *args, **kwargs):
         """Fit the estimator to z-values."""
-        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        # This resets the Estimator's dataset_ attribute. fit() will overwrite if called.
         self.dataset_ = None
 
         if self.mode == "concordant":
@@ -57,9 +57,13 @@ class CombinationTest(BaseEstimator):
             name = self.__class__.__name__
             raise ValueError(
                 "This {} instance hasn't been fitted yet. Please "
-                "call _fit() of fit() before transform().".format(name)
+                "call _fit() or fit() before transform().".format(name)
             )
         return CombinationTestResults(self, self.dataset_, p=self.params_["p"])
+
+    def fit_transform(self, z, *args, **kwargs):
+        """Fit the estimator to z-values, then transform it."""
+        return self.fit(z, *args, **kwargs).transform()
 
 
 class StoufferCombinationTest(CombinationTest):

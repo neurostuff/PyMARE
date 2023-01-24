@@ -55,8 +55,8 @@ dset.to_df()
 # The :meth:`~pymare.estimators.estimators.BaseEstimator.transform` function
 # will return a :class:`~pymare.results.MetaRegressionResults` object,
 # which contains the results of the analysis.
-est = estimators.WeightedLeastSquares().fit(dset)
-results = est.transform()
+est = estimators.WeightedLeastSquares()
+results = est.fit_transform(dset)
 results.to_df()
 
 ###############################################################################

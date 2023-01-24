@@ -37,7 +37,7 @@ def test_combination_test(Cls, data, mode, expected):
 def test_combination_test_from_dataset(Cls, data, mode, expected):
     """Test CombinationTest Estimators with PyMARE Datasets."""
     dset = Dataset(y=data)
-    est = Cls(mode).fit(dset)
-    results = est.transform()
+    est = Cls(mode)
+    results = est.fit_transform(dset)
     z = ss.norm.isf(results.p)
     assert np.allclose(z, expected, atol=1e-5)
