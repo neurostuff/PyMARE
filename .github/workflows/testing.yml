@@ -7,9 +7,6 @@ on:
   pull_request:
     branches:
       - '*'
-  schedule:
-    # Run tests every Sunday at 12am
-    - cron: '0 0 * * 0'
 
 concurrency:
   group: environment-${{ github.ref }}
