@@ -20,6 +20,7 @@ del _version
 
 def _py367_deprecation_warning():
     """Deprecation warnings message.
+
     Notes
     -----
     Adapted from NiMARE.
@@ -34,6 +35,7 @@ def _py367_deprecation_warning():
 
 def _python_deprecation_warnings():
     """Raise deprecation warnings.
+
     Notes
     -----
     Adapted from NiMARE.
