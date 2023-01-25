@@ -40,6 +40,14 @@ jobs:
         matrix:
             os: ["ubuntu-latest", "macos-latest"]
             python-version: ["3.6", "3.7", "3.8", "3.9"]
+            include:
+              # ubuntu-20.04 is used only to test python 3.6
+              - os: "ubuntu-20.04"
+                python-version: "3.6"
+            exclude:
+              # ubuntu-latest does not support python 3.6
+              - os: "ubuntu-latest"
+                python-version: "3.6"
     name: ${{ matrix.os }} with Python ${{ matrix.python-version }}
     defaults:
       run:
@@ -73,7 +81,7 @@ jobs:
       - name: Set up Python environment
         uses: actions/setup-python@v2
         with:
-          python-version: "3.7"
+          python-version: "3.8"
 
       - name: "Install the package"
         shell: bash {0}
