@@ -146,13 +146,13 @@ results = {}
 #
 # Notice that these models don't use :class:`~pymare.core.Dataset` objects.
 stouff = estimators.StoufferCombinationTest()
-stouff.fit(z[:, None])
+stouff.fit_transform(z[:, None])
 print("Stouffers")
 print("p: {}".format(stouff.params_["p"]))
 print()
 
 fisher = estimators.FisherCombinationTest()
-fisher.fit(z[:, None])
+fisher.fit_transform(z[:, None])
 print("Fishers")
 print("p: {}".format(fisher.params_["p"]))
 
@@ -162,11 +162,10 @@ print("p: {}".format(fisher.params_["p"]))
 # This estimator does not attempt to estimate between-study variance.
 # Instead, it takes ``tau2`` (:math:`\tau^{2}`) as an argument.
 wls = estimators.WeightedLeastSquares()
-wls.fit_dataset(dset)
-wls_summary = wls.summary()
-results["Weighted Least Squares"] = wls_summary.to_df()
+wls_results = wls.fit_transform(dset)
+results["Weighted Least Squares"] = wls_results.to_df()
 print("Weighted Least Squares")
-print(wls_summary.to_df().T)
+print(wls_results.to_df().T)
 
 ###############################################################################
 # Methods that estimate between-study variance
@@ -180,54 +179,48 @@ print(wls_summary.to_df().T)
 # can use either maximum-likelihood (ML) or restricted maximum-likelihood (REML)
 # to iteratively estimate it.
 dsl = estimators.DerSimonianLaird()
-dsl.fit_dataset(dset)
-dsl_summary = dsl.summary()
-results["DerSimonian-Laird"] = dsl_summary.to_df()
+dsl_results = dsl.fit_transform(dset)
+results["DerSimonian-Laird"] = dsl_results.to_df()
 print("DerSimonian-Laird")
-print(dsl_summary.to_df().T)
+print(dsl_results.to_df().T)
 print()
 
 hedge = estimators.Hedges()
-hedge.fit_dataset(dset)
-hedge_summary = hedge.summary()
-results["Hedges"] = hedge_summary.to_df()
+hedge_results = hedge.fit_transform(dset)
+results["Hedges"] = hedge_results.to_df()
 print("Hedges")
-print(hedge_summary.to_df().T)
+print(hedge_results.to_df().T)
 print()
 
 vb_ml = estimators.VarianceBasedLikelihoodEstimator(method="ML")
-vb_ml.fit_dataset(dset)
-vb_ml_summary = vb_ml.summary()
-results["Variance-Based with ML"] = vb_ml_summary.to_df()
+vb_ml_results = vb_ml.fit_transform(dset)
+results["Variance-Based with ML"] = vb_ml_results.to_df()
 print("Variance-Based with ML")
-print(vb_ml_summary.to_df().T)
+print(vb_ml_results.to_df().T)
 print()
 
 vb_reml = estimators.VarianceBasedLikelihoodEstimator(method="REML")
-vb_reml.fit_dataset(dset)
-vb_reml_summary = vb_reml.summary()
-results["Variance-Based with REML"] = vb_reml_summary.to_df()
+vb_reml_results = vb_reml.fit_transform(dset)
+results["Variance-Based with REML"] = vb_reml_results.to_df()
 print("Variance-Based with REML")
-print(vb_reml_summary.to_df().T)
+print(vb_reml_results.to_df().T)
 print()
 
 # The ``SampleSizeBasedLikelihoodEstimator`` estimates between-study variance
 # using ``y`` and ``n``, but assumes within-study variance is homogenous
 # across studies.
 sb_ml = estimators.SampleSizeBasedLikelihoodEstimator(method="ML")
-sb_ml.fit_dataset(dset)
-sb_ml_summary = sb_ml.summary()
-results["Sample Size-Based with ML"] = sb_ml_summary.to_df()
+sb_ml_results = sb_ml.fit_transform(dset)
+results["Sample Size-Based with ML"] = sb_ml_results.to_df()
 print("Sample Size-Based with ML")
-print(sb_ml_summary.to_df().T)
+print(sb_ml_results.to_df().T)
 print()
 
 sb_reml = estimators.SampleSizeBasedLikelihoodEstimator(method="REML")
-sb_reml.fit_dataset(dset)
-sb_reml_summary = sb_reml.summary()
-results["Sample Size-Based with REML"] = sb_reml_summary.to_df()
+sb_reml_results = sb_reml.fit_transform(dset)
+results["Sample Size-Based with REML"] = sb_reml_results.to_df()
 print("Sample Size-Based with REML")
-print(sb_reml_summary.to_df().T)
+print(sb_reml_results.to_df().T)
 
 ###############################################################################
 # What about the Stan estimator?
@@ -240,10 +233,10 @@ print(sb_reml_summary.to_df().T)
 # `````````````````````````````````````````````````````````````````````````````
 fig, ax = plt.subplots(figsize=(6, 6))
 
-for i, (estimator_name, summary_df) in enumerate(results.items()):
-    ax.scatter((summary_df.loc[0, "estimate"],), (i + 1,), label=estimator_name)
+for i, (estimator_name, results_df) in enumerate(results.items()):
+    ax.scatter((results_df.loc[0, "estimate"],), (i + 1,), label=estimator_name)
     ax.plot(
-        (summary_df.loc[0, "ci_0.025"], summary_df.loc[0, "ci_0.975"]),
+        (results_df.loc[0, "ci_0.025"], results_df.loc[0, "ci_0.975"]),
         (i + 1, i + 1),
         linewidth=3,
     )

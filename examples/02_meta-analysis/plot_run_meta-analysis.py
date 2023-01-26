@@ -52,11 +52,11 @@ dset.to_df()
 #   so it can be useful for large-scale meta-analyses,
 #   such as neuroimaging image-based meta-analyses.
 #
-# The :meth:`~pymare.estimators.estimators.BaseEstimator.summary` function
+# The :meth:`~pymare.estimators.estimators.BaseEstimator.transform` function
 # will return a :class:`~pymare.results.MetaRegressionResults` object,
 # which contains the results of the analysis.
-est = estimators.WeightedLeastSquares().fit_dataset(dset)
-results = est.summary()
+est = estimators.WeightedLeastSquares()
+results = est.fit_transform(dset)
 results.to_df()
 
 ###############################################################################

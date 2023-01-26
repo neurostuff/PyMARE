@@ -34,9 +34,9 @@ class CombinationTest(BaseEstimator):
     def _z_to_p(self, z):
         return ss.norm.sf(z)
 
-    def fit(self, z, *args, **kwargs):
+    def _fit(self, z, *args, **kwargs):
         """Fit the estimator to z-values."""
-        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        # This resets the Estimator's dataset_ attribute. fit() will overwrite if called.
         self.dataset_ = None
 
         if self.mode == "concordant":
@@ -51,15 +51,19 @@ class CombinationTest(BaseEstimator):
         self.params_ = {"p": p}
         return self
 
-    def summary(self):
-        """Generate a summary of the estimator results."""
+    def transform(self):
+        """Generate a transform of the estimator results."""
         if not hasattr(self, "params_"):
             name = self.__class__.__name__
             raise ValueError(
                 "This {} instance hasn't been fitted yet. Please "
-                "call fit() before summary().".format(name)
+                "call _fit() or fit() before transform().".format(name)
             )
         return CombinationTestResults(self, self.dataset_, p=self.params_["p"])
+
+    def fit_transform(self, z, *args, **kwargs):
+        """Fit the estimator to z-values, then transform it."""
+        return self.fit(z, *args, **kwargs).transform()
 
 
 class StoufferCombinationTest(CombinationTest):
@@ -112,9 +116,9 @@ class StoufferCombinationTest(CombinationTest):
     # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
     _dataset_attr_map = {"z": "y", "w": "v"}
 
-    def fit(self, z, w=None):
+    def _fit(self, z, w=None):
         """Fit the estimator to z-values, optionally with weights."""
-        return super().fit(z, w=w)
+        return super()._fit(z, w=w)
 
     def p_value(self, z, w=None):
         """Calculate p-values."""
