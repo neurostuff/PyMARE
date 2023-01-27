@@ -670,7 +670,6 @@ class StanMetaRegression(BaseEstimator):
         if self.model is None:
             self.compile()
 
-        # self.result_ = self.model.sampling(data=data, **self.sampling_kwargs)
         self.result_ = self.model.sample(**self.sampling_kwargs)
         return self
 
