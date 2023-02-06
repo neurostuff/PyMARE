@@ -59,7 +59,6 @@ class Dataset:
     def __init__(
         self, y=None, v=None, X=None, n=None, data=None, X_names=None, add_intercept=True
     ):
-
         if y is None and data is None:
             raise ValueError(
                 "If no y values are provided, a pandas DataFrame "
