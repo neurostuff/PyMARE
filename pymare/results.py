@@ -331,7 +331,6 @@ class MetaRegressionResults:
 
         # Loop over parallel datasets
         for i in range(n_datasets):
-
             y = self.dataset.y[:, i]
             y_perm = np.repeat(y[:, None], n_perm, axis=1)
 
@@ -471,7 +470,6 @@ class CombinationTestResults:
 
         # Loop over parallel datasets
         for i in range(n_datasets):
-
             y = self.dataset.y[:, i]
             y_perm = np.repeat(y[:, None], n_perm, axis=1)
 
