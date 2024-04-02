@@ -1,4 +1,5 @@
 """Statistical expressions."""
+
 import json
 from collections import defaultdict
 from itertools import chain

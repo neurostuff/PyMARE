@@ -1,4 +1,5 @@
 """Miscellaneous utility functions."""
+
 import os.path as op
 
 import numpy as np
