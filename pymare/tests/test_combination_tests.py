@@ -1,4 +1,5 @@
 """Tests for pymare.estimators.combination."""
+
 import numpy as np
 import pytest
 import scipy.stats as ss
@@ -31,6 +32,43 @@ def test_combination_test(Cls, data, mode, expected):
     results = Cls(mode).fit(data).params_
     z = ss.norm.isf(results["p"])
     assert np.allclose(z, expected, atol=1e-5)
+
+
+def test_stouffer_adjusted():
+    """Test StoufferCombinationTest with weights and groups."""
+    # Test with weights and groups
+    data = np.array(
+        [
+            [2.1, 0.7, -0.2, 4.1, 3.8],
+            [1.1, 0.2, 0.4, 1.3, 1.5],
+            [-0.6, -1.6, -2.3, -0.8, -4.0],
+            [2.5, 1.7, 2.1, 2.3, 2.5],
+            [3.1, 2.7, 3.1, 3.3, 3.5],
+            [3.6, 3.2, 3.6, 3.8, 4.0],
+        ]
+    )
+    weights = np.tile(np.array([4, 3, 4, 10, 15, 10]), (data.shape[1], 1)).T
+    groups = np.tile(np.array([0, 0, 1, 2, 2, 2]), (data.shape[1], 1)).T
+
+    results = StoufferCombinationTest("directed").fit(z=data, w=weights, g=groups).params_
+    z = ss.norm.isf(results["p"])
+
+    z_expected = np.array([5.00088912, 3.70356943, 4.05465924, 5.4633001, 5.18927878])
+    assert np.allclose(z, z_expected, atol=1e-5)
+
+    # Test with weights and no groups. Limiting cases.
+    # Limiting case 1: all correlations are one.
+    n_maps_l1 = 5
+    common_sample = np.array([2.1, 0.7, -0.2])
+    data_l1 = np.tile(common_sample, (n_maps_l1, 1))
+    groups_l1 = np.tile(np.array([0, 0, 0, 0, 0]), (data_l1.shape[1], 1)).T
+
+    results_l1 = StoufferCombinationTest("directed").fit(z=data_l1, g=groups_l1).params_
+    z_l1 = ss.norm.isf(results_l1["p"])
+
+    sigma_l1 = n_maps_l1 * (n_maps_l1 - 1)  # Expected inflation term
+    z_expected_l1 = n_maps_l1 * common_sample / np.sqrt(n_maps_l1 + sigma_l1)
+    assert np.allclose(z_l1, z_expected_l1, atol=1e-5)
 
 
 @pytest.mark.parametrize("Cls,data,mode,expected", _params)

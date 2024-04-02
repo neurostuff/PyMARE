@@ -1,4 +1,5 @@
 """Estimators for combination (p/z) tests."""
+
 import warnings
 from abc import abstractmethod
 
@@ -110,17 +111,78 @@ class StoufferCombinationTest(CombinationTest):
     """
 
     # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
-    _dataset_attr_map = {"z": "y", "w": "v"}
+    _dataset_attr_map = {"z": "y", "w": "n", "g": "v"}
 
-    def fit(self, z, w=None):
+    def _inflation_term(self, z, w, g):
+        """Calculate the variance inflation term for each group.
+
+        This term is used to adjust the variance of the combined z-scorem when
+        multiple sample from the same group are present.
+
+        Parameters
+        ----------
+        z : array-like
+            Array of z-values.
+        w : array-like
+            Array of weights.
+        g : array-like
+            Array of group labels.
+
+        Returns
+        -------
+        sigma : float
+            The variance inflation term.
+        """
+        # Centering
+        all_samples_same = np.all(np.equal(z, z[0]), axis=0).all()
+        if not all_samples_same:
+            # Only center if the samples are not all the same, to prevent division by zero
+            # when calculating the correlation matrix.
+            mean_sample = z.mean(0)
+            z = z - mean_sample  # This centering is problematic for N=2
+
+        # Use the value for one voxel, as all voxels have the same group and weight
+        groups = g[:, 0]
+        weights = w[:, 0]
+
+        # Loop over groups
+        unique_groups = np.unique(groups)
+
+        sigma = 0
+        for group in unique_groups:
+            group_indices = np.where(groups == group)[0]
+            group_z = z[group_indices]
+
+            # For groups with only one sample the contribution to the summand is 0
+            n_samples = len(group_indices)
+            if n_samples < 2:
+                continue
+
+            # Calculate the within group correlation matrix and select the non-diagonal elements
+            corr = np.corrcoef(group_z, rowvar=True)
+            upper_indices = np.triu_indices(n_samples, k=1)
+            non_diag_corr = corr[upper_indices]
+            w_i, w_j = weights[upper_indices[0]], weights[upper_indices[1]]
+
+            sigma += (2 * w_i * w_j * non_diag_corr).sum()
+
+        return sigma
+
+    def fit(self, z, w=None, g=None):
         """Fit the estimator to z-values, optionally with weights."""
-        return super().fit(z, w=w)
+        return super().fit(z, w=w, g=g)
 
-    def p_value(self, z, w=None):
+    def p_value(self, z, w=None, g=None):
         """Calculate p-values."""
         if w is None:
             w = np.ones_like(z)
-        cz = (z * w).sum(0) / np.sqrt((w**2).sum(0))
+
+        # Calculate the variance inflation term
+        sigma = self._inflation_term(z, w, g) if g is not None else 0
+
+        variance = (w**2).sum(0) + sigma
+
+        cz = (z * w).sum(0) / np.sqrt(variance)
         return ss.norm.sf(cz)
 
 
