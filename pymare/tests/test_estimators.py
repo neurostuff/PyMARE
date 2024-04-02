@@ -1,4 +1,5 @@
 """Tests for pymare.estimators.estimators."""
+
 import numpy as np
 import pytest
 
