@@ -116,8 +116,8 @@ class StoufferCombinationTest(CombinationTest):
     def _inflation_term(self, z, w, g):
         """Calculate the variance inflation term for each group.
 
-        This term is used to adjust the variance of the combined z-scorem when
-        multiple sample from the same group are present.
+        This term is used to adjust the variance of the combined z-score when
+        multiple sample come from the same group are present.
 
         Parameters
         ----------
