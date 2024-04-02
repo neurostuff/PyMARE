@@ -134,12 +134,11 @@ class StoufferCombinationTest(CombinationTest):
             The variance inflation term.
         """
         # Centering
+        # Only center if the samples are not all the same, to prevent division by zero
+        # when calculating the correlation matrix.
+        # This centering is problematic for N=2
         all_samples_same = np.all(np.equal(z, z[0]), axis=0).all()
-        if not all_samples_same:
-            # Only center if the samples are not all the same, to prevent division by zero
-            # when calculating the correlation matrix.
-            mean_sample = z.mean(0)
-            z = z - mean_sample  # This centering is problematic for N=2
+        z = z if all_samples_same else z - z.mean(0)
 
         # Use the value for one voxel, as all voxels have the same group and weight
         groups = g[:, 0]
