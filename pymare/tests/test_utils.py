@@ -1,4 +1,5 @@
 """Tests for pymare.utils."""
+
 import os.path as op
 
 import numpy as np

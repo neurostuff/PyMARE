@@ -1,4 +1,5 @@
 """Tests for pymare.effectsize.base."""
+
 import numpy as np
 import pandas as pd
 import pytest
