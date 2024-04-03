@@ -1,4 +1,5 @@
 """Tests for estimators that use stan."""
+
 import sys
 
 import pytest
