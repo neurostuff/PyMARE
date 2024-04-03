@@ -583,7 +583,7 @@ class StanMetaRegression(BaseEstimator):
             int<lower=1> N;
             int<lower=1> K;
             vector[N] y;
-            int<lower=1,upper=K> id[N];
+            array[N] int<lower=1,upper=K> id;
             int<lower=1> C;
             matrix[K, C] X;
             vector[N] sigma;
