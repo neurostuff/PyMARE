@@ -1,4 +1,5 @@
 """Tests for pymare.results."""
+
 import numpy as np
 import pytest
 
@@ -31,6 +32,71 @@ def results_2d(fitted_estimator, dataset_2d):
     """Create a 2D results object as a fixture."""
     est = VarianceBasedLikelihoodEstimator()
     return est.fit_dataset(dataset_2d).summary()
+
+
+def test_meta_regression_results_from_arrays(dataset):
+    """Ensure that a MetaRegressionResults can be created from arrays.
+
+    This is a regression test for a bug that caused the MetaRegressionResults
+    to fail when Estimators were fitted to arrays instead of Datasets.
+    See https://github.com/neurostuff/PyMARE/issues/52 for more info.
+    """
+    est = DerSimonianLaird()
+    fitted_estimator = est.fit(y=dataset.y, X=dataset.X, v=dataset.v)
+    results = fitted_estimator.summary()
+    assert isinstance(results, MetaRegressionResults)
+    assert results.fe_params.shape == (2, 1)
+    assert results.fe_cov.shape == (2, 2, 1)
+    assert results.tau2.shape == (1,)
+
+    # fit overwrites dataset_ attribute with None
+    assert fitted_estimator.dataset_ is None
+    # fit_dataset overwrites it with the Dataset
+    fitted_estimator.fit_dataset(dataset)
+    assert isinstance(fitted_estimator.dataset_, Dataset)
+    # fit sets it back to None
+    fitted_estimator.fit(y=dataset.y, X=dataset.X, v=dataset.v)
+    assert fitted_estimator.dataset_ is None
+
+    # Some methods are not available if fit was used
+    results = fitted_estimator.summary()
+    with pytest.raises(ValueError):
+        results.get_re_stats()
+
+    with pytest.raises(ValueError):
+        results.get_heterogeneity_stats()
+
+    with pytest.raises(ValueError):
+        results.to_df()
+
+    with pytest.raises(ValueError):
+        results.permutation_test(1000)
+
+
+def test_combination_test_results_from_arrays(dataset):
+    """Ensure that a CombinationTestResults can be created from arrays.
+
+    This is a regression test for a bug that caused the MetaRegressionResults
+    to fail when Estimators were fitted to arrays instead of Datasets.
+    See https://github.com/neurostuff/PyMARE/issues/52 for more info.
+    """
+    fitted_estimator = StoufferCombinationTest().fit(z=dataset.y)
+    results = fitted_estimator.summary()
+    assert isinstance(results, CombinationTestResults)
+    assert results.p.shape == (1,)
+
+    # fit overwrites dataset_ attribute with None
+    assert fitted_estimator.dataset_ is None
+    # fit_dataset overwrites it with the Dataset
+    fitted_estimator.fit_dataset(dataset)
+    assert isinstance(fitted_estimator.dataset_, Dataset)
+    # fit sets it back to None
+    fitted_estimator.fit(z=dataset.y)
+    assert fitted_estimator.dataset_ is None
+
+    # Some methods are not available if fit was used
+    with pytest.raises(ValueError):
+        fitted_estimator.summary().permutation_test(1000)
 
 
 def test_meta_regression_results_init_1d(fitted_estimator):

@@ -91,7 +91,6 @@ API
 
    :template: function.rst
    effectsize.solve_system
-   effectsize.Expression
    effectsize.select_expressions
    effectsize.compute_measure
 
@@ -114,3 +113,35 @@ API
    stats.ensure_2d
    stats.q_profile
    stats.q_gen
+   stats.bonferroni
+   stats.fdr
+
+:mod:`pymare.datasets`: Meta-analytic datasets
+----------------------------------------------
+
+.. automodule:: pymare.datasets
+   :no-members:
+   :no-inherited-members:
+
+.. currentmodule:: pymare
+
+.. autosummary::
+   :toctree: generated/
+   :template: function.rst
+
+   datasets.michael2013
+
+:mod:`pymare.utils`: Miscellaneous utility functions
+----------------------------------------------------
+
+.. automodule:: pymare.utils
+   :no-members:
+   :no-inherited-members:
+
+.. currentmodule:: pymare
+
+.. autosummary::
+   :toctree: generated/
+   :template: function.rst
+
+   utils.get_resource_path

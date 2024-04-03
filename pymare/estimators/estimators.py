@@ -35,9 +35,11 @@ def _loopable(wrapped, instance, args, kwargs):
         iter_kwargs["y"] = kwargs["y"][:, i, None]
         if "v" in kwargs:
             iter_kwargs["v"] = kwargs["v"][:, i, None]
+
         if "n" in kwargs:
             n = kwargs["n"][:, i, None] if kwargs["n"].shape[1] > 1 else kwargs["n"]
             iter_kwargs["n"] = n
+
         wrapped(**iter_kwargs)
         param_dicts.append(instance.params_.copy())
 
@@ -114,12 +116,13 @@ class BaseEstimator(metaclass=ABCMeta):
 
         Notes
         -----
-        This is equivalent to directly accessing `dataset.v` when variances are present,
+        This is equivalent to directly accessing ``dataset.v`` when variances are present,
         but affords a way of estimating v from sample size (n) for any estimator that implicitly
         estimates a sigma^2 parameter.
         """
         if dataset.v is not None:
             return dataset.v
+
         # Estimate sampling variances from sigma^2 and n if available.
         if dataset.n is None:
             raise ValueError(
@@ -127,22 +130,30 @@ class BaseEstimator(metaclass=ABCMeta):
                 " and no estimate of v is possible without sample"
                 " sizes (n)."
             )
+
         if "sigma2" not in self.params_:
             raise ValueError(
                 "Dataset does not contain sampling variances (v),"
                 " and no estimate of v is possible because no "
                 "sigma^2 parameter was found."
             )
+
         return self.params_["sigma2"] / dataset.n
 
     def summary(self):
-        """Generate a MetaRegressionResults object for the fitted estimator."""
+        """Generate a MetaRegressionResults object for the fitted estimator.
+
+        Returns
+        -------
+        :obj:`~pymare.results.MetaRegressionResults`
+        """
         if not hasattr(self, "params_"):
             name = self.__class__.__name__
             raise ValueError(
                 "This {} instance hasn't been fitted yet. Please "
                 "call fit() before summary().".format(name)
             )
+
         p = self.params_
         return MetaRegressionResults(self, self.dataset_, p["fe_params"], p["inv_cov"], p["tau2"])
 
@@ -150,40 +161,57 @@ class BaseEstimator(metaclass=ABCMeta):
 class WeightedLeastSquares(BaseEstimator):
     """Weighted least-squares meta-regression.
 
-    Provides the weighted least-squares estimate of the fixed effects given
-    known/assumed between-study variance tau^2. When tau^2 = 0 (default), the
-    model is the standard inverse-weighted fixed-effects meta-regression.
+    Provides the weighted least-squares estimate of the fixed effects given known/assumed
+    between-study variance tau^2, as described in :footcite:t:`brockwell2001comparison`.
+    When tau^2 = 0 (default), the model is the standard inverse-weighted fixed-effects
+    meta-regression.
 
     Parameters
     ----------
     tau2 : :obj:`float` or :obj:`numpy.ndarray` of shape (d), optional
         Assumed/known value of tau^2. Must be >= 0.
         If an array, must have ``d`` elements, where ``d`` refers to the number of datasets.
-        Defaults to 0.
+        Default = 0.
 
     Notes
     -----
-    This estimator accepts 2-D inputs for y and v--i.e., it can produce
-    estimates simultaneously for multiple independent sets of y/v values
-    (use the 2nd dimension for the parallel iterates). The X matrix must be
-    identical for all iterates. If no v argument is passed to fit(), unit
-    weights will be used, resulting in the ordinary least-squares (OLS)
-    solution.
+    This estimator accepts 2-D inputs for ``y`` and ``v``--i.e., it can produce estimates
+    simultaneously for multiple independent sets of ``y``/``v`` values
+    (use the 2nd dimension for the parallel iterates).
+    The ``X`` matrix must be identical for all iterates.
+    If no ``v`` argument is passed to :meth:`fit`, unit weights will be used, resulting in the
+    ordinary least-squares (OLS) solution.
 
     References
     ----------
-    Brockwell, S. E., & Gordon, I. R. (2001). A comparison of statistical
-    methods for meta-analysis. Statistics in Medicine, 20(6), 825-840.
-    https://doi.org/10.1002/sim.650
+    .. footbibliography::
     """
 
     def __init__(self, tau2=0.0):
         self.tau2 = tau2
 
     def fit(self, y, X, v=None):
-        """Fit the estimator to data."""
+        """Fit the estimator to data.
+
+        Parameters
+        ----------
+        y : :obj:`numpy.ndarray` of shape (n, d)
+            The dependent variable(s) (y).
+        X : :obj:`numpy.ndarray` of shape (n, p)
+            The independent variable(s) (X).
+        v : :obj:`numpy.ndarray` of shape (n, d), optional
+            Sampling variances. If not provided, unit weights will be used.
+
+        Returns
+        -------
+        :obj:`~pymare.estimators.WeightedLeastSquares`
+        """
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         if v is None:
             v = np.ones_like(y)
+
         beta, inv_cov = weighted_least_squares(y, v, X, self.tau2, return_cov=True)
         self.params_ = {"fe_params": beta, "tau2": self.tau2, "inv_cov": inv_cov}
         return self
@@ -192,27 +220,40 @@ class WeightedLeastSquares(BaseEstimator):
 class DerSimonianLaird(BaseEstimator):
     """DerSimonian-Laird meta-regression estimator.
 
-    Estimates the between-subject variance tau^2 using the DerSimonian-Laird
-    (1986) method-of-moments approach.
+    Estimates the between-subject variance tau^2 using the :footcite:t:`dersimonian1986meta`
+    method-of-moments approach.
 
     Notes
     -----
-    This estimator accepts 2-D inputs for y and v--i.e., it can produce
-    estimates simultaneously for multiple independent sets of y/v values
-    (use the 2nd dimension for the parallel iterates). The X matrix must be
-    identical for all iterates.
+    This estimator accepts 2-D inputs for ``y`` and ``v``--i.e., it can produce estimates
+    simultaneously for multiple independent sets of ``y``/``v`` values
+    (use the 2nd dimension for the parallel iterates).
+    The ``X`` matrix must be identical for all iterates.
 
     References
     ----------
-    DerSimonian, R., & Laird, N. (1986). Meta-analysis in clinical trials.
-    Controlled clinical trials, 7(3), 177-188.
-    Kosmidis, I., Guolo, A., & Varin, C. (2017). Improving the accuracy of
-    likelihood-based inference in meta-analysis and meta-regression.
-    Biometrika, 104(2), 489-496. https://doi.org/10.1093/biomet/asx001
+    .. footbibliography::
     """
 
     def fit(self, y, v, X):
-        """Fit the estimator to data."""
+        """Fit the estimator to data.
+
+        Parameters
+        ----------
+        y : :obj:`numpy.ndarray` of shape (n, d)
+            The dependent variable(s) (y).
+        v : :obj:`numpy.ndarray` of shape (n, d)
+            Sampling variances.
+        X : :obj:`numpy.ndarray` of shape (n, p)
+            The independent variable(s) (X).
+
+        Returns
+        -------
+        :obj:`~pymare.estimators.DerSimonianLaird`
+        """
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         y = ensure_2d(y)
         v = ensure_2d(v)
 
@@ -221,7 +262,7 @@ class DerSimonianLaird(BaseEstimator):
         # Estimate initial betas with WLS, assuming tau^2=0
         beta_wls, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
 
-        # Cochrane's Q
+        # Cochran's Q
         w = 1.0 / v
         w_sum = w.sum(0)
         Q = (w * (y - X.dot(beta_wls)) ** 2).sum(0)
@@ -243,22 +284,40 @@ class DerSimonianLaird(BaseEstimator):
 class Hedges(BaseEstimator):
     """Hedges meta-regression estimator.
 
-    Estimates the between-subject variance tau^2 using the Hedges & Olkin (1985) approach.
+    Estimates the between-subject variance tau^2 using the :footcite:t:`hedges2014statistical`
+    approach.
 
     Notes
     -----
-    This estimator accepts 2-D inputs for y and v--i.e., it can produce
-    estimates simultaneously for multiple independent sets of y/v values
-    (use the 2nd dimension for the parallel iterates). The X matrix must be
-    identical for all iterates.
+    This estimator accepts 2-D inputs for ``y`` and ``v``--i.e., it can produce estimates
+    simultaneously for multiple independent sets of ``y``/``v`` values
+    (use the 2nd dimension for the parallel iterates).
+    The ``X`` matrix must be identical for all iterates.
 
     References
     ----------
-    Hedges LV, Olkin I. 1985. Statistical Methods for Meta-Analysis.
+    .. footbibliography::
     """
 
     def fit(self, y, v, X):
-        """Fit the estimator to data."""
+        """Fit the estimator to data.
+
+        Parameters
+        ----------
+        y : :obj:`numpy.ndarray` of shape (n, d)
+            The dependent variable(s) (y).
+        v : :obj:`numpy.ndarray` of shape (n, d)
+            Sampling variances.
+        X : :obj:`numpy.ndarray` of shape (n, p)
+            The independent variable(s) (X).
+
+        Returns
+        -------
+        :obj:`~pymare.estimators.Hedges`
+        """
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         k, p = X.shape[:2]
         _unit_v = np.ones_like(y)
         beta, inv_cov = weighted_least_squares(y, _unit_v, X, return_cov=True)
@@ -274,43 +333,59 @@ class Hedges(BaseEstimator):
 class VarianceBasedLikelihoodEstimator(BaseEstimator):
     """Likelihood-based estimator for estimates with known variances.
 
-    Iteratively estimates the between-subject variance tau^2 and fixed effect
-    coefficients using the specified likelihood-based estimator (ML or REML).
+    Initially estimates the between-subject variance tau^2 and fixed effect coefficients
+    using :footcite:t:`dersimonian1986meta` method-of-moments approach, and then
+    iteratively estimates them using the specified likelihood-based estimator (ML or REML)
+    :footcite:p:`kosmidis2017improving`.
 
     Parameters
     ----------
     method : {"ML", "REML"}, optional
-        The estimation method to use. Either 'ML' (for
-        maximum-likelihood) or 'REML' (restricted maximum-likelihood).
-        Defaults to 'ML'.
+        The estimation method to use.
+        Either 'ML' (for maximum-likelihood) or 'REML' (restricted maximum-likelihood).
+        Default = 'ML'.
     **kwargs
         Keyword arguments to pass to the SciPy minimizer.
 
     Notes
     -----
-    The ML and REML solutions are obtained via SciPy's scalar function
-    minimizer (:func:`scipy.optimize.minimize`). Parameters to ``minimize()`` can be
-    passed in as keyword arguments.
+    The ML and REML solutions are obtained via SciPy's scalar function minimizer
+    (:func:`scipy.optimize.minimize`).
+    Parameters to ``minimize()`` can be passed in as keyword arguments.
 
     References
     ----------
-    DerSimonian, R., & Laird, N. (1986). Meta-analysis in clinical trials.
-    Controlled clinical trials, 7(3), 177-188.
-    Kosmidis, I., Guolo, A., & Varin, C. (2017). Improving the accuracy of
-    likelihood-based inference in meta-analysis and meta-regression.
-    Biometrika, 104(2), 489-496. https://doi.org/10.1093/biomet/asx001
+    .. footbibliography::
     """
 
     def __init__(self, method="ml", **kwargs):
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
             raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
+
         self._nll_func = nll_func
         self.kwargs = kwargs
 
     @_loopable
     def fit(self, y, v, X):
-        """Fit the estimator to data."""
+        """Fit the estimator to data.
+
+        Parameters
+        ----------
+        y : :obj:`numpy.ndarray` of shape (n, d)
+            The dependent variable(s) (y).
+        v : :obj:`numpy.ndarray` of shape (n, d)
+            Sampling variances.
+        X : :obj:`numpy.ndarray` of shape (n, p)
+            The independent variable(s) (X).
+
+        Returns
+        -------
+        :obj:`~pymare.estimators.VarianceBasedLikelihoodEstimator`
+        """
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         # use D-L estimate for initial values
         est_DL = DerSimonianLaird().fit(y, v, X).params_
         beta = est_DL["fe_params"]
@@ -351,52 +426,70 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     """Likelihood-based estimator for data with known sample sizes but unknown sampling variances.
 
-    Iteratively estimates the between-subject variance tau^2 and fixed effect
-    betas using the specified likelihood-based estimator (ML or REML).
+    Iteratively estimates the between-subject variance tau^2 and fixed effect betas using the
+    specified likelihood-based estimator (ML or REML) :footcite:p:`sangnawakij2019meta`.
 
     Parameters
     ----------
     method : {"ML", "REML"}, optional
-        The estimation method to use. Either 'ML' (for
-        maximum-likelihood) or 'REML' (restricted maximum-likelihood).
-        Defaults to 'ML'.
+        The estimation method to use.
+        Either 'ML' (for maximum-likelihood) or 'REML' (restricted maximum-likelihood).
+        Default = 'ML'.
     **kwargs
         Keyword arguments to pass to the SciPy minimizer.
 
     Notes
     -----
-    Homogeneity of sigma^2 across studies is assumed. The ML and REML
-    solutions are obtained via SciPy's scalar function minimizer
-    (scipy.optimize.minimize). Parameters to minimize() can be passed in as
-    keyword arguments.
+    Homogeneity of sigma^2 across studies is assumed.
+
+    The ML and REML solutions are obtained via SciPy's scalar function minimizer
+    (:func:`scipy.optimize.minimize`).
+    Parameters to ``minimize()`` can be passed in as keyword arguments.
 
     References
     ----------
-    Sangnawakij, P., Böhning, D., Niwitpong, S. A., Adams, S., Stanton, M.,
-    & Holling, H. (2019). Meta-analysis without study-specific variance
-    information: Heterogeneity case. Statistical Methods in Medical Research,
-    28(1), 196-210. https://doi.org/10.1177/0962280217718867
+    .. footbibliography::
     """
 
     def __init__(self, method="ml", **kwargs):
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
             raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
+
         self._nll_func = nll_func
         self.kwargs = kwargs
 
     @_loopable
     def fit(self, y, n, X):
-        """Fit the estimator to data."""
+        """Fit the estimator to data.
+
+        Parameters
+        ----------
+        y : :obj:`numpy.ndarray` of shape (n, d)
+            The dependent variable(s) (y).
+        n : :obj:`numpy.ndarray` of shape (n, d)
+            Sample sizes.
+        X : :obj:`numpy.ndarray` of shape (n, p)
+            The independent variable(s) (X).
+
+        Returns
+        -------
+        :obj:`~pymare.estimators.SampleSizeBasedLikelihoodEstimator`
+        """
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         if n.std() < np.sqrt(np.finfo(float).eps):
             raise ValueError(
                 "Sample size-based likelihood estimator cannot "
                 "work with all-equal sample sizes."
             )
+
         if n.std() < n.mean() / 10:
             raise Warning(
                 "Sample sizes are too close, sample size-based likelihood estimator may fail."
             )
+
         # set tau^2 to 0 and compute starting values
         tau2 = 0.0
         k, p = X.shape
@@ -542,6 +635,9 @@ class StanMetaRegression(BaseEstimator):
         `groups` argument can be used to specify the nesting structure
         (i.e., which rows in `y`, `v`, and `X` belong to each study).
         """
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         if y.ndim > 1 and y.shape[1] > 1:
             raise ValueError(
                 "The StanMetaRegression estimator currently does "

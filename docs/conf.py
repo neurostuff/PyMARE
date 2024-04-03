@@ -53,6 +53,7 @@ extensions = [
     "sphinx_copybutton",  # for copying code snippets
     "sphinx_gallery.gen_gallery",  # example gallery
     "sphinxarg.ext",  # argparse
+    "sphinxcontrib.bibtex",  # for foot-citations
     "recommonmark",  # markdown parser
 ]
 
@@ -100,7 +101,7 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "utils/*"]
 default_role = "autolink"
 
 # The name of the Pygments (syntax highlighting) style to use.
-pygments_style = "sphinx"
+pygments_style = "default"
 
 # -----------------------------------------------------------------------------
 # Napoleon settings
@@ -110,13 +111,16 @@ napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = True
 napoleon_include_private_with_doc = False
 napoleon_include_special_with_doc = False
-napoleon_use_admonition_for_examples = False
-napoleon_use_admonition_for_notes = False
-napoleon_use_admonition_for_references = False
+napoleon_use_admonition_for_examples = True
+napoleon_use_admonition_for_notes = True
+napoleon_use_admonition_for_references = True
 napoleon_use_ivar = True
-napoleon_use_param = False
+napoleon_use_param = True
 napoleon_use_keyword = True
-napoleon_use_rtype = False
+napoleon_use_rtype = True
+napoleon_preprocess_types = False
+napoleon_type_aliases = None
+napoleon_attr_annotations = True
 
 # -----------------------------------------------------------------------------
 # HTML output
@@ -137,8 +141,8 @@ html_sidebars = {"**": ["globaltoc.html", "relations.html", "searchbox.html", "i
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 
-html_favicon = "_static/nimare_favicon.png"
-html_logo = "_static/nimare_banner.png"
+# html_favicon = "_static/nimare_favicon.png"
+# html_logo = "_static/nimare_banner.png"
 
 # -----------------------------------------------------------------------------
 # HTMLHelp output
@@ -167,6 +171,7 @@ intersphinx_mapping = {
     "sklearn": ("https://scikit-learn.org/stable", (None, "./_intersphinx/sklearn-objects.inv")),
     "matplotlib": ("https://matplotlib.org/", (None, "https://matplotlib.org/objects.inv")),
     "pandas": ("https://pandas.pydata.org/pandas-docs/stable/", None),
+    "statsmodels": ("http://www.statsmodels.org/stable/", None),
 }
 
 sphinx_gallery_conf = {
@@ -188,11 +193,19 @@ sphinx_gallery_conf = {
 # Generate the plots for the gallery
 plot_gallery = True
 
+# -----------------------------------------------------------------------------
+# sphinxcontrib-bibtex
+# -----------------------------------------------------------------------------
+bibtex_bibfiles = ["./references.bib"]
+bibtex_style = "unsrt"
+bibtex_reference_style = "author_year"
+bibtex_footbibliography_header = ""
+
 
 def setup(app):
     """From https://github.com/rtfd/sphinx_rtd_theme/issues/117."""
     app.add_css_file("theme_overrides.css")
-    app.add_css_file("pymare.css")
+    app.add_css_file("nimare.css")
     app.connect("autodoc-process-docstring", generate_example_rst)
     # Fix to https://github.com/sphinx-doc/sphinx/issues/7420
     # from https://github.com/life4/deal/commit/7f33cbc595ed31519cefdfaaf6f415dada5acd94

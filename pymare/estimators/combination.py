@@ -1,4 +1,5 @@
 """Estimators for combination (p/z) tests."""
+
 import warnings
 from abc import abstractmethod
 
@@ -36,6 +37,9 @@ class CombinationTest(BaseEstimator):
 
     def fit(self, z, *args, **kwargs):
         """Fit the estimator to z-values."""
+        # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
+        self.dataset_ = None
+
         if self.mode == "concordant":
             ose = self.__class__(mode="directed")
             p1 = ose.p_value(z, *args, **kwargs)
@@ -62,14 +66,15 @@ class CombinationTest(BaseEstimator):
 class StoufferCombinationTest(CombinationTest):
     """Stouffer's Z-score meta-analysis method.
 
-    Takes a set of independent z-scores and combines them via Stouffer's method
-    to produce a fixed-effect estimate of the combined effect.
+    Takes a set of independent z-scores and combines them via Stouffer's
+    :footcite:p:`stouffer1949american` method to produce a fixed-effect estimate of the combined
+    effect.
 
     Parameters
     ----------
     mode : {"directed", "undirected", "concordant"}, optional
-        The type of test to perform-- i.e., what null hypothesis to
-        reject. See Winkler et al. (2016) for details.
+        The type of test to perform-- i.e., what null hypothesis to reject.
+        See :footcite:t:`winkler2016non` for details.
         Valid options are:
 
         -   'directed': tests a directional hypothesis--i.e., that the
@@ -99,6 +104,10 @@ class StoufferCombinationTest(CombinationTest):
         users should instead opt for 'directed' or 'concordant'.
     (3) This estimator does not support meta-regression; any moderators
         passed in to fit() as the X array will be ignored.
+
+    References
+    ----------
+    .. footbibliography::
     """
 
     # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
@@ -119,14 +128,18 @@ class StoufferCombinationTest(CombinationTest):
 class FisherCombinationTest(CombinationTest):
     """Fisher's method for combining p-values.
 
-    Takes a set of independent z-scores and combines them via Fisher's method
-    to produce a fixed-effect estimate of the combined effect.
+    Takes a set of independent z-scores and combines them via Fisher's
+    :footcite:p:`fisher1946statistical` method to produce a fixed-effect estimate of the combined
+    effect.
 
+    Parameters
+    ----------
     mode : {"directed", "undirected", "concordant"}, optional
-        The type of test to perform-- i.e., what null hypothesis to
-        reject. See Winkler et al. (2016) for details. Valid options are:
+        The type of test to perform-- i.e., what null hypothesis to reject.
+        See :footcite:t:`winkler2016non` for details.
+        Valid options are:
 
-            -  'directed': tests a directional hypothesis--i.e., that the
+            -   'directed': tests a directional hypothesis--i.e., that the
                 observed value is consistently greater than 0 in the input
                 studies. This is the default.
             -   'undirected': tests an undirected hypothesis--i.e., that the
@@ -153,6 +166,10 @@ class FisherCombinationTest(CombinationTest):
         users should instead opt for 'directed' or 'concordant'.
     (3) This estimator does not support meta-regression; any moderators
         passed in to fit() as the X array will be ignored.
+
+    References
+    ----------
+    .. footbibliography::
     """
 
     # Maps Dataset attributes onto fit() args; see BaseEstimator for details.

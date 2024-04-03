@@ -17,7 +17,8 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False):
     X : :obj:`numpy.ndarray`
         Fixed effect design matrix
     tau2 : :obj:`float`, optional
-        tau^2 estimate to use for weights
+        tau^2 estimate to use for weights.
+        Default = 0.
     return_cov : :obj:`bool`, optional
         Whether or not to return the inverse cov matrix.
         Default = False.
@@ -48,17 +49,20 @@ def ensure_2d(arr):
     """Ensure the passed array has 2 dimensions."""
     if arr is None:
         return arr
+
     try:
         arr = np.array(arr)
     except:
         return arr
+
     if arr.ndim == 1:
         arr = arr[:, None]
+
     return arr
 
 
 def q_profile(y, v, X, alpha=0.05):
-    """Get the CI for tau^2 via the Q-Profile method (Viechtbauer, 2007).
+    """Get the CI for tau^2 via the Q-Profile method.
 
     Parameters
     ----------
@@ -72,7 +76,7 @@ def q_profile(y, v, X, alpha=0.05):
         of studies and P is the number of predictor variables.
     alpha : :obj:`float`, optional
         alpha value defining the coverage of the CIs,
-        where width(CI) = 1 - alpha. Defaults to 0.05.
+        where width(CI) = 1 - alpha. Default = 0.05.
 
     Returns
     -------
@@ -82,16 +86,14 @@ def q_profile(y, v, X, alpha=0.05):
 
     Notes
     -----
-    Following the Viechtbauer implementation, this method returns the
-    interval that gives an equal probability mass at both tails (i.e.,
-    P(tau^2 <= lower_bound)  == P(tau^2 >= upper_bound) == alpha/2), and
-    *not* the smallest possible range of tau^2 values that provides the
-    desired coverage.
+    Following the :footcite:t:`viechtbauer2007confidence` implementation,
+    this method returns the interval that gives an equal probability mass at both tails
+    (i.e., ``P(tau^2 <= lower_bound)  == P(tau^2 >= upper_bound) == alpha/2``),
+    and *not* the smallest possible range of tau^2 values that provides the desired coverage.
 
     References
     ----------
-    Viechtbauer, W. (2007). Confidence intervals for the amount of
-    heterogeneity in meta-analysis. Statistics in Medicine, 26(1), 37-52.
+    .. footbibliography::
     """
     k, p = X.shape
     df = k - p
@@ -107,12 +109,14 @@ def q_profile(y, v, X, alpha=0.05):
     ub_start = 2 * DerSimonianLaird().fit(y, v, X).params_["tau2"]
 
     lb = minimize(lambda x: (q_gen(*args, x) - l_crit) ** 2, [0], bounds=bds).x[0]
-    ub = minimize(lambda x: (q_gen(*args, x) - u_crit) ** 2, [ub_start], bounds=bds).x[0]
+    ub = minimize(lambda x: (q_gen(*args, x) - u_crit) ** 2, ub_start, bounds=bds).x[0]
     return {"ci_l": lb, "ci_u": ub}
 
 
 def q_gen(y, v, X, tau2):
     """Calculate a generalized form of Cochran's Q-statistic.
+
+    This version of the Q statistic is described in :footcite:t:`veroniki2016methods`.
 
     Parameters
     ----------
@@ -134,14 +138,104 @@ def q_gen(y, v, X, tau2):
 
     References
     ----------
-    Veroniki, A. A., Jackson, D., Viechtbauer, W., Bender, R., Bowden, J.,
-    Knapp, G., Kuss, O., Higgins, J. P., Langan, D., & Salanti, G. (2016).
-    Methods to estimate the between-study variance and its uncertainty in
-    meta-analysis. Research synthesis methods, 7(1), 55-79.
-    https://doi.org/10.1002/jrsm.1164
+    .. footbibliography::
     """
     if np.any(tau2 < 0):
         raise ValueError("Value of tau^2 must be >= 0.")
+
     beta = weighted_least_squares(y, v, X, tau2)
     w = 1.0 / (v + tau2)
     return (w * (y - X.dot(beta)) ** 2).sum(0)
+
+
+def bonferroni(p_values):
+    """Perform Bonferroni correction on p values.
+
+    This correction is based on the one described in :footcite:t:`bonferroni1936teoria` and
+    :footcite:t:`shaffer1995multiple`.
+
+    .. versionadded:: 0.0.4
+
+    Parameters
+    ----------
+    p_values : :obj:`numpy.ndarray`
+        Uncorrected p values.
+
+    Returns
+    -------
+    p_corr : :obj:`numpy.ndarray`
+        Corrected p values.
+
+    References
+    ----------
+    .. footbibliography::
+    """
+    p_corr = p_values * p_values.size
+    p_corr[p_corr > 1] = 1
+    return p_corr
+
+
+def fdr(p_values, q=0.05, method="bh"):
+    """Perform FDR correction on p values.
+
+    .. versionadded:: 0.0.4
+
+    Parameters
+    ----------
+    p_values : :obj:`numpy.ndarray`
+        Array of p values.
+    q : :obj:`float`, optional
+        Alpha value. Default is 0.05.
+    method : {"bh", "by"}, optional
+        Method to use for correction.
+        Either "bh" (Benjamini-Hochberg :footcite:p:`benjamini1995controlling`) or
+        "by" (Benjamini-Yekutieli :footcite:p:`benjamini2001control`).
+        Default is "bh".
+
+    Returns
+    -------
+    p_adjusted : :obj:`numpy.ndarray`
+        Array of adjusted p values.
+
+    Notes
+    -----
+    This function is adapted from ``statsmodels``, which is licensed under a BSD-3 license.
+
+    References
+    ----------
+    .. footbibliography::
+
+    See Also
+    --------
+    statsmodels.stats.multitest.fdrcorrection
+    """
+    sort_idx = np.argsort(p_values)
+    revert_idx = np.argsort(sort_idx)
+    p_sorted = p_values[sort_idx]
+
+    n_tests = p_values.size
+
+    # empirical cumulative density function
+    ecdf = np.linspace(0, 1, n_tests + 1)[1:]
+    if method == "by":
+        # NOTE: I don't know what cm stands for
+        cm = np.sum(1 / np.arange(1, n_tests + 1))
+        ecdffactor = ecdf / cm
+    else:
+        ecdffactor = ecdf
+
+    p_adjusted = p_sorted / ecdffactor
+    p_adjusted = np.minimum.accumulate(p_adjusted[::-1])[::-1]
+    # NOTE: Why not this?
+    # p_adjusted = np.maximum.accumulate(p_adjusted)
+
+    p_adjusted[p_adjusted > 1] = 1
+    p_adjusted = p_adjusted[revert_idx]
+
+    return p_adjusted
+
+
+def var_to_ci(y, v, n):
+    """Convert sampling variance to 95% CI."""
+    term = 1.96 * np.sqrt(v) / np.sqrt(n)
+    return y - term, y + term
