@@ -68,7 +68,7 @@ def solve_system(system, known_vars=None):
 
     # solver will return a dict if there's only one non-dummy expression
     if isinstance(solutions, dict):
-        solutions = [list(solutions.values())]
+        solutions = [[solutions[s] for s in symbols]]
 
     # Prepare the dummy list and data args in a fixed order
     dummy_list = list(dummies)

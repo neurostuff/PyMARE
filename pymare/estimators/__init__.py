@@ -1,4 +1,5 @@
 """Estimators for meta-analyses and meta-regressions."""
+
 from .combination import FisherCombinationTest, StoufferCombinationTest
 from .estimators import (
     DerSimonianLaird,

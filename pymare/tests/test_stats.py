@@ -1,4 +1,5 @@
 """Tests for pymare.stats."""
+
 from pymare import stats
 
 
