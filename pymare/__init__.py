@@ -1,4 +1,5 @@
 """PyMARE: Python Meta-Analysis & Regression Engine."""
+
 import sys
 import warnings
 

@@ -1,4 +1,5 @@
 """Tests for pymare.results."""
+
 import numpy as np
 import pytest
 

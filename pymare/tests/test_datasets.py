@@ -1,4 +1,5 @@
 """Tests for the pymare.datasets module."""
+
 import pandas as pd
 
 from pymare import datasets
