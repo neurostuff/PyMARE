@@ -1,4 +1,5 @@
 """Tools for representing and manipulating meta-regression results."""
+
 import itertools
 from functools import lru_cache
 from inspect import getfullargspec
