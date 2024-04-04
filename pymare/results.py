@@ -544,8 +544,6 @@ class BayesianMetaRegressionResults:
     """
 
     def __init__(self, data, dataset, ci=95.0):
-        import arviz as az
-
         if az is None:
             raise ValueError(
                 "ArviZ package must be installed in order to work "
