@@ -16,4 +16,4 @@ If you want to use the most up-to-date version, you can install from the ``maste
     pip install git+https://github.com/neurostuff/PyMARE.git
 
 PyMARE requires Python >=3.6 and a number of packages.
-For a complete list, please see the file ``setup.cfg``.
+For a complete list, please see ``setup.cfg``.

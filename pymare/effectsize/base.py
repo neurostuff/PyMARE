@@ -90,7 +90,6 @@ class EffectSizeConverter(metaclass=ABCMeta):
     """Base class for effect size converters."""
 
     def __init__(self, data=None, **kwargs):
-
         kwargs = {k: v for k, v in kwargs.items() if v is not None}
 
         if data is not None:
@@ -509,7 +508,6 @@ def compute_measure(
 
     # Select or infer converter class
     if comparison == "infer":
-
         one_samp_inputs = {"m", "sd", "n", "r"}
         two_samp_inputs = {"m1", "m2", "sd1", "sd2", "n1", "n2"}
 

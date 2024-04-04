@@ -1,5 +1,6 @@
 """Meta-regression estimator classes."""
 
+import sys
 from abc import ABCMeta, abstractmethod
 from inspect import getfullargspec
 from warnings import warn
@@ -553,8 +554,8 @@ class StanMetaRegression(BaseEstimator):
 
     Warning
     -------
-    With changes to Stan in version 3, which requires Python 3.7, this class no longer works for
-    Python 3.7+. We will try to fix it in the future.
+    :obj:`~pymare.estimators.StanMetaRegression` uses Pystan 3, which requires Python 3.7.
+    Pystan 3 should not be used with PyMARE and Python 3.6 or earlier.
     """
 
     _result_cls = BayesianMetaRegressionResults
@@ -563,6 +564,13 @@ class StanMetaRegression(BaseEstimator):
         self.sampling_kwargs = sampling_kwargs
         self.model = None
         self.result_ = None
+
+        if sys.version_info < (3, 7):
+            raise RuntimeError(
+                "StanMetaRegression uses Pystan 3, which requires python 3.7 or higher. "
+                f"You are running Python {sys.version_info.major}.{sys.version_info.minor}. "
+                "Pystan 3 should not be used with PyMARE and Python 3.6 or earlier."
+            )
 
     def compile(self):
         """Compile the Stan model."""
@@ -575,7 +583,7 @@ class StanMetaRegression(BaseEstimator):
             int<lower=1> N;
             int<lower=1> K;
             vector[N] y;
-            int<lower=1,upper=K> id[N];
+            array[N] int<lower=1,upper=K> id;
             int<lower=1> C;
             matrix[K, C] X;
             vector[N] sigma;
@@ -595,13 +603,11 @@ class StanMetaRegression(BaseEstimator):
         }
         """
         try:
-            from pystan import StanModel
+            import stan
         except ImportError:
-            raise ImportError(
-                "Please install pystan or, if using Python 3.7+, switch to Python 3.6."
-            )
+            raise ImportError("Please install pystan.")
 
-        self.model = StanModel(model_code=spec)
+        self.model = stan.build(spec, data=self.data)
 
     def fit(self, y, v, X, groups=None):
         """Run the Stan sampler and return results.
@@ -645,9 +651,6 @@ class StanMetaRegression(BaseEstimator):
                 "shape {}.".format(y.shape)
             )
 
-        if self.model is None:
-            self.compile()
-
         N = y.shape[0]
         groups = groups or np.arange(1, N + 1, dtype=int)
         K = len(np.unique(groups))
@@ -662,7 +665,12 @@ class StanMetaRegression(BaseEstimator):
             "sigma": v.ravel(),
         }
 
-        self.result_ = self.model.sampling(data=data, **self.sampling_kwargs)
+        self.data = data
+
+        if self.model is None:
+            self.compile()
+
+        self.result_ = self.model.sample(**self.sampling_kwargs)
         return self
 
     def summary(self, ci=95):

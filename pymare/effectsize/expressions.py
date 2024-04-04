@@ -91,7 +91,6 @@ def select_expressions(target, known_vars, type=1):
         results = []
 
         for exp in exp_dict[sym]:
-
             candidates = []
 
             sym_names = set(s.name for s in exp.symbols)
