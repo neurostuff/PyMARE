@@ -11,7 +11,7 @@ import scipy.stats as ss
 
 try:
     import arviz as az
-except ImportError:
+except ImportError as e:
     az = None
 
 from pymare.stats import q_gen, q_profile
@@ -544,6 +544,7 @@ class BayesianMetaRegressionResults:
     """
 
     def __init__(self, data, dataset, ci=95.0):
+        import arviz as az
         if az is None:
             raise ValueError(
                 "ArviZ package must be installed in order to work "
