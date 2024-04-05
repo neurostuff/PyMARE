@@ -117,15 +117,15 @@ class StoufferCombinationTest(CombinationTest):
         """Calculate the variance inflation term for each group.
 
         This term is used to adjust the variance of the combined z-score when
-        multiple sample come from the same group are present.
+        multiple sample come from the same study.
 
         Parameters
         ----------
-        z : array-like
+        z : :obj:`numpy.ndarray` of shape (n, d)
             Array of z-values.
-        w : array-like
+        w : :obj:`numpy.ndarray` of shape (n, d)
             Array of weights.
-        g : array-like
+        g : :obj:`numpy.ndarray` of shape (n, d)
             Array of group labels.
 
         Returns
@@ -133,14 +133,13 @@ class StoufferCombinationTest(CombinationTest):
         sigma : float
             The variance inflation term.
         """
-        # Centering
         # Only center if the samples are not all the same, to prevent division by zero
         # when calculating the correlation matrix.
         # This centering is problematic for N=2
         all_samples_same = np.all(np.equal(z, z[0]), axis=0).all()
         z = z if all_samples_same else z - z.mean(0)
 
-        # Use the value for one voxel, as all voxels have the same group and weight
+        # Use the value from one feature, as all features have the same groups and weights
         groups = g[:, 0]
         weights = w[:, 0]
 
@@ -157,7 +156,7 @@ class StoufferCombinationTest(CombinationTest):
             if n_samples < 2:
                 continue
 
-            # Calculate the within group correlation matrix and select the non-diagonal elements
+            # Calculate the within group correlation matrix and sum the non-diagonal elements
             corr = np.corrcoef(group_z, rowvar=True)
             upper_indices = np.triu_indices(n_samples, k=1)
             non_diag_corr = corr[upper_indices]
@@ -168,7 +167,7 @@ class StoufferCombinationTest(CombinationTest):
         return sigma
 
     def fit(self, z, w=None, g=None):
-        """Fit the estimator to z-values, optionally with weights."""
+        """Fit the estimator to z-values, optionally with weights and groups."""
         return super().fit(z, w=w, g=g)
 
     def p_value(self, z, w=None, g=None):
@@ -176,9 +175,10 @@ class StoufferCombinationTest(CombinationTest):
         if w is None:
             w = np.ones_like(z)
 
-        # Calculate the variance inflation term
+        # Calculate the variance inflation term, sum of non-diagonal elements of sigma.
         sigma = self._inflation_term(z, w, g) if g is not None else 0
 
+        # The sum of diagonal elements of sigma is given by (w**2).sum(0).
         variance = (w**2).sum(0) + sigma
 
         cz = (z * w).sum(0) / np.sqrt(variance)
