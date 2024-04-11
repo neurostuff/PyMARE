@@ -1,9 +1,9 @@
 [build-system]
-requires = ["setuptools==58.2.0", "wheel"]
+requires = ["setuptools==68.2.2", "wheel"]
 
 [tool.black]
 line-length = 99
-target-version = ["py37"]
+target-version = ["py39"]
 include = '\.pyi?$'
 exclude = '''
 
