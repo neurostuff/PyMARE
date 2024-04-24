@@ -87,7 +87,10 @@ def test_combination_test_results_from_arrays(dataset):
 
     # fit overwrites dataset_ attribute with None
     assert fitted_estimator.dataset_ is None
+
     # fit_dataset overwrites it with the Dataset
+    dataset.n = dataset.v  # StoufferCombinationTest now maps n to w
+    dataset.v = None
     fitted_estimator.fit_dataset(dataset)
     assert isinstance(fitted_estimator.dataset_, Dataset)
     # fit sets it back to None
