@@ -79,3 +79,28 @@ def test_stouffer_adjusted():
     sigma_l1 = n_maps_l1 * (n_maps_l1 - 1)  # Expected inflation term
     z_expected_l1 = n_maps_l1 * common_sample / np.sqrt(n_maps_l1 + sigma_l1)
     assert np.allclose(z_l1, z_expected_l1, atol=1e-5)
+
+    # Test with correlation matrix and groups.
+    data_corr = data - data.mean(0)
+    corr = np.corrcoef(data_corr, rowvar=True)
+    results_corr = (
+        StoufferCombinationTest("directed").fit(z=data, w=weights, g=groups, corr=corr).params_
+    )
+    z_corr = ss.norm.isf(results_corr["p"])
+
+    z_corr_expected = np.array([5.00088912, 3.70356943, 4.05465924, 5.4633001, 5.18927878])
+    assert np.allclose(z_corr, z_corr_expected, atol=1e-5)
+
+    # Test with no correlation matrix and groups, but only one feature.
+    with pytest.raises(ValueError):
+        StoufferCombinationTest("directed").fit(z=data[:, :1], w=weights[:, :1], g=groups)
+
+    # Test with correlation matrix and groups of different shapes.
+    with pytest.raises(ValueError):
+        StoufferCombinationTest("directed").fit(z=data, w=weights, g=groups, corr=corr[:-2, :-2])
+
+    # Test with correlation matrix and no groups.
+    results1 = StoufferCombinationTest("directed").fit(z=_z1, corr=corr).params_
+    z1 = ss.norm.isf(results1["p"])
+
+    assert np.allclose(z1, [4.69574], atol=1e-5)
