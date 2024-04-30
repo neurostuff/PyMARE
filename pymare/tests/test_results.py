@@ -87,8 +87,9 @@ def test_combination_test_results_from_arrays(dataset):
 
     # fit overwrites dataset_ attribute with None
     assert fitted_estimator.dataset_ is None
+
     # fit_dataset overwrites it with the Dataset
-    fitted_estimator.fit_dataset(dataset)
+    fitted_estimator.fit_dataset(Dataset(dataset.y))
     assert isinstance(fitted_estimator.dataset_, Dataset)
     # fit sets it back to None
     fitted_estimator.fit(z=dataset.y)

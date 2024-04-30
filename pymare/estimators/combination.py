@@ -113,7 +113,7 @@ class StoufferCombinationTest(CombinationTest):
     # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
     _dataset_attr_map = {"z": "y", "w": "n", "g": "v"}
 
-    def _inflation_term(self, z, w, g):
+    def _inflation_term(self, z, w, g, corr=None):
         """Calculate the variance inflation term for each group.
 
         This term is used to adjust the variance of the combined z-score when
@@ -127,6 +127,8 @@ class StoufferCombinationTest(CombinationTest):
             Array of weights.
         g : :obj:`numpy.ndarray` of shape (n, d)
             Array of group labels.
+        corr : :obj:`numpy.ndarray` of shape (n, n), optional
+            The correlation matrix of the z-values. If None, it will be calculated.
 
         Returns
         -------
@@ -157,26 +159,38 @@ class StoufferCombinationTest(CombinationTest):
                 continue
 
             # Calculate the within group correlation matrix and sum the non-diagonal elements
-            corr = np.corrcoef(group_z, rowvar=True)
+            if corr is None:
+                if z.shape[1] < 2:
+                    raise ValueError("The number of features must be greater than 1.")
+                group_corr = np.corrcoef(group_z, rowvar=True)
+            else:
+                group_corr = corr[group_indices][:, group_indices]
+
             upper_indices = np.triu_indices(n_samples, k=1)
-            non_diag_corr = corr[upper_indices]
+            non_diag_corr = group_corr[upper_indices]
             w_i, w_j = weights[upper_indices[0]], weights[upper_indices[1]]
 
             sigma += (2 * w_i * w_j * non_diag_corr).sum()
 
         return sigma
 
-    def fit(self, z, w=None, g=None):
+    def fit(self, z, w=None, g=None, corr=None):
         """Fit the estimator to z-values, optionally with weights and groups."""
-        return super().fit(z, w=w, g=g)
+        return super().fit(z, w=w, g=g, corr=corr)
 
-    def p_value(self, z, w=None, g=None):
+    def p_value(self, z, w=None, g=None, corr=None):
         """Calculate p-values."""
         if w is None:
             w = np.ones_like(z)
 
+        if g is None and corr is not None:
+            warnings.warn("Correlation matrix provided without groups. Ignoring.")
+
+        if g is not None and corr is not None and g.shape[0] != corr.shape[0]:
+            raise ValueError("Group labels must have the same length as the correlation matrix.")
+
         # Calculate the variance inflation term, sum of non-diagonal elements of sigma.
-        sigma = self._inflation_term(z, w, g) if g is not None else 0
+        sigma = self._inflation_term(z, w, g, corr=corr) if g is not None else 0
 
         # The sum of diagonal elements of sigma is given by (w**2).sum(0).
         variance = (w**2).sum(0) + sigma
