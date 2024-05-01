@@ -61,7 +61,7 @@ jobs:
         shell: bash {0}
         run: python -m pytest --pyargs pymare --cov=pymare
       - name: "Upload coverage to CodeCov"
-        uses: codecov/codecov-action@v1
+        uses: codecov/codecov-action@v4
         if: success()
 
   flake8-lint:
