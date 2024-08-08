@@ -84,16 +84,18 @@ class MetaRegressionResults:
             =========== ==========================================================================
         """
         beta, se = self.fe_params, self.fe_se
+        epsilon = np.finfo(beta.dtype).eps
         z_se = ss.norm.ppf(1 - alpha / 2)
         z = beta / se
-
+        p = 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
+        p[p == 0] += epsilon
         stats = {
             "est": beta,
             "se": se,
             "ci_l": beta - z_se * se,
             "ci_u": beta + z_se * se,
             "z": z,
-            "p": 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2,
+            "p": p,
         }
 
         return stats
