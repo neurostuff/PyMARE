@@ -22,9 +22,22 @@ def fitted_estimator(dataset):
 
 
 @pytest.fixture
+def small_variance_estimator(small_variance_dataset):
+    """Create a fitted Estimator with small variances as a fixture."""
+    est = DerSimonianLaird()
+    return est.fit_dataset(small_variance_dataset)
+
+
+@pytest.fixture
 def results(fitted_estimator):
     """Create a results object as a fixture."""
     return fitted_estimator.summary()
+
+
+@pytest.fixture
+def small_variance_results(small_variance_estimator):
+    """Create a results object with small variances as a fixture."""
+    return small_variance_estimator.summary()
 
 
 @pytest.fixture
@@ -167,6 +180,15 @@ def test_mrr_to_df(results):
     col_names = {"estimate", "p-value", "z-score", "ci_0.025", "ci_0.975", "se", "name"}
     assert set(df.columns) == col_names
     assert np.allclose(df["p-value"].values, [0.9678, 0.4369], atol=1e-4)
+
+
+def test_small_variance_mrr_to_df(small_variance_results):
+    """Test conversion of MetaRegressionResults to DataFrame."""
+    df = small_variance_results.to_df()
+    assert df.shape == (2, 7)
+    col_names = {"estimate", "p-value", "z-score", "ci_0.025", "ci_0.975", "se", "name"}
+    assert set(df.columns) == col_names
+    assert np.allclose(df["p-value"].values, [1, np.finfo(np.float64).eps], atol=1e-4)
 
 
 def test_estimator_summary(dataset):

@@ -16,9 +16,24 @@ def variables():
 
 
 @pytest.fixture(scope="package")
+def small_variance_variables(variables):
+    """make significant variables."""
+    y, v, X = variables
+    y = X.copy()
+    v /= 10
+    return (y, v, X)
+
+
+@pytest.fixture(scope="package")
 def dataset(variables):
     """Build a Dataset compiled from the variables fixture."""
     return Dataset(*variables, X_names=["my_covariate"])
+
+
+@pytest.fixture(scope="package")
+def small_variance_dataset(small_variance_variables):
+    """Build a Dataset compiled from the small variance variables fixture."""
+    return Dataset(*small_variance_variables, X_names=["my_covariate"])
 
 
 @pytest.fixture(scope="package")
