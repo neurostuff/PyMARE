@@ -17,7 +17,7 @@ def variables():
 
 @pytest.fixture(scope="package")
 def small_variance_variables(variables):
-    """make significant variables."""
+    """Make highly correlated variables."""
     y, v, X = variables
     y = X.copy()
     v /= 10
