@@ -16,13 +16,13 @@ _params = [
     (StoufferCombinationTest, _z1, "concordant", [4.55204117]),
     (StoufferCombinationTest, _z2, "directed", [4.69574275, -4.16803071]),
     (StoufferCombinationTest, _z2, "undirected", [4.87462819, 4.16803071]),
-    (StoufferCombinationTest, _z2, "concordant", [4.55204117, 4.00717817]),
+    (StoufferCombinationTest, _z2, "concordant", [4.55204117, -4.00717817]),
     (FisherCombinationTest, _z1, "directed", [5.22413541]),
     (FisherCombinationTest, _z1, "undirected", [5.27449962]),
     (FisherCombinationTest, _z1, "concordant", [5.09434911]),
     (FisherCombinationTest, _z2, "directed", [5.22413541, -3.30626405]),
     (FisherCombinationTest, _z2, "undirected", [5.27449962, 4.27572965]),
-    (FisherCombinationTest, _z2, "concordant", [5.09434911, 4.11869468]),
+    (FisherCombinationTest, _z2, "concordant", [5.09434911, -4.11869468]),
 ]
 
 
@@ -30,8 +30,7 @@ _params = [
 def test_combination_test(Cls, data, mode, expected):
     """Test CombinationTest Estimators with numpy data."""
     results = Cls(mode).fit(data).params_
-    z = ss.norm.isf(results["p"])
-    assert np.allclose(z, expected, atol=1e-5)
+    assert np.allclose(results["z"], expected, atol=1e-5)
 
 
 @pytest.mark.parametrize("Cls,data,mode,expected", _params)
@@ -40,8 +39,7 @@ def test_combination_test_from_dataset(Cls, data, mode, expected):
     dset = Dataset(y=data)
     est = Cls(mode).fit_dataset(dset)
     results = est.summary()
-    z = ss.norm.isf(results.p)
-    assert np.allclose(z, expected, atol=1e-5)
+    assert np.allclose(results.z, expected, atol=1e-5)
 
 
 def test_stouffer_adjusted():
@@ -61,10 +59,9 @@ def test_stouffer_adjusted():
     groups = np.tile(np.array([0, 0, 1, 2, 2, 2]), (data.shape[1], 1)).T
 
     results = StoufferCombinationTest("directed").fit(z=data, w=weights, g=groups).params_
-    z = ss.norm.isf(results["p"])
 
     z_expected = np.array([5.00088912, 3.70356943, 4.05465924, 5.4633001, 5.18927878])
-    assert np.allclose(z, z_expected, atol=1e-5)
+    assert np.allclose(results["z"], z_expected, atol=1e-5)
 
     # Test with weights and no groups. Limiting cases.
     # Limiting case 1: all correlations are one.
@@ -74,11 +71,11 @@ def test_stouffer_adjusted():
     groups_l1 = np.tile(np.array([0, 0, 0, 0, 0]), (data_l1.shape[1], 1)).T
 
     results_l1 = StoufferCombinationTest("directed").fit(z=data_l1, g=groups_l1).params_
-    z_l1 = ss.norm.isf(results_l1["p"])
+    # z_l1 = ss.norm.isf(results_l1["p"])
 
     sigma_l1 = n_maps_l1 * (n_maps_l1 - 1)  # Expected inflation term
     z_expected_l1 = n_maps_l1 * common_sample / np.sqrt(n_maps_l1 + sigma_l1)
-    assert np.allclose(z_l1, z_expected_l1, atol=1e-5)
+    assert np.allclose(results_l1["z"], z_expected_l1, atol=1e-5)
 
     # Test with correlation matrix and groups.
     data_corr = data - data.mean(0)
@@ -86,10 +83,10 @@ def test_stouffer_adjusted():
     results_corr = (
         StoufferCombinationTest("directed").fit(z=data, w=weights, g=groups, corr=corr).params_
     )
-    z_corr = ss.norm.isf(results_corr["p"])
+    # z_corr = ss.norm.isf(results_corr["p"])
 
     z_corr_expected = np.array([5.00088912, 3.70356943, 4.05465924, 5.4633001, 5.18927878])
-    assert np.allclose(z_corr, z_corr_expected, atol=1e-5)
+    assert np.allclose(results_corr["z"], z_corr_expected, atol=1e-5)
 
     # Test with no correlation matrix and groups, but only one feature.
     with pytest.raises(ValueError):
@@ -101,6 +98,6 @@ def test_stouffer_adjusted():
 
     # Test with correlation matrix and no groups.
     results1 = StoufferCombinationTest("directed").fit(z=_z1, corr=corr).params_
-    z1 = ss.norm.isf(results1["p"])
+    # z1 = ss.norm.isf(results1["p"])
 
-    assert np.allclose(z1, [4.69574], atol=1e-5)
+    assert np.allclose(results1["z"], [4.69574], atol=1e-5)
