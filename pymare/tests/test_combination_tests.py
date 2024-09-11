@@ -2,7 +2,6 @@
 
 import numpy as np
 import pytest
-import scipy.stats as ss
 
 from pymare import Dataset
 from pymare.estimators import FisherCombinationTest, StoufferCombinationTest
