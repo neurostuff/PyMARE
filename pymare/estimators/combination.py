@@ -45,11 +45,15 @@ class CombinationTest(BaseEstimator):
             p1 = ose.p_value(z, *args, **kwargs)
             p2 = ose.p_value(-z, *args, **kwargs)
             p = np.minimum(1, 2 * np.minimum(p1, p2))
+            z_calc = ss.norm.isf(p)
+            z_calc[p2 < p1] *= -1
         else:
             if self.mode == "undirected":
                 z = np.abs(z)
             p = self.p_value(z, *args, **kwargs)
-        self.params_ = {"p": p}
+            z_calc = ss.norm.isf(p)
+
+        self.params_ = {"p": p, "z": z_calc}
         return self
 
     def summary(self):
@@ -60,7 +64,9 @@ class CombinationTest(BaseEstimator):
                 "This {} instance hasn't been fitted yet. Please "
                 "call fit() before summary().".format(name)
             )
-        return CombinationTestResults(self, self.dataset_, p=self.params_["p"])
+        return CombinationTestResults(
+            self, self.dataset_, z=self.params_["z"], p=self.params_["p"]
+        )
 
 
 class StoufferCombinationTest(CombinationTest):
