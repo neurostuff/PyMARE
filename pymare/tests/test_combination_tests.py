@@ -70,7 +70,6 @@ def test_stouffer_adjusted():
     groups_l1 = np.tile(np.array([0, 0, 0, 0, 0]), (data_l1.shape[1], 1)).T
 
     results_l1 = StoufferCombinationTest("directed").fit(z=data_l1, g=groups_l1).params_
-    # z_l1 = ss.norm.isf(results_l1["p"])
 
     sigma_l1 = n_maps_l1 * (n_maps_l1 - 1)  # Expected inflation term
     z_expected_l1 = n_maps_l1 * common_sample / np.sqrt(n_maps_l1 + sigma_l1)
@@ -82,7 +81,6 @@ def test_stouffer_adjusted():
     results_corr = (
         StoufferCombinationTest("directed").fit(z=data, w=weights, g=groups, corr=corr).params_
     )
-    # z_corr = ss.norm.isf(results_corr["p"])
 
     z_corr_expected = np.array([5.00088912, 3.70356943, 4.05465924, 5.4633001, 5.18927878])
     assert np.allclose(results_corr["z"], z_corr_expected, atol=1e-5)
@@ -97,6 +95,5 @@ def test_stouffer_adjusted():
 
     # Test with correlation matrix and no groups.
     results1 = StoufferCombinationTest("directed").fit(z=_z1, corr=corr).params_
-    # z1 = ss.norm.isf(results1["p"])
 
     assert np.allclose(results1["z"], [4.69574], atol=1e-5)
