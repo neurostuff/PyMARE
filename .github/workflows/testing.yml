@@ -4,12 +4,17 @@ on:
   push:
     branches:
       - "master"
-  pull_request:
+  pull_request_target:
     branches:
       - "*"
   schedule:
     # Run tests every Sunday at 12am
     - cron: "0 0 * * 0"
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
 
 concurrency:
   group: environment-${{ github.ref }}
