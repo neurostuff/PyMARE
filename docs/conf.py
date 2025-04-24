@@ -22,7 +22,7 @@ from datetime import datetime
 from distutils.version import LooseVersion
 
 import sphinx
-from m2r import MdInclude
+from m2r2 import MdInclude
 
 sys.path.insert(0, os.path.abspath("sphinxext"))
 sys.path.insert(0, os.path.abspath(os.path.pardir))
@@ -214,6 +214,7 @@ def setup(app):
     app.add_config_value("m2r_parse_relative_links", False, "env")
     app.add_config_value("m2r_anonymous_references", False, "env")
     app.add_config_value("m2r_disable_inline_math", False, "env")
+    app.add_config_value("m2r_use_mermaid", True, "env")
     app.add_directive("mdinclude", MdInclude)
 
 
