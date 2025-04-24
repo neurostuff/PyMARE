@@ -5,7 +5,7 @@ meta-analysis).
 
 # License
 
-[PYMARE]{.title-ref} is licensed under the terms of the MIT license. See
+PYMARE is licensed under the terms of the MIT license. See
 the file \'LICENSE\' for information on the history of this software,
 terms & conditions for usage, and a DISCLAIMER OF ALL WARRANTIES.
 
