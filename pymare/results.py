@@ -1,6 +1,7 @@
 """Tools for representing and manipulating meta-regression results."""
 
 import itertools
+import math
 from functools import lru_cache
 from inspect import getfullargspec
 from warnings import warn
@@ -322,7 +323,7 @@ class MetaRegressionResults:
 
         # Calculate # of permutations and determine whether to use exact test
         if has_mods:
-            n_exact = np.math.factorial(n_obs)
+            n_exact = math.factorial(n_obs)
         else:
             n_exact = 2**n_obs
             if n_exact < n_perm:
