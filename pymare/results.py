@@ -1,10 +1,10 @@
 """Tools for representing and manipulating meta-regression results."""
 
 import itertools
+import math
 from functools import lru_cache
 from inspect import getfullargspec
 from warnings import warn
-import math
 
 import numpy as np
 import pandas as pd
