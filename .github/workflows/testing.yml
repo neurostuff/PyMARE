@@ -62,17 +62,6 @@ jobs:
       - name: "Install PyMARE"
         shell: bash {0}
         run: pip install -e .[tests,stan]
-      - name: "Debug info for Python 3.9"
-        if: ${{ matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' }}
-        run: |
-          python -c "import numpy; print(f'Numpy version: {numpy.__version__}')"
-          python -c "import sys; print(f'Python path: {sys.path}')"
-          pip freeze
-          pip check
-      - name: Setup tmate session for Python 3.9 debugging
-        if: ${{ matrix.python-version == '3.9' && matrix.os == 'ubuntu-latest' }}
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 45
       - name: "Run tests"
         shell: bash {0}
         run: python -m pytest --pyargs pymare --cov=pymare
