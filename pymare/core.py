@@ -24,26 +24,25 @@ class Dataset:
     Parameters
     ----------
     y : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
-        1d array of study-level estimates with length K, or the name of the column in data
+        1d array of observation-level estimates with length K, or the name of the column in data
         containing the y values.
         Default = None.
     v : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
-        1d array of study-level variances with length K, or the name of the column in data
+        1d array of observation-level variances with length K, or the name of the column in data
         containing v values.
         Default = None.
     X : None or :obj:`numpy.ndarray` of shape (K,[P]) or :obj:`list` of :obj:`str`, optional
-        1d or 2d array containing study-level predictors (dimensions K x P),
+        1d or 2d array containing observation-level predictors (dimensions K x P),
         or a list of strings giving the names of the columns in data containing the X values.
         Default = None.
     n : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
-        1d array of study-level sample sizes (length K), or the name of the corresponding column
-        in ``data``.
+        1d array of observation-level ``n`` values (length K), or the name of the
+        corresponding column in ``data``.
         Default = None.
     g : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
-        1d array of study-level group (cluster) labels with length K, or the name of the
-        corresponding column in ``data``.
-        Estimates sharing a label are treated as statistically dependent, e.g. multiple
-        contrasts contributed by the same study.
+        1d array of group (cluster) labels with length K, or the name of the
+        corresponding column in ``data``. Observations sharing a label are
+        treated as statistically dependent.
         Estimators that support dependent estimates use this to widen their inference
         accordingly; estimators that do not simply ignore it.
         Default = None.
@@ -118,8 +117,8 @@ class Dataset:
         _check_inputs_shape(self.y, self.v, "y", "v", row=True, column=True)
         _check_inputs_shape(self.y, self.n, "y", "n", row=True)
         # A single column of n broadcasts across parallel datasets. The
-        # estimators already handle that, and per-study quantities such as
-        # sample sizes or weights usually do not vary by dataset.
+        # estimators already handle that, and per-observation quantities such
+        # as n or weights usually do not vary by parallel dataset.
         if self.n is not None and self.n.shape[1] != 1:
             _check_inputs_shape(self.y, self.n, "y", "n", column=True)
         _check_inputs_shape(self.y, self.g, "y", "g", row=True)
@@ -211,20 +210,20 @@ def meta_regression(
     Parameters
     ----------
     y : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
-        1d array of study-level estimates with length K, or the name of the column in data
+        1d array of observation-level estimates with length K, or the name of the column in data
         containing the y values.
         Default = None.
     v : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
-        1d array of study-level variances with length K, or the name of the column in data
+        1d array of observation-level variances with length K, or the name of the column in data
         containing v values.
         Default = None.
     X : None or :obj:`numpy.ndarray` of shape (K,[P]) or :obj:`list` of :obj:`str`, optional
-        1d or 2d array containing study-level predictors (dimensions K x P),
+        1d or 2d array containing observation-level predictors (dimensions K x P),
         or a list of strings giving the names of the columns in data containing the X values.
         Default = None.
     n : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
-        1d array of study-level sample sizes (length K), or the name of the corresponding column
-        in ``data``.
+        1d array of observation-level ``n`` values (length K), or the name of the
+        corresponding column in ``data``.
         Default = None.
     data : None or :obj:`pandas.DataFrame` or :obj:`~pymare.core.Dataset`, optional
         If a Dataset instance is passed, the y, v, X, n, g and associated arguments are ignored,

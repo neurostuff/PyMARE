@@ -1,6 +1,7 @@
 """Miscellaneous statistical functions."""
 
 import warnings
+from typing import NamedTuple
 
 import numpy as np
 import scipy.stats as ss
@@ -18,6 +19,176 @@ _MIN_LEVERAGE_COMPLEMENT = 1e-10
 # clusters before estimating tau^2. Results are very weakly sensitive to it; 0.8
 # is the conventional choice for correlated effects.
 DEFAULT_CLUSTER_RHO = 0.8
+
+
+class WeightedInterceptCR2Statistics(NamedTuple):
+    """Reusable sufficient statistics for signed intercept-only CR2 tests."""
+
+    weighted_values: np.ndarray
+    adjusted_values: np.ndarray
+    adjusted_sum_squares: np.ndarray
+    adjusted_weight_sum: float
+    total_weight: float
+
+
+def encode_groups(groups, n_observations=None):
+    """Encode arbitrary group labels in order of first occurrence.
+
+    Parameters
+    ----------
+    groups : None or array-like of shape (K,) or (K, 1)
+        One hashable label per observation. If None, every observation is
+        assigned its own group and ``n_observations`` is required.
+    n_observations : :obj:`int`, optional
+        Expected number of observations.
+
+    Returns
+    -------
+    codes : :obj:`numpy.ndarray` of shape (K,)
+        Consecutive integer codes.
+    labels : :obj:`numpy.ndarray` of shape (G,)
+        Original labels in order of first occurrence.
+    """
+    if groups is None:
+        if n_observations is None:
+            raise ValueError("n_observations is required when groups is None.")
+        if not isinstance(n_observations, (int, np.integer)) or n_observations < 0:
+            raise ValueError("n_observations must be a non-negative integer.")
+        labels = np.arange(n_observations)
+        return labels.copy(), labels
+
+    groups = np.asarray(groups, dtype=object)
+    if groups.ndim > 2 or (groups.ndim == 2 and 1 not in groups.shape):
+        raise ValueError("groups must be one-dimensional.")
+    groups = groups.ravel()
+    if n_observations is not None and groups.size != n_observations:
+        raise ValueError(
+            f"groups must contain one label per observation: expected {n_observations}, "
+            f"got {groups.size}."
+        )
+
+    codes = np.empty(groups.size, dtype=np.intp)
+    labels = []
+    label_codes = {}
+    for observation, label in enumerate(groups):
+        try:
+            if label not in label_codes:
+                label_codes[label] = len(labels)
+                labels.append(label)
+            codes[observation] = label_codes[label]
+        except TypeError as exc:
+            raise ValueError("Group labels must be hashable scalars.") from exc
+    return codes, np.asarray(labels, dtype=object)
+
+
+def group_mean(values, groups):
+    """Return one arithmetic mean per group in first-occurrence order."""
+    values = np.asarray(values)
+    one_dimensional = values.ndim == 1
+    if one_dimensional:
+        values = values[:, None]
+    elif values.ndim != 2:
+        raise ValueError("values must be one- or two-dimensional.")
+
+    codes, labels = encode_groups(groups, n_observations=values.shape[0])
+    means = np.zeros((labels.size, values.shape[1]), dtype=np.result_type(values, float))
+    np.add.at(means, codes, values)
+    means /= np.bincount(codes, minlength=labels.size)[:, None]
+    return means[:, 0] if one_dimensional else means
+
+
+def normalize_group_weights(weights, groups):
+    """Divide each row's weight by the number of rows in its group."""
+    weights = np.asarray(weights, dtype=float)
+    if weights.ndim not in (1, 2):
+        raise ValueError("weights must be one- or two-dimensional.")
+    codes, labels = encode_groups(groups, n_observations=weights.shape[0])
+    sizes = np.bincount(codes, minlength=labels.size)[codes]
+    reshape = (sizes.size,) + (1,) * (weights.ndim - 1)
+    return weights / sizes.reshape(reshape)
+
+
+def one_sample_t_from_sufficient_statistics(sums, sum_squares, n_observations):
+    """Calculate one-sample t statistics from sums and sums of squares."""
+    sums = np.asarray(sums, dtype=float)
+    sum_squares = np.asarray(sum_squares, dtype=float)
+    try:
+        broadcast_shape = np.broadcast_shapes(sums.shape, sum_squares.shape)
+    except ValueError as exc:
+        raise ValueError("sum_squares must broadcast to the shape of sums.") from exc
+    if broadcast_shape != sums.shape:
+        raise ValueError("sum_squares must broadcast to the shape of sums.")
+    if not isinstance(n_observations, (int, np.integer)) or n_observations < 2:
+        raise ValueError("n_observations must be an integer of at least two.")
+
+    statistics = np.square(sums)
+    np.subtract(n_observations * sum_squares, statistics, out=statistics)
+    np.maximum(statistics, 0.0, out=statistics)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        np.sqrt(statistics, out=statistics)
+        degenerate = statistics == 0
+        np.divide(sums, statistics, out=statistics)
+    statistics *= np.sqrt(n_observations - 1)
+    statistics[degenerate] = np.nan
+    return statistics
+
+
+def weighted_intercept_cr2_sufficient_statistics(values, weights):
+    """Prepare reusable sufficient statistics for intercept-only CR2 WLS."""
+    values = np.asarray(values, dtype=float)
+    weights = np.asarray(weights, dtype=float)
+    if values.ndim != 2:
+        raise ValueError("values must be two-dimensional.")
+    if weights.ndim != 1 or weights.size != values.shape[0]:
+        raise ValueError("weights must contain one value per observation.")
+    if np.any(~np.isfinite(weights)) or np.any(weights <= 0):
+        raise ValueError("weights must be finite positive values.")
+    if weights.size < 2:
+        raise ValueError("At least two observations with positive weight are required.")
+
+    total_weight = float(weights.sum())
+    leverage = weights / total_weight
+    adjusted_weights = np.square(weights) / (1.0 - leverage)
+    return WeightedInterceptCR2Statistics(
+        weighted_values=weights[:, None] * values,
+        adjusted_values=adjusted_weights[:, None] * values,
+        adjusted_sum_squares=(adjusted_weights[:, None] * np.square(values)).sum(axis=0),
+        adjusted_weight_sum=float(adjusted_weights.sum()),
+        total_weight=total_weight,
+    )
+
+
+def weighted_intercept_cr2(signs, sufficient_statistics):
+    r"""Evaluate signed intercept-only CR2 WLS statistics.
+
+    With :math:`W=\sum_g q_g`, :math:`h_g=q_g/W`, and signed observation
+    :math:`x_g^*=s_gx_g`, this computes
+
+    .. math::
+        \hat\mu = \frac{\sum_g q_gx_g^*}{W},\qquad
+        \widehat{V}(\hat\mu) = \frac{1}{W^2}
+        \sum_g \frac{q_g^2(x_g^*-\hat\mu)^2}{1-h_g},
+        \qquad t=\frac{\hat\mu}{\sqrt{\widehat{V}(\hat\mu)}}.
+    """
+    signs = np.asarray(signs, dtype=float)
+    if signs.ndim == 1:
+        signs = signs[None, :]
+    if signs.ndim != 2 or signs.shape[1] != sufficient_statistics.weighted_values.shape[0]:
+        raise ValueError("signs must contain one value per observation.")
+    if not np.all(np.isin(signs, (-1.0, 1.0))):
+        raise ValueError("signs may only contain -1 and 1.")
+
+    weighted_sums = signs @ sufficient_statistics.weighted_values
+    adjusted_sums = signs @ sufficient_statistics.adjusted_values
+    means = weighted_sums / sufficient_statistics.total_weight
+    meat = sufficient_statistics.adjusted_sum_squares[None, :] - 2.0 * means * adjusted_sums
+    meat += np.square(means) * sufficient_statistics.adjusted_weight_sum
+    np.maximum(meat, 0.0, out=meat)
+    degenerate = meat == 0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        statistics = weighted_sums / np.sqrt(meat)
+    statistics[degenerate] = np.nan
+    return statistics
 
 
 def cluster_weights(v, groups, tau2=0.0):
@@ -58,26 +229,17 @@ def cluster_weights(v, groups, tau2=0.0):
     .. footbibliography::
 
     """
-    groups = np.asarray(groups).ravel()
-    if groups.shape[0] != v.shape[0]:
-        raise ValueError(
-            f"groups must have one label per estimate: expected {v.shape[0]}, "
-            f"got {groups.shape[0]}."
-        )
-
-    _, group_codes = np.unique(groups, return_inverse=True)
-    sizes = np.bincount(np.ravel(group_codes))[np.ravel(group_codes)]
-    return 1.0 / ((v + tau2) * sizes[:, None])
+    return normalize_group_weights(1.0 / (v + tau2), groups)
 
 
 def collapse_clusters(y, v, X, groups, rho=DEFAULT_CLUSTER_RHO):
     r"""Aggregate each cluster to a single effect estimate.
 
     Moment-based estimators of :math:`\tau^2` count every row of ``y`` as an
-    independent study. When a cluster contributes several rows, that
+    independent observation. When a cluster contributes several rows, that
     pseudo-replication biases :math:`\tau^2` downward: the duplicated rows agree
     with each other by construction, so the observed dispersion looks smaller
-    than the number of "studies" would imply. Estimating :math:`\tau^2` from one
+    than the number of observations would imply. Estimating :math:`\tau^2` from one
     effect per cluster removes the problem.
 
     Each cluster is collapsed to the unweighted mean of its members, whose
@@ -92,7 +254,7 @@ def collapse_clusters(y, v, X, groups, rho=DEFAULT_CLUSTER_RHO):
     Parameters
     ----------
     y : :obj:`numpy.ndarray` of shape (K, D)
-        2d array of estimates (studies x parallel datasets).
+        2d array of estimates (observations x parallel datasets).
     v : :obj:`numpy.ndarray` of shape (K, D)
         2d array of sampling variances.
     X : :obj:`numpy.ndarray` of shape (K, P)
@@ -127,16 +289,13 @@ def collapse_clusters(y, v, X, groups, rho=DEFAULT_CLUSTER_RHO):
     group_codes = np.ravel(group_codes)
     n_groups = int(group_codes.max()) + 1
 
-    collapsed_y = np.empty((n_groups, y.shape[1]))
+    collapsed_y = group_mean(y, group_codes)
     collapsed_v = np.empty((n_groups, v.shape[1]))
-    collapsed_X = np.empty((n_groups, X.shape[1]))
+    collapsed_X = group_mean(X, group_codes)
 
     for group in range(n_groups):
         members = np.flatnonzero(group_codes == group)
         size = members.size
-        collapsed_y[group] = y[members].mean(axis=0)
-        collapsed_X[group] = X[members].mean(axis=0)
-
         member_v = v[members]
         if size == 1:
             collapsed_v[group] = member_v[0]
@@ -169,7 +328,7 @@ def collapse_clusters_by_n(y, n, X, groups, rho=DEFAULT_CLUSTER_RHO):
     Parameters
     ----------
     y : :obj:`numpy.ndarray` of shape (K, D)
-        2d array of estimates (studies x parallel datasets).
+        2d array of estimates (observations x parallel datasets).
     n : :obj:`numpy.ndarray` of shape (K, D)
         2d array of sample sizes.
     X : :obj:`numpy.ndarray` of shape (K, P)
@@ -194,16 +353,13 @@ def collapse_clusters_by_n(y, n, X, groups, rho=DEFAULT_CLUSTER_RHO):
     group_codes = np.ravel(group_codes)
     n_groups = int(group_codes.max()) + 1
 
-    collapsed_y = np.empty((n_groups, y.shape[1]))
+    collapsed_y = group_mean(y, group_codes)
     collapsed_n = np.empty((n_groups, n.shape[1]))
-    collapsed_X = np.empty((n_groups, X.shape[1]))
+    collapsed_X = group_mean(X, group_codes)
 
     for group in range(n_groups):
         members = np.flatnonzero(group_codes == group)
         size = members.size
-        collapsed_y[group] = y[members].mean(axis=0)
-        collapsed_X[group] = X[members].mean(axis=0)
-
         member_n = n[members]
         if size == 1:
             collapsed_n[group] = member_n[0]
@@ -216,6 +372,63 @@ def collapse_clusters_by_n(y, n, X, groups, rho=DEFAULT_CLUSTER_RHO):
     return collapsed_y, collapsed_n, collapsed_X
 
 
+def collapse_groups_by_n(y, n, X, groups):
+    r"""Aggregate repeated observations while preserving each group's ``n``.
+
+    This operation is appropriate when rows in a group are repeated outcomes or
+    measurements of the *same sampling unit*. Their equal-weight mean is one
+    group-level estimate, but ``n`` must only be counted once. Unlike
+    :func:`collapse_clusters_by_n`, this function therefore does not convert
+    repeated outcomes into an effective sample size.
+
+    All rows in a group must report the same ``n`` value. A disagreement is
+    ambiguous and is rejected rather than silently averaged.
+
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        Estimates.
+    n : :obj:`numpy.ndarray` of shape (K, 1) or (K, D)
+        Per-observation ``n`` values.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Design matrix.
+    groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
+        Group labels.
+
+    Returns
+    -------
+    :obj:`tuple`
+        ``(y, n, X)`` with one row per group.
+    """
+    y = np.asarray(y)
+    n = np.asarray(n)
+    X = np.asarray(X)
+    groups = np.asarray(groups).ravel()
+    if groups.shape[0] != y.shape[0]:
+        raise ValueError(
+            f"groups must have one label per estimate: expected {y.shape[0]}, "
+            f"got {groups.shape[0]}."
+        )
+
+    _, group_codes = np.unique(groups, return_inverse=True)
+    n_groups = int(group_codes.max()) + 1
+    collapsed_y = group_mean(y, group_codes)
+    collapsed_n = np.empty((n_groups, n.shape[1]))
+    collapsed_X = group_mean(X, group_codes)
+
+    for group in range(n_groups):
+        members = np.flatnonzero(group_codes == group)
+        member_n = n[members]
+        if not np.allclose(member_n, member_n[[0]], rtol=0.0, atol=0.0):
+            raise ValueError(
+                "n values within each group must agree when observations "
+                "come from the same sampling unit."
+            )
+        collapsed_n[group] = member_n[0]
+
+    return collapsed_y, collapsed_n, collapsed_X
+
+
 def estimate_null_correlation(y, groups=None, bias_correct=True):
     r"""Estimate the correlation between estimates under the null.
 
@@ -223,8 +436,8 @@ def estimate_null_correlation(y, groups=None, bias_correct=True):
     inflation term, or Fisher's via Brown's method -- need the correlation the
     inputs would have *under the null*, i.e. the correlation of their noise.
     Correlating the raw rows of ``y`` does not measure that: any effect shared
-    across studies is common signal, and it inflates every pairwise
-    correlation, including pairs from unrelated studies that are independent by
+    across inputs is common signal, and it inflates every pairwise
+    correlation, including pairs from unrelated groups that are independent by
     construction.
 
     Removing the across-dataset mean at each column first strips that shared
@@ -235,7 +448,7 @@ def estimate_null_correlation(y, groups=None, bias_correct=True):
     Parameters
     ----------
     y : :obj:`numpy.ndarray` of shape (K, D)
-        2d array of estimates (studies x parallel datasets). At least two
+        2d array of estimates (observations x parallel datasets). At least two
         parallel datasets are required to estimate a correlation.
     groups : None or :obj:`numpy.ndarray` of shape (K,), optional
         Group labels, one per estimate. When supplied, the shrinkage that
@@ -422,7 +635,7 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
     Parameters
     ----------
     y : :obj:`numpy.ndarray`
-        2-d array of estimates (studies x parallel datasets)
+        2-d array of estimates (observations x parallel datasets)
     v : :obj:`numpy.ndarray`
         2-d array of sampling variances
     X : :obj:`numpy.ndarray`
@@ -447,7 +660,7 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
     """
     w = 1.0 / (v + tau2) if w is None else w
 
-    # Einsum indices: k = studies, p = predictors, i = parallel iterates
+    # Einsum indices: k = observations, p = predictors, i = parallel iterates
     wX = np.einsum("kp,ki->ipk", X, w)
     cov = wX.dot(X)
 
@@ -541,7 +754,7 @@ def cluster_robust_cov(
     Implements robust variance estimation (RVE) for meta-regression with
     dependent effect size estimates :footcite:p:`hedges2010robust`. Estimates
     sharing a group label are treated as statistically dependent, e.g.
-    multiple contrasts contributed by the same study.
+    repeated observations contributed by the same sampling unit.
 
     The estimator is
 
@@ -556,7 +769,7 @@ def cluster_robust_cov(
     Parameters
     ----------
     y : :obj:`numpy.ndarray` of shape (K, D)
-        2d array of estimates (studies x parallel datasets).
+        2d array of estimates (observations x parallel datasets).
     v : :obj:`numpy.ndarray` of shape (K, D)
         2d array of sampling variances.
     X : :obj:`numpy.ndarray` of shape (K, P)
@@ -565,7 +778,7 @@ def cluster_robust_cov(
         Fixed effect coefficients, as returned by
         :func:`~pymare.stats.weighted_least_squares`.
     groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
-        Group (cluster) labels, one per study. Any hashable labels are
+        Group (cluster) labels, one per observation. Any hashable labels are
         accepted.
     tau2 : :obj:`float` or :obj:`numpy.ndarray`, optional
         tau^2 estimate used for the weights, matching the value used to
@@ -627,7 +840,7 @@ def cluster_robust_cov(
     groups = np.asarray(groups).ravel()
     if groups.shape[0] != y.shape[0]:
         raise ValueError(
-            f"groups must have one label per study: expected {y.shape[0]} "
+            f"groups must have one label per observation: expected {y.shape[0]} "
             f"labels, got {groups.shape[0]}."
         )
 
@@ -661,7 +874,7 @@ def cluster_robust_cov(
 
     w = 1.0 / (v + tau2) if w is None else w
 
-    # Einsum indices: k = studies, p/q = predictors, i = parallel iterates,
+    # Einsum indices: k = observations, p/q = predictors, i = parallel iterates,
     # j = groups.
     wX = np.einsum("kp,ki->ipk", X, w)
 
@@ -687,7 +900,7 @@ def cluster_robust_cov(
         starts = np.r_[0, np.flatnonzero(np.diff(group_codes)) + 1]
         if starts.size == n_groups:
             # The weighted design is no longer needed after the bread is
-            # formed, so reuse it for the per-study scores rather than
+            # formed, so reuse it for the per-observation scores rather than
             # allocating another array of size (i, p, k).
             wX *= resid.T[:, None, :]
             group_sizes = np.diff(np.r_[starts, group_codes.size])
@@ -739,13 +952,13 @@ def q_profile(y, v, X, alpha=0.05):
     Parameters
     ----------
     y : :obj:`numpy.ndarray` of shape (K,)
-        1d array of study-level estimates
+        1d array of observation-level estimates
     v : :obj:`numpy.ndarray` of shape (K,)
-        1d array of study-level variances
+        1d array of observation-level variances
     X : :obj:`numpy.ndarray` of shape (K[, P])
-        1d or 2d array containing study-level predictors
+        1d or 2d array containing observation-level predictors
         (including intercept); has dimensions K x P, where K is the number
-        of studies and P is the number of predictor variables.
+        of observations and P is the number of predictor variables.
     alpha : :obj:`float`, optional
         alpha value defining the coverage of the CIs,
         where width(CI) = 1 - alpha. Default = 0.05.
@@ -793,15 +1006,15 @@ def q_gen(y, v, X, tau2):
     Parameters
     ----------
     y : :obj:`numpy.ndarray`
-        1d array of study-level estimates
+        1d array of observation-level estimates
     v : :obj:`numpy.ndarray`
-        1d array of study-level variances
+        1d array of observation-level variances
     X : :obj:`numpy.ndarray`
-        1d or 2d array containing study-level predictors
+        1d or 2d array containing observation-level predictors
         (including intercept); has dimensions K x P, where K is the number
-        of studies and P is the number of predictor variables.
+        of observations and P is the number of predictor variables.
     tau2 : :obj:`float`
-        Between-study variance. Must be >= 0.
+        Between-unit variance. Must be >= 0.
 
     Returns
     -------

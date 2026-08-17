@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+import scipy.stats as ss
 
 from pymare import Dataset, meta_regression
 from pymare.estimators import (
@@ -9,6 +10,7 @@ from pymare.estimators import (
     FisherCombinationTest,
     Hedges,
     SampleSizeBasedLikelihoodEstimator,
+    StoufferCombinationTest,
     VarianceBasedLikelihoodEstimator,
     WeightedLeastSquares,
 )
@@ -17,22 +19,213 @@ from pymare.stats import (
     cluster_weights,
     collapse_clusters,
     collapse_clusters_by_n,
+    collapse_groups_by_n,
+    encode_groups,
     estimate_null_correlation,
+    group_mean,
+    normalize_group_weights,
+    one_sample_t_from_sufficient_statistics,
     undo_centering_shrinkage,
+    weighted_intercept_cr2,
+    weighted_intercept_cr2_sufficient_statistics,
     weighted_least_squares,
 )
 
 
+def test_stouffer_group_level_matches_two_stage_hand_calculation():
+    """Groups are standardized first and then receive one external weight."""
+    z = np.array([[1.0, 2.0], [3.0, 4.0], [0.5, -1.0]])
+    groups = np.array([0, 0, 1])
+    weights = np.sqrt(np.array([20.0, 20.0, 80.0]))[:, None]
+    corr = np.eye(3)
+    corr[0, 1] = corr[1, 0] = 0.5
+
+    result = StoufferCombinationTest(group_level=True).fit(z, w=weights, g=groups, corr=corr)
+
+    # Var((z_1 + z_2) / 2) = (1 + 1 + 2 rho) / 4 = 3/4.
+    group_z = np.vstack([z[:2].mean(axis=0) / np.sqrt(0.75), z[2]])
+    group_weights = np.sqrt(np.array([20.0, 80.0]))
+    expected_z = (group_z * group_weights[:, None]).sum(axis=0) / np.sqrt(
+        np.square(group_weights).sum()
+    )
+
+    assert np.allclose(result.params_["z"], expected_z)
+    assert np.allclose(result.params_["p"], ss.norm.sf(expected_z))
+
+
+def test_stouffer_group_level_is_invariant_to_perfect_duplicates():
+    """Duplicating a perfectly correlated observation cannot buy group influence."""
+    z = np.array([[1.5, -0.5], [0.25, 2.0]])
+    weights = np.sqrt(np.array([25.0, 100.0]))[:, None]
+    expected = StoufferCombinationTest(group_level=True).fit(
+        z,
+        w=weights,
+        g=np.array([0, 1]),
+        corr=np.eye(2),
+    )
+
+    expanded = np.vstack([np.repeat(z[[0]], 4, axis=0), z[[1]]])
+    expanded_weights = np.sqrt(np.array([25.0] * 4 + [100.0]))[:, None]
+    corr = np.eye(5)
+    corr[:4, :4] = 1.0
+    observed = StoufferCombinationTest(group_level=True).fit(
+        expanded,
+        w=expanded_weights,
+        g=np.array([0, 0, 0, 0, 1]),
+        corr=corr,
+    )
+
+    assert np.allclose(observed.params_["z"], expected.params_["z"])
+    assert np.allclose(observed.params_["p"], expected.params_["p"])
+
+
+def test_stouffer_group_level_permutation_flips_groups_as_units():
+    """Exact permutation inference is invariant to duplicated group rows."""
+    collapsed_z = np.array([[1.5], [0.25], [-0.5]])
+    collapsed_weights = np.sqrt(np.array([25.0, 100.0, 50.0]))[:, None]
+    collapsed_estimator = StoufferCombinationTest(group_level=True)
+    collapsed_result = collapsed_estimator.fit_dataset(
+        Dataset(
+            y=collapsed_z,
+            n=collapsed_weights,
+            g=np.arange(3),
+        ),
+        corr=np.eye(3),
+    ).summary()
+
+    expanded_z = np.vstack([np.repeat(collapsed_z[[0]], 4, axis=0), collapsed_z[1:]])
+    expanded_weights = np.sqrt(np.array([25.0] * 4 + [100.0, 50.0]))[:, None]
+    expanded_groups = np.array([0, 0, 0, 0, 1, 2])
+    corr = np.eye(6)
+    corr[:4, :4] = 1.0
+    expanded_result = (
+        StoufferCombinationTest(group_level=True)
+        .fit_dataset(
+            Dataset(y=expanded_z, n=expanded_weights, g=expanded_groups),
+            corr=corr,
+        )
+        .summary()
+    )
+
+    collapsed_perm = collapsed_result.permutation_test(n_perm=20)
+    expanded_perm = expanded_result.permutation_test(n_perm=20)
+    assert collapsed_perm.exact
+    assert expanded_perm.exact
+    assert collapsed_perm.n_perm == expanded_perm.n_perm == 8
+    assert np.allclose(collapsed_perm.perm_p["fe_p"], expanded_perm.perm_p["fe_p"])
+
+
+def test_stouffer_group_level_rejects_inconsistent_group_weights():
+    """A group has one weight, not one independently varying row weight."""
+    with pytest.raises(ValueError, match="one weight per group"):
+        StoufferCombinationTest(group_level=True).fit(
+            np.ones((3, 2)),
+            w=np.array([2.0, 3.0, 4.0])[:, None],
+            g=np.array([0, 0, 1]),
+            corr=np.eye(3),
+        )
+
+
 def _dependent_data(rng, n_groups=10, n_per_group=3, n_datasets=4, rho_sd=1.0):
     """Build data where estimates within a group share a common offset."""
-    n_studies = n_groups * n_per_group
+    n_estimates = n_groups * n_per_group
     shared = rng.normal(0, rho_sd, size=(n_groups, n_datasets))
-    noise = rng.normal(0, 0.25, size=(n_studies, n_datasets))
+    noise = rng.normal(0, 0.25, size=(n_estimates, n_datasets))
     y = np.repeat(shared, n_per_group, axis=0) + noise
-    v = np.abs(rng.normal(0, 0.2, size=(n_studies, n_datasets))) + 0.5
-    X = np.ones((n_studies, 1))
+    v = np.abs(rng.normal(0, 0.2, size=(n_estimates, n_datasets))) + 0.5
+    X = np.ones((n_estimates, 1))
     groups = np.repeat(np.arange(n_groups), n_per_group)
     return y, v, X, groups
+
+
+# -----------------------------------------------------------------------------
+# Generic group primitives
+# -----------------------------------------------------------------------------
+
+
+def test_encode_groups_preserves_first_occurrence_order():
+    """Arbitrary labels should map stably without imposing sorted order."""
+    codes, labels = encode_groups(["later", "later", "first", "last", "first"])
+
+    assert np.array_equal(codes, [0, 0, 1, 2, 1])
+    assert np.array_equal(labels, ["later", "first", "last"])
+
+
+def test_group_mean_uses_ten_distinct_observations_from_one_group():
+    """A large group may contain genuinely different observations, not duplicates."""
+    first_group = np.arange(30, dtype=float).reshape(10, 3)
+    values = np.vstack([first_group, [[100.0, 200.0, 300.0]]])
+    groups = np.array(["many"] * 10 + ["single"])
+
+    means = group_mean(values, groups)
+
+    assert np.allclose(means[0], first_group.mean(axis=0))
+    assert np.allclose(means[1], [100.0, 200.0, 300.0])
+
+
+def test_normalize_group_weights_divides_by_observation_count():
+    """Normalization should preserve row-specific weights while removing multiplicity."""
+    weights = np.array([2.0, 4.0, 6.0, 10.0])
+    groups = np.array([0, 0, 0, 1])
+
+    normalized = normalize_group_weights(weights, groups)
+
+    assert np.allclose(normalized, [2 / 3, 4 / 3, 2, 10])
+
+
+def test_weighted_intercept_cr2_matches_explicit_signed_formula():
+    """The generic vectorized CR2 primitive must recompute residuals after signs."""
+    values = np.array([[1.0, 2.0], [3.0, 5.0], [7.0, 11.0], [4.0, -1.0]])
+    weights = np.array([20.0, 40.0, 80.0, 25.0])
+    signs = np.array([[1.0, 1.0, 1.0, 1.0], [1.0, -1.0, 1.0, -1.0]])
+    sufficient_statistics = weighted_intercept_cr2_sufficient_statistics(values, weights)
+
+    observed = weighted_intercept_cr2(signs, sufficient_statistics)
+
+    expected = []
+    total_weight = weights.sum()
+    leverage = weights / total_weight
+    for sign in signs:
+        signed = sign[:, None] * values
+        mean = (weights[:, None] * signed).sum(axis=0) / total_weight
+        residuals = signed - mean
+        meat = (
+            np.square(weights)[:, None] * np.square(residuals) / (1.0 - leverage)[:, None]
+        ).sum(axis=0)
+        expected.append(mean / (np.sqrt(meat) / total_weight))
+
+    assert np.allclose(observed, expected)
+
+
+def test_weighted_intercept_cr2_rejects_invalid_signs():
+    """Only one -1/+1 sign per independent input is accepted."""
+    statistics = weighted_intercept_cr2_sufficient_statistics(
+        np.ones((3, 2)),
+        np.ones(3),
+    )
+
+    with pytest.raises(ValueError, match="-1 and 1"):
+        weighted_intercept_cr2(np.array([[1.0, 0.0, -1.0]]), statistics)
+
+
+def test_one_sample_t_from_sufficient_statistics_matches_direct_formula():
+    """The reusable sufficient-statistic form must equal an ordinary one-sample t."""
+    values = np.array([[1.0, 2.0], [3.0, 5.0], [7.0, 11.0], [4.0, -1.0]])
+
+    observed = one_sample_t_from_sufficient_statistics(
+        values.sum(axis=0),
+        np.square(values).sum(axis=0),
+        values.shape[0],
+    )
+    expected = values.mean(axis=0) / (values.std(axis=0, ddof=1) / np.sqrt(values.shape[0]))
+
+    assert np.allclose(observed, expected)
+    batched = one_sample_t_from_sufficient_statistics(
+        np.vstack([values.sum(axis=0), -values.sum(axis=0)]),
+        np.square(values).sum(axis=0),
+        values.shape[0],
+    )
+    assert np.allclose(batched, np.vstack([expected, -expected]))
 
 
 # -----------------------------------------------------------------------------
@@ -44,10 +237,10 @@ def _dependent_data(rng, n_groups=10, n_per_group=3, n_datasets=4, rho_sd=1.0):
 def test_cluster_robust_cov_matches_explicit_reference():
     """Check the vectorized sandwich against a plain per-dataset loop."""
     rng = np.random.RandomState(0)
-    n_studies, n_datasets, n_preds = 12, 3, 2
-    y = rng.randn(n_studies, n_datasets)
-    v = np.abs(rng.randn(n_studies, n_datasets)) + 0.5
-    X = np.c_[np.ones(n_studies), rng.randn(n_studies)]
+    n_estimates, n_datasets, n_preds = 12, 3, 2
+    y = rng.randn(n_estimates, n_datasets)
+    v = np.abs(rng.randn(n_estimates, n_datasets)) + 0.5
+    X = np.c_[np.ones(n_estimates), rng.randn(n_estimates)]
     groups = np.repeat(np.arange(4), 3)
 
     beta = weighted_least_squares(y, v, X)
@@ -81,10 +274,10 @@ def test_cluster_robust_cov_matches_explicit_reference():
 def test_cluster_robust_cov_group_layouts_match_explicit_reference(groups):
     """Optimized and fallback grouping paths must produce the same sandwich."""
     rng = np.random.RandomState(3)
-    n_studies, n_datasets, n_preds = 12, 5, 3
-    y = rng.randn(n_studies, n_datasets)
-    v = np.abs(rng.randn(n_studies, n_datasets)) + 0.5
-    X = np.c_[np.ones(n_studies), rng.randn(n_studies, n_preds - 1)]
+    n_estimates, n_datasets, n_preds = 12, 5, 3
+    y = rng.randn(n_estimates, n_datasets)
+    v = np.abs(rng.randn(n_estimates, n_datasets)) + 0.5
+    X = np.c_[np.ones(n_estimates), rng.randn(n_estimates, n_preds - 1)]
     beta = weighted_least_squares(y, v, X)
 
     robust = cluster_robust_cov(y, v, X, beta, groups, small_sample=False, method="CR0")
@@ -116,17 +309,17 @@ def test_cluster_robust_cov_small_sample_scaling():
 
 
 @pytest.mark.filterwarnings("ignore:Cluster-robust")
-def test_cluster_robust_cov_one_group_per_study_is_heteroskedasticity_robust():
+def test_cluster_robust_cov_one_group_per_estimate_is_heteroskedasticity_robust():
     """With singleton groups the sandwich reduces to the HC0 estimator."""
     rng = np.random.RandomState(0)
-    n_studies = 8
-    y = rng.randn(n_studies, 1)
-    v = np.abs(rng.randn(n_studies, 1)) + 0.5
-    X = np.ones((n_studies, 1))
+    n_estimates = 8
+    y = rng.randn(n_estimates, 1)
+    v = np.abs(rng.randn(n_estimates, 1)) + 0.5
+    X = np.ones((n_estimates, 1))
     beta = weighted_least_squares(y, v, X)
 
     robust = cluster_robust_cov(
-        y, v, X, beta, np.arange(n_studies), small_sample=False, method="CR0"
+        y, v, X, beta, np.arange(n_estimates), small_sample=False, method="CR0"
     )
 
     weights = 1.0 / v[:, 0]
@@ -137,12 +330,12 @@ def test_cluster_robust_cov_one_group_per_study_is_heteroskedasticity_robust():
 
 
 def test_cluster_robust_cov_wrong_group_length():
-    """Group labels must be one per study."""
+    """Group labels must be one per observation."""
     rng = np.random.RandomState(0)
     y, v, X, _ = _dependent_data(rng)
     beta = weighted_least_squares(y, v, X)
 
-    with pytest.raises(ValueError, match="one label per study"):
+    with pytest.raises(ValueError, match="one label per observation"):
         cluster_robust_cov(y, v, X, beta, np.arange(3))
 
 
@@ -150,10 +343,10 @@ def test_cluster_robust_cov_wrong_group_length():
 def test_cluster_robust_cov_too_few_groups_for_correction():
     """The small-sample correction needs more groups than predictors."""
     rng = np.random.RandomState(0)
-    n_studies = 6
-    y = rng.randn(n_studies, 1)
-    v = np.ones((n_studies, 1))
-    X = np.c_[np.ones(n_studies), rng.randn(n_studies)]
+    n_estimates = 6
+    y = rng.randn(n_estimates, 1)
+    v = np.ones((n_estimates, 1))
+    X = np.c_[np.ones(n_estimates), rng.randn(n_estimates)]
     beta = weighted_least_squares(y, v, X)
     groups = np.repeat([0, 1], 3)  # 2 groups, 2 predictors
 
@@ -329,17 +522,53 @@ def test_results_use_t_reference_with_groups():
     assert np.all(width_robust > width_naive)
 
 
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+def test_group_weighted_heterogeneity_matches_collapsed_reference():
+    """Q and its degrees of freedom must use independent group aggregates."""
+    y = np.array([[1.0], [3.0], [8.0], [10.0], [20.0]])
+    v = np.array([[1.0], [4.0], [2.0], [8.0], [5.0]])
+    X = np.ones((5, 1))
+    groups = np.array([0, 0, 1, 1, 2])
+    rho = 0.4
+    dataset = Dataset(y=y, v=v, X=X, g=groups, add_intercept=False)
+
+    observed = (
+        WeightedLeastSquares(weight_scheme="group", cluster_rho=rho)
+        .fit_dataset(dataset)
+        .summary()
+        .get_heterogeneity_stats()
+    )
+
+    collapsed_y, collapsed_v, collapsed_X = collapse_clusters(y, v, X, groups, rho=rho)
+    expected = (
+        WeightedLeastSquares()
+        .fit_dataset(
+            Dataset(
+                y=collapsed_y,
+                v=collapsed_v,
+                X=collapsed_X,
+                add_intercept=False,
+            )
+        )
+        .summary()
+        .get_heterogeneity_stats()
+    )
+
+    for key in ("Q", "p(Q)", "I^2", "H"):
+        assert np.allclose(observed[key], expected[key])
+
+
 # -----------------------------------------------------------------------------
 # Brown's method
 # -----------------------------------------------------------------------------
 
 
 def test_brown_reduces_to_fisher_with_singleton_groups():
-    """One group per study means no dependence, so Fisher's result stands."""
+    """One group per estimate means no dependence, so Fisher's result stands."""
     rng = np.random.RandomState(0)
-    n_studies, n_datasets = 10, 50
-    z = rng.randn(n_studies, n_datasets)
-    groups = np.tile(np.arange(n_studies)[:, None], (1, n_datasets))
+    n_estimates, n_datasets = 10, 50
+    z = rng.randn(n_estimates, n_datasets)
+    groups = np.tile(np.arange(n_estimates)[:, None], (1, n_datasets))
 
     plain = FisherCombinationTest().fit(z).params_["p"]
     blocked = FisherCombinationTest().fit(z, g=groups).params_["p"]
@@ -350,12 +579,12 @@ def test_brown_reduces_to_fisher_with_singleton_groups():
 def test_brown_equal_sized_groups_reduce_to_fisher_with_zero_correlation():
     """Equal-sized independent groups must recover Fisher's method exactly."""
     rng = np.random.RandomState(0)
-    n_studies, n_datasets = 10, 50
-    z = rng.randn(n_studies, n_datasets)
+    n_estimates, n_datasets = 10, 50
+    z = rng.randn(n_estimates, n_datasets)
     groups = np.tile(np.repeat(np.arange(5), 2)[:, None], (1, n_datasets))
 
     plain = FisherCombinationTest().fit(z).params_["p"]
-    blocked = FisherCombinationTest().fit(z, g=groups, corr=np.eye(n_studies)).params_["p"]
+    blocked = FisherCombinationTest().fit(z, g=groups, corr=np.eye(n_estimates)).params_["p"]
 
     assert np.allclose(plain, blocked)
 
@@ -372,9 +601,21 @@ def test_brown_accepts_one_dimensional_groups():
     assert np.allclose(one_dimensional, two_dimensional)
 
 
+def test_fisher_preserves_group_and_correlation_positional_arguments():
+    """The new generic weight must not reinterpret released positional calls."""
+    z = np.arange(24, dtype=float).reshape(6, 4) / 10
+    groups = np.repeat(np.arange(3), 2)
+    corr = np.eye(6)
+
+    expected = FisherCombinationTest().fit(z, g=groups, corr=corr).params_["p"]
+    observed = FisherCombinationTest().fit(z, groups, corr).params_["p"]
+
+    assert np.allclose(observed, expected)
+
+
 @pytest.mark.parametrize("mode", ["directed", "concordant"])
 def test_brown_perfect_duplicates_have_unit_group_weight(mode):
-    """Repeating a perfectly dependent input must not increase its study's weight."""
+    """Repeating a perfectly dependent input must not increase its group's weight."""
     rng = np.random.RandomState(4)
     n_datasets = 100
     collapsed = rng.randn(2, n_datasets)
@@ -391,8 +632,57 @@ def test_brown_perfect_duplicates_have_unit_group_weight(mode):
     assert np.allclose(actual, expected)
 
 
+def test_brown_permutation_flips_groups_as_units():
+    """Exact Brown inference is invariant to repeated rows from one group."""
+    collapsed = np.array([[1.5], [0.25], [-0.5]])
+    collapsed_result = (
+        FisherCombinationTest()
+        .fit_dataset(Dataset(y=collapsed, g=np.arange(3)), corr=np.eye(3))
+        .summary()
+    )
+
+    expanded = np.vstack([np.repeat(collapsed[[0]], 4, axis=0), collapsed[1:]])
+    groups = np.array([0, 0, 0, 0, 1, 2])
+    corr = np.eye(6)
+    corr[:4, :4] = 1.0
+    expanded_result = (
+        FisherCombinationTest().fit_dataset(Dataset(y=expanded, g=groups), corr=corr).summary()
+    )
+    assert np.array_equal(expanded_result.estimator.corr_, corr)
+
+    collapsed_perm = collapsed_result.permutation_test(n_perm=20)
+    expanded_perm = expanded_result.permutation_test(n_perm=20)
+    assert collapsed_perm.exact
+    assert expanded_perm.exact
+    assert collapsed_perm.n_perm == expanded_perm.n_perm == 8
+    assert np.allclose(collapsed_perm.perm_p["fe_p"], expanded_perm.perm_p["fe_p"])
+
+
+def test_brown_applies_one_external_weight_per_group():
+    """Generic group weights are allocated across rows without multiplicity."""
+    collapsed = np.array([[1.5, -0.5], [0.25, 2.0]])
+    expected = FisherCombinationTest().fit(
+        collapsed,
+        w=np.array([2.0, 4.0]),
+    )
+
+    expanded = np.vstack([np.repeat(collapsed[[0]], 3, axis=0), collapsed[[1]]])
+    groups = np.array([0, 0, 0, 1])
+    corr = np.eye(4)
+    corr[:3, :3] = 1.0
+    observed = FisherCombinationTest().fit(
+        expanded,
+        w=np.array([2.0, 2.0, 2.0, 4.0]),
+        g=groups,
+        corr=corr,
+    )
+
+    assert np.allclose(observed.params_["p"], expected.params_["p"])
+    assert np.allclose(observed.params_["z"], expected.params_["z"])
+
+
 def test_brown_rejects_feature_specific_groups():
-    """Groups describe studies and therefore must not vary across features."""
+    """Groups describe rows and therefore must not vary across features."""
     rng = np.random.RandomState(0)
     z = rng.randn(6, 20)
     groups = np.tile(np.repeat(np.arange(3), 2)[:, None], (1, z.shape[1]))
@@ -410,13 +700,13 @@ def test_brown_is_conservative_in_the_upper_tail():
     is the only region used for inference.
     """
     rng = np.random.RandomState(1)
-    n_studies, n_datasets = 10, 2000
-    shared = rng.randn(n_studies // 2, n_datasets)
-    z = np.repeat(shared, 2, axis=0) + 0.2 * rng.randn(n_studies, n_datasets)
+    n_estimates, n_datasets = 10, 2000
+    shared = rng.randn(n_estimates // 2, n_datasets)
+    z = np.repeat(shared, 2, axis=0) + 0.2 * rng.randn(n_estimates, n_datasets)
 
-    groups = np.tile(np.repeat(np.arange(n_studies // 2), 2)[:, None], (1, n_datasets))
-    corr = np.eye(n_studies)
-    for idx in range(0, n_studies, 2):
+    groups = np.tile(np.repeat(np.arange(n_estimates // 2), 2)[:, None], (1, n_datasets))
+    corr = np.eye(n_estimates)
+    for idx in range(0, n_estimates, 2):
         corr[idx, idx + 1] = corr[idx + 1, idx] = 0.95
 
     plain = FisherCombinationTest().fit(z).params_["p"]
@@ -440,7 +730,7 @@ def test_brown_warns_on_corr_without_groups():
 
 
 def test_brown_rejects_mismatched_corr():
-    """The correlation matrix must match the number of studies."""
+    """The correlation matrix must match the number of estimates."""
     rng = np.random.RandomState(0)
     z = rng.randn(6, 10)
     groups = np.tile(np.repeat(np.arange(3), 2)[:, None], (1, 10))
@@ -450,7 +740,7 @@ def test_brown_rejects_mismatched_corr():
 
 
 def test_brown_rejects_nonsquare_corr():
-    """Correlation matrices must have one row and column per study."""
+    """Correlation matrices must have one row and column per estimate."""
     rng = np.random.RandomState(0)
     z = rng.randn(6, 10)
     groups = np.repeat(np.arange(3), 2)
@@ -479,11 +769,11 @@ def test_cr2_reduces_to_hc2_with_singleton_groups():
     reference is reproduced explicitly.
     """
     rng = np.random.default_rng(11)
-    n_studies, n_preds = 30, 3
-    X = np.c_[np.ones(n_studies), rng.standard_normal((n_studies, n_preds - 1))]
-    y = (X @ np.array([1.0, 0.5, -0.3]))[:, None] + rng.standard_normal((n_studies, 1))
-    v = np.ones((n_studies, 1))
-    groups = np.arange(n_studies)
+    n_estimates, n_preds = 30, 3
+    X = np.c_[np.ones(n_estimates), rng.standard_normal((n_estimates, n_preds - 1))]
+    y = (X @ np.array([1.0, 0.5, -0.3]))[:, None] + rng.standard_normal((n_estimates, 1))
+    v = np.ones((n_estimates, 1))
+    groups = np.arange(n_estimates)
 
     beta, inv_cov = weighted_least_squares(y, v, X, 0.0, return_cov=True)
     robust = cluster_robust_cov(
@@ -534,21 +824,105 @@ def test_cluster_weights_equalize_group_totals():
 
 
 def test_cluster_weighting_removes_the_replication_advantage():
-    """A study contributing many estimates must not outvote a study with one."""
+    """A group contributing many estimates must not outvote a group with one."""
     n_singletons = 8
     groups = np.array([0] * 6 + list(range(1, n_singletons + 1)))
-    n_studies = groups.size
-    y = np.zeros((n_studies, 1))
-    y[:6] = 1.0  # the big study is the only one with a non-zero effect
-    v = np.ones((n_studies, 1))
+    n_estimates = groups.size
+    y = np.zeros((n_estimates, 1))
+    y[:6] = 1.0  # the big group is the only one with a non-zero effect
+    v = np.ones((n_estimates, 1))
     dataset = Dataset(y=y, v=v, g=groups)
 
     individual = WeightedLeastSquares().fit_dataset(dataset).summary()
     clustered = WeightedLeastSquares(weight_scheme="cluster").fit_dataset(dataset).summary()
 
-    # Six of fourteen estimates, but only one of nine studies.
+    # Six of fourteen estimates, but only one of nine groups.
     assert np.isclose(individual.get_fe_stats()["est"].ravel()[0], 6 / 14)
     assert np.isclose(clustered.get_fe_stats()["est"].ravel()[0], 1 / 9)
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+def test_group_weighting_matches_explicit_group_collapse():
+    """Group mode must fit the algebraically equivalent one-row-per-group model."""
+    y = np.array([[1.0], [3.0], [8.0], [10.0], [20.0]])
+    v = np.array([[1.0], [4.0], [2.0], [8.0], [5.0]])
+    X = np.ones((5, 1))
+    groups = np.array([0, 0, 1, 1, 2])
+    rho = 0.4
+
+    collapsed_y, collapsed_v, collapsed_X = collapse_clusters(y, v, X, groups, rho=rho)
+    expected = WeightedLeastSquares().fit(
+        collapsed_y,
+        collapsed_X,
+        v=collapsed_v,
+        g=np.arange(3),
+    )
+    observed = WeightedLeastSquares(
+        weight_scheme="group",
+        cluster_rho=rho,
+    ).fit(y, X, v=v, g=groups)
+
+    assert np.allclose(observed.params_["fe_params"], expected.params_["fe_params"])
+    assert np.allclose(observed.params_["inv_cov"], expected.params_["inv_cov"])
+    assert observed.n_clusters_ == 3
+
+
+@pytest.mark.parametrize(
+    "estimator",
+    [DerSimonianLaird, Hedges, VarianceBasedLikelihoodEstimator],
+)
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+def test_variance_estimators_group_mode_matches_explicit_collapse(estimator):
+    """Every variance-based algorithm must use the same grouped inputs."""
+    y = np.array([[1.0], [3.0], [6.0], [10.0], [20.0], [22.0]])
+    v = np.array([[1.0], [4.0], [2.0], [8.0], [5.0], [3.0]])
+    X = np.ones((6, 1))
+    groups = np.array([0, 0, 1, 1, 2, 2])
+    rho = 0.4
+    collapsed_y, collapsed_v, collapsed_X = collapse_clusters(y, v, X, groups, rho=rho)
+
+    expected = estimator().fit(
+        y=collapsed_y,
+        v=collapsed_v,
+        X=collapsed_X,
+        g=np.arange(3),
+    )
+    observed = estimator(weight_scheme="group", cluster_rho=rho).fit(
+        y=y,
+        v=v,
+        X=X,
+        g=groups,
+    )
+
+    assert np.allclose(observed.params_["fe_params"], expected.params_["fe_params"])
+    assert np.allclose(observed.params_["tau2"], expected.params_["tau2"])
+    assert np.allclose(observed.params_["inv_cov"], expected.params_["inv_cov"])
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+def test_sample_size_likelihood_group_mode_matches_explicit_collapse():
+    """The likelihood receives one unchanged n value per independent group."""
+    y = np.array([[1.0], [3.0], [6.0], [10.0], [20.0], [22.0]])
+    n = np.array([[20.0], [20.0], [50.0], [50.0], [100.0], [100.0]])
+    X = np.ones((6, 1))
+    groups = np.array([0, 0, 1, 1, 2, 2])
+    collapsed_y, collapsed_n, collapsed_X = collapse_groups_by_n(y, n, X, groups)
+
+    expected = SampleSizeBasedLikelihoodEstimator().fit(
+        y=collapsed_y,
+        n=collapsed_n,
+        X=collapsed_X,
+        g=np.arange(3),
+    )
+    observed = SampleSizeBasedLikelihoodEstimator(weight_scheme="group").fit(
+        y=y,
+        n=n,
+        X=X,
+        g=groups,
+    )
+
+    for key in ("fe_params", "sigma2", "tau2", "inv_cov"):
+        assert np.allclose(observed.params_[key], expected.params_[key])
 
 
 def test_estimator_rejects_unknown_weight_scheme():
@@ -632,6 +1006,31 @@ def test_collapse_clusters_by_n_matches_hand_calculation():
     assert np.isclose(c_n.ravel()[1], 50.0)  # singletons pass through
 
 
+def test_collapse_groups_by_n_preserves_the_group_n():
+    """Repeated observations do not multiply the group's supplied n value."""
+    y = np.array([[1.0], [3.0], [10.0]])
+    n = np.array([[20.0], [20.0], [80.0]])
+    X = np.ones((3, 1))
+    groups = np.array([0, 0, 1])
+
+    collapsed_y, collapsed_n, collapsed_X = collapse_groups_by_n(y, n, X, groups)
+
+    assert np.allclose(collapsed_y.ravel(), [2.0, 10.0])
+    assert np.allclose(collapsed_n.ravel(), [20.0, 80.0])
+    assert np.allclose(collapsed_X, np.ones((2, 1)))
+
+
+def test_collapse_groups_by_n_rejects_inconsistent_n():
+    """The n value must be unambiguous within a group."""
+    with pytest.raises(ValueError, match="n values within each group"):
+        collapse_groups_by_n(
+            np.ones((3, 1)),
+            np.array([[20.0], [21.0], [80.0]]),
+            np.ones((3, 1)),
+            np.array([0, 0, 1]),
+        )
+
+
 def test_collapse_clusters_rejects_out_of_range_rho():
     """The assumed within-cluster correlation must lie in [0, 1]."""
     y = np.ones((2, 1))
@@ -642,24 +1041,24 @@ def test_collapse_clusters_rejects_out_of_range_rho():
 
 @pytest.mark.parametrize("estimator", [DerSimonianLaird, Hedges, VarianceBasedLikelihoodEstimator])
 def test_variance_components_are_insensitive_to_duplication(estimator):
-    """Duplicating a study's estimate must not shrink tau^2.
+    """Duplicating a group's estimate must not shrink tau^2.
 
-    Repeated estimates from one study agree with each other by construction. An
+    Repeated estimates from one group agree with each other by construction. An
     estimator that counts them as independent sees less dispersion than the row
     count implies and shrinks tau^2 toward zero, which sharpens the weights and
     makes downstream inference anti-conservative.
     """
     rng = np.random.default_rng(4)
-    n_studies, n_datasets = 12, 8
-    y = rng.standard_normal((n_studies, n_datasets)) * 2.0
-    v = np.full((n_studies, n_datasets), 0.5)
-    groups = np.arange(n_studies)
+    n_estimates, n_datasets = 12, 8
+    y = rng.standard_normal((n_estimates, n_datasets)) * 2.0
+    v = np.full((n_estimates, n_datasets), 0.5)
+    groups = np.arange(n_estimates)
 
     single = estimator(weight_scheme="cluster")
     single.fit_dataset(Dataset(y=y, v=v, g=groups))
 
-    # Study 0 now contributes four identical estimates instead of one.
-    dupe_idx = np.r_[np.zeros(4, dtype=int), np.arange(1, n_studies)]
+    # Group 0 now contributes four identical estimates instead of one.
+    dupe_idx = np.r_[np.zeros(4, dtype=int), np.arange(1, n_estimates)]
     duped = estimator(weight_scheme="cluster")
     duped.fit_dataset(Dataset(y=y[dupe_idx], v=v[dupe_idx], g=groups[dupe_idx]))
 

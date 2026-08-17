@@ -1,5 +1,6 @@
 """Tools for representing and manipulating meta-regression results."""
 
+import copy
 import itertools
 import math
 from functools import lru_cache
@@ -15,7 +16,7 @@ try:
 except ImportError:
     az = None
 
-from pymare.stats import q_gen, q_profile
+from pymare.stats import collapse_clusters, collapse_groups_by_n, q_gen, q_profile
 
 
 class MetaRegressionResults:
@@ -50,6 +51,33 @@ class MetaRegressionResults:
         self.fe_params = fe_params
         self.fe_cov = fe_cov
         self.tau2 = tau2
+
+    def _analysis_arrays(self):
+        """Return the independent-unit arrays used by result statistics."""
+        y = self.dataset.y
+        v = self.estimator.get_v(self.dataset)
+        X = self.dataset.X
+        groups = getattr(self.dataset, "g", None)
+        if getattr(self.estimator, "weight_scheme", None) == "group" and groups is not None:
+            rho = getattr(self.estimator, "cluster_rho", 0.8)
+            y, v, X = collapse_clusters(y, v, X, groups, rho=rho)
+        return y, v, X
+
+    def _permutation_arrays(self):
+        """Return estimator inputs reduced to independent groups."""
+        y = self.dataset.y
+        X = self.dataset.X
+        groups = getattr(self.dataset, "g", None)
+        has_v = "v" in getfullargspec(self.estimator.fit).args[1:]
+        second = self.dataset.v if has_v else self.dataset.n
+        if getattr(self.estimator, "weight_scheme", None) == "group" and groups is not None:
+            if has_v:
+                rho = getattr(self.estimator, "cluster_rho", 0.8)
+                y, second, X = collapse_clusters(y, second, X, groups, rho=rho)
+            else:
+                y, second, X = collapse_groups_by_n(y, second, X, groups)
+            groups = np.arange(y.shape[0])
+        return y, second, X, groups, has_v
 
     @property
     @lru_cache(maxsize=1)
@@ -117,8 +145,8 @@ class MetaRegressionResults:
 
         if dof is not None:
             # ``est / se`` is a t statistic here, so reporting it as "z" would
-            # leave the two entries disagreeing: thresholding the z map and
-            # thresholding the p map would select different results. Report the
+            # leave the two entries disagreeing: thresholding on the z values
+            # and on the p values would select different results. Report the
             # z that carries the same tail probability instead.
             z = np.sign(z) * ss.norm.isf(np.clip(p, epsilon, 1.0) / 2)
 
@@ -198,14 +226,14 @@ class MetaRegressionResults:
                 )
 
             # Make sure we have an estimate of v if it wasn't observed
-            v = self.estimator.get_v(self.dataset)
+            analysis_y, v, analysis_X = self._analysis_arrays()
 
             cis = []
             for i in range(n_datasets):
                 args = {
-                    "y": self.dataset.y[:, i],
+                    "y": analysis_y[:, i],
                     "v": v[:, i],
-                    "X": self.dataset.X,
+                    "X": analysis_X,
                     "alpha": alpha,
                 }
 
@@ -245,9 +273,10 @@ class MetaRegressionResults:
             ======= ==============================================================================
             Q       Cochran's Q :footcite:p:`cochran1954combination`.
                     This measure follows a chi-squared distribution, with n - k degrees of
-                    freedom, where n is the number of studies and k is the number of regressors.
+                    freedom, where n is the number of independent observations and k is the
+                    number of regressors.
             p(Q)    P values associated with the Cochran's Q values.
-            I^2     The proportion of the variance in study estimates that is due to heterogeneity
+            I^2     The proportion of the variance in input estimates that is due to heterogeneity
                     instead of sampling error :footcite:p:`higgins2002quantifying`.
                     This measure is bounded from 0 to 100.
             H       The ratio of the standard deviation of the estimated overall effect size from
@@ -262,9 +291,9 @@ class MetaRegressionResults:
         if self.dataset is None:
             raise ValueError("The Dataset is unavailable. This method requires a Dataset.")
 
-        v = self.estimator.get_v(self.dataset)
-        q_fe = q_gen(self.dataset.y, v, self.dataset.X, 0)
-        df = self.dataset.y.shape[0] - self.dataset.X.shape[1]
+        y, v, X = self._analysis_arrays()
+        q_fe = q_gen(y, v, X, 0)
+        df = y.shape[0] - X.shape[1]
         i2 = np.maximum(100.0 * (q_fe - df) / q_fe, 0.0)
         h = np.maximum(np.sqrt(q_fe / df), 1.0)
         p = ss.chi2.sf(q_fe, df)
@@ -358,8 +387,11 @@ class MetaRegressionResults:
         if self.dataset is None:
             raise ValueError("The Dataset is unavailable. This method requires a Dataset.")
 
-        n_obs, n_datasets = self.dataset.y.shape
-        has_mods = self.dataset.X.shape[1] > 1
+        analysis_y, analysis_second, analysis_X, analysis_groups, has_v = (
+            self._permutation_arrays()
+        )
+        n_obs, n_datasets = analysis_y.shape
+        has_mods = analysis_X.shape[1] > 1
 
         fe_stats = self.get_fe_stats()
         re_stats = self.get_re_stats()
@@ -388,12 +420,12 @@ class MetaRegressionResults:
 
         # Loop over parallel datasets
         for i in range(n_datasets):
-            y = self.dataset.y[:, i]
+            y = analysis_y[:, i]
             y_perm = np.repeat(y[:, None], n_perm, axis=1)
 
             # for v, we might actually be working with n, depending on estimator
-            has_v = "v" in getfullargspec(self.estimator.fit).args[1:]
-            v = self.dataset.v[:, i] if has_v else self.dataset.n[:, i]
+            second_column = i if analysis_second.shape[1] > 1 else 0
+            v = analysis_second[:, second_column]
 
             v_perm = np.repeat(v[:, None], n_perm, axis=1)
 
@@ -416,8 +448,10 @@ class MetaRegressionResults:
                     y_perm *= signs
 
             # Pass parameters, remembering that v may actually be n
-            kwargs = {"y": y_perm, "X": self.dataset.X}
+            kwargs = {"y": y_perm, "X": analysis_X}
             kwargs["v" if has_v else "n"] = v_perm
+            if analysis_groups is not None:
+                kwargs["g"] = analysis_groups
             params = self.estimator.fit(**kwargs).params_
 
             fe_obs = fe_stats["est"][:, i]
@@ -509,21 +543,32 @@ class CombinationTestResults:
             raise ValueError("The Dataset is unavailable. This method requires a Dataset.")
 
         n_obs, n_datasets = self.dataset.y.shape
+        groups = getattr(self.dataset, "g", None)
+        # Dependence-labelled rows are exchangeable only as complete groups.
+        # This applies to every grouped combination method, not only to
+        # Stouffer's optional group-first statistic.
+        if groups is not None:
+            groups = np.asarray(groups).ravel()
+            _, group_codes = np.unique(groups, return_inverse=True)
+            n_units = np.unique(group_codes).size
+        else:
+            group_codes = None
+            n_units = n_obs
 
         # create results arrays
         p_p = np.zeros_like(self.z)
 
         # Calculate # of permutations and determine whether to use exact test
-        n_exact = 2**n_obs
+        n_exact = 2**n_units
         if n_exact < n_perm:
-            perms = np.array(list(itertools.product([-1, 1], repeat=n_obs))).T
+            perms = np.array(list(itertools.product([-1, 1], repeat=n_units))).T
             exact = True
             n_perm = n_exact
         else:
             exact = False
 
         # Initialize a copy of the estimator to prevent overwriting results
-        est = self.estimator.__class__(mode=self.estimator.mode)
+        est = copy.copy(self.estimator)
 
         # Loop over parallel datasets
         for i in range(n_datasets):
@@ -531,21 +576,28 @@ class CombinationTestResults:
             y_perm = np.repeat(y[:, None], n_perm, axis=1)
 
             if exact:
-                y_perm *= perms
+                signs = perms
             else:
-                signs = np.random.choice(np.array([-1, 1]), (n_obs, n_perm))
-                y_perm *= signs
+                signs = np.random.choice(np.array([-1, 1]), (n_units, n_perm))
+            if group_codes is not None:
+                signs = signs[group_codes]
+            y_perm *= signs
 
             # Some combination tests can handle weights (passed as v)
             kwargs = {"z": y_perm}
             if "w" in getfullargspec(est.fit).args:
-                kwargs["w"] = self.dataset.v
+                kwargs["w"] = self.dataset.n
+            if groups is not None:
+                kwargs["g"] = groups
+                kwargs["corr"] = getattr(self.estimator, "corr_", None)
             params = est.fit(**kwargs).params_
 
-            p_obs = self.z[i]
-            if p_obs.ndim == 1:
-                p_obs = p_obs[:, None]
-            p_p[i] = (p_obs > params["p"]).mean()
+            observed = np.ravel(self.z)[i]
+            null = np.ravel(params["z"])
+            if self.estimator.mode in ("concordant", "undirected"):
+                p_p[i] = (np.abs(observed) < np.abs(null)).mean()
+            else:
+                p_p[i] = (observed < null).mean()
 
         # p-values can't be smaller than 1/n_perm
         p_p = np.maximum(1 / n_perm, p_p)

@@ -1,5 +1,6 @@
 """Estimators for combination (p/z) tests."""
 
+import copy
 import warnings
 from abc import abstractmethod
 
@@ -8,6 +9,7 @@ import scipy.stats as ss
 from scipy.special import ndtr
 
 from ..results import CombinationTestResults
+from ..stats import encode_groups, normalize_group_weights
 from .estimators import BaseEstimator
 
 
@@ -42,7 +44,10 @@ class CombinationTest(BaseEstimator):
         self.dataset_ = None
 
         if self.mode == "concordant":
-            ose = self.__class__(mode="directed")
+            # Preserve subclass configuration (for example group-level
+            # aggregation) while evaluating the two directed tails.
+            ose = copy.copy(self)
+            ose.mode = "directed"
             p1 = ose.p_value(z, *args, **kwargs)
             p2 = ose.p_value(-z, *args, **kwargs)
             p = np.minimum(1, 2 * np.minimum(p1, p2))
@@ -85,13 +90,18 @@ class StoufferCombinationTest(CombinationTest):
         Valid options are:
 
         -   'directed': tests a directional hypothesis--i.e., that the
-            observed value is consistently greater than 0 in the input
-            studies. This is the default.
+            observed value is consistently greater than 0 across the inputs.
+            This is the default.
         -   'undirected': tests an undirected hypothesis--i.e., that the
-            observed value differs from 0 in the input studies, but
-            allowing the direction of the deviation to vary by study.
+            observed value differs from 0 across the inputs, but
+            allowing the direction of the deviation to vary by input.
         -   'concordant': equivalent to two directed tests, one for each
             sign, with correction for 2 tests.
+    group_level : :obj:`bool`, optional
+        If True and group labels are supplied, first convert every group to
+        one variance-standardized equal-weight mean, then apply one externally
+        supplied weight per group. Repeated rows in a group must carry the same
+        weight. Default is False, which preserves row-level Stouffer behavior.
 
     Notes
     -----
@@ -105,7 +115,7 @@ class StoufferCombinationTest(CombinationTest):
         want to test for consistent effects in either the positive or
         negative direction should use the 'concordant' mode. The
         'undirected' mode tests a fairly uncommon null that doesn't
-        constrain the sign of effects to be consistent across studies
+        constrain the sign of effects to be consistent across inputs
         (one can think of it as a test of extremity). In the vast majority
         of meta-analysis applications, this mode is not appropriate, and
         users should instead opt for 'directed' or 'concordant'.
@@ -120,11 +130,91 @@ class StoufferCombinationTest(CombinationTest):
     # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
     _dataset_attr_map = {"z": "y", "w": "n", "g": "g"}
 
+    def __init__(self, mode="directed", group_level=False):
+        super().__init__(mode=mode)
+        self.group_level = group_level
+
+    @staticmethod
+    def _validate_groups(g, n_rows):
+        """Return one group label per row."""
+        groups = np.asarray(g)
+        if groups.ndim == 2:
+            if groups.shape[1] == 0:
+                raise ValueError("Group labels cannot have zero columns.")
+            if groups.shape[1] > 1 and not np.all(groups == groups[:, [0]]):
+                raise ValueError("Group labels must be the same for every feature.")
+            groups = groups[:, 0]
+        elif groups.ndim != 1:
+            raise ValueError("Group labels must be one- or two-dimensional.")
+        if groups.shape[0] != n_rows:
+            raise ValueError(
+                f"Group labels must contain one label per estimate: expected {n_rows}, "
+                f"got {groups.shape[0]}."
+            )
+        return groups
+
+    def _group_statistics(self, z, w, g, corr=None):
+        r"""Standardize one equal-weight mean per group.
+
+        For :math:`a_g = 1/k_g`, the group statistic is
+        :math:`a_g'z_g / \sqrt{a_g'R_ga_g}`. The supplied row weights
+        represent one group-level weight and must therefore be constant within
+        a group; this prevents row multiplicity from changing total weight.
+        """
+        groups = self._validate_groups(g, z.shape[0])
+        w = np.asarray(w, dtype=float)
+        if w.ndim == 1:
+            w = w[:, None]
+        if w.shape[0] != z.shape[0] or w.shape[1] not in (1, z.shape[1]):
+            raise ValueError("Weights must have one row per estimate and one or D columns.")
+        if w.shape[1] == 1 and z.shape[1] > 1:
+            w = np.broadcast_to(w, z.shape)
+
+        if corr is not None:
+            corr = np.asarray(corr, dtype=float)
+            if corr.shape != (z.shape[0], z.shape[0]):
+                raise ValueError(f"Correlation matrix must have shape {(z.shape[0], z.shape[0])}.")
+
+        unique_groups = np.unique(groups)
+        group_z = np.empty((unique_groups.size, z.shape[1]), dtype=float)
+        group_w = np.empty_like(group_z)
+        centered = z if np.all(z == z[0]) else z - z.mean(axis=0)
+
+        for group_idx, group in enumerate(unique_groups):
+            members = np.flatnonzero(groups == group)
+            member_w = w[members]
+            if not np.allclose(member_w, member_w[[0]], rtol=1e-12, atol=1e-15):
+                raise ValueError(
+                    "Group-level Stouffer requires one weight per group; repeated "
+                    "rows in a group must have equal weights."
+                )
+            group_w[group_idx] = member_w[0]
+
+            size = members.size
+            if size == 1:
+                variance = 1.0
+            elif corr is not None:
+                block_corr = corr[np.ix_(members, members)]
+                variance = block_corr.sum() / size**2
+            else:
+                if z.shape[1] < 2:
+                    raise ValueError("The number of features must be greater than 1.")
+                block_corr = np.corrcoef(centered[members], rowvar=True)
+                variance = block_corr.sum() / size**2
+
+            if not np.isfinite(variance) or variance <= 0:
+                raise ValueError(
+                    "Each group's aggregated z statistic must have positive variance."
+                )
+            group_z[group_idx] = z[members].mean(axis=0) / np.sqrt(variance)
+
+        return group_z, group_w
+
     def _inflation_term(self, z, w, g, corr=None):
         """Calculate the variance inflation term for each group.
 
         This term is used to adjust the variance of the combined z-score when
-        multiple sample come from the same study.
+        multiple observations come from the same group.
 
         Parameters
         ----------
@@ -183,12 +273,19 @@ class StoufferCombinationTest(CombinationTest):
 
     def fit(self, z, w=None, g=None, corr=None):
         """Fit the estimator to z-values, optionally with weights and groups."""
+        self.corr_ = corr
         return super().fit(z, w=w, g=g, corr=corr)
 
     def p_value(self, z, w=None, g=None, corr=None):
         """Calculate p-values."""
         if w is None:
             w = np.ones_like(z)
+
+        if self.group_level and g is not None:
+            group_z, group_w = self._group_statistics(z, w, g, corr=corr)
+            variance = np.square(group_w).sum(axis=0)
+            cz = (group_z * group_w).sum(axis=0) / np.sqrt(variance)
+            return ss.norm.sf(cz)
 
         if g is None and corr is not None:
             warnings.warn("Correlation matrix provided without groups. Ignoring.")
@@ -215,10 +312,12 @@ class FisherCombinationTest(CombinationTest):
 
     When group labels are supplied to :meth:`fit`, the statistic is instead referred to the
     scaled chi-squared distribution of :footcite:t:`brown1975method`, which accounts for
-    dependence among z-scores within a group. Inputs are weighted by the inverse of their group
-    size, so every group has total weight one regardless of how many estimates it contributes.
-    Ordinary Fisher inference is recovered when group weights are all one, as when no groups are
-    supplied or every input belongs to a different group.
+    dependence among z-scores within a group. By default, inputs are weighted by the inverse of
+    their group size, so every group has total weight one regardless of how many rows it
+    contributes. Optional positive external weights may assign different total weights to groups;
+    repeated rows in a group must carry the same external weight. Ordinary Fisher inference is
+    recovered when group weights are all one, as when no groups are supplied or every input
+    belongs to a different group.
 
     Parameters
     ----------
@@ -228,11 +327,11 @@ class FisherCombinationTest(CombinationTest):
         Valid options are:
 
             -   'directed': tests a directional hypothesis--i.e., that the
-                observed value is consistently greater than 0 in the input
-                studies. This is the default.
+                observed value is consistently greater than 0 across the inputs.
+                This is the default.
             -   'undirected': tests an undirected hypothesis--i.e., that the
-                observed value differs from 0 in the input studies, but
-                allowing the direction of the deviation to vary by study.
+                observed value differs from 0 across the inputs, but
+                allowing the direction of the deviation to vary by input.
             -   'concordant': equivalent to two directed tests, one for each
                 sign, with correction for 2 tests.
 
@@ -248,7 +347,7 @@ class FisherCombinationTest(CombinationTest):
         want to test for consistent effects in either the positive or
         negative direction should use the 'concordant' mode. The
         'undirected' mode tests a fairly uncommon null that doesn't
-        constrain the sign of effects to be consistent across studies
+        constrain the sign of effects to be consistent across inputs
         (one can think of it as a test of extremity). In the vast majority
         of meta-analysis applications, this mode is not appropriate, and
         users should instead opt for 'directed' or 'concordant'.
@@ -264,7 +363,7 @@ class FisherCombinationTest(CombinationTest):
     """
 
     # Maps Dataset attributes onto fit() args; see BaseEstimator for details.
-    _dataset_attr_map = {"z": "y", "g": "g"}
+    _dataset_attr_map = {"z": "y", "w": "n", "g": "g"}
 
     @staticmethod
     def _kost_covariance(corr):
@@ -281,14 +380,29 @@ class FisherCombinationTest(CombinationTest):
         return corr * (3.263 + corr * (0.710 + corr * 0.027))
 
     @staticmethod
-    def _group_weights(g, n_studies):
-        """Give every group total weight one, or every input weight one without groups."""
-        if g is None:
-            return np.ones(n_studies)
+    def _group_weights(g, n_observations, w=None):
+        """Allocate one optional external weight across each group's rows."""
+        if w is None:
+            external = np.ones(n_observations)
+        else:
+            external = np.asarray(w, dtype=float).squeeze()
+            if external.ndim != 1 or external.size != n_observations:
+                raise ValueError("Weights must contain one scalar per observation.")
+            if np.any(~np.isfinite(external)) or np.any(external <= 0):
+                raise ValueError("Weights must be finite positive values.")
 
-        _, group_inverse = np.unique(g, return_inverse=True)
-        group_sizes = np.bincount(group_inverse)
-        return 1.0 / group_sizes[group_inverse]
+        if g is None:
+            return external
+
+        group_codes, labels = encode_groups(g, n_observations=n_observations)
+        for group in range(labels.size):
+            member_weights = external[group_codes == group]
+            if not np.allclose(member_weights, member_weights[0], rtol=1e-12, atol=1e-15):
+                raise ValueError(
+                    "Grouped Fisher combination requires one weight per group; "
+                    "repeated rows in a group must have equal weights."
+                )
+        return normalize_group_weights(external, group_codes)
 
     def _brown_moments(self, z, g, corr=None, weights=None):
         """Return the mean and variance of Brown's chi-squared statistic.
@@ -296,18 +410,18 @@ class FisherCombinationTest(CombinationTest):
         For weights ``w``, the statistic has mean ``2 * sum(w)`` and an
         independent variance contribution of ``4 * sum(w**2)``. Dependence
         within a group adds ``2 * sum_{i<j} w_i * w_j * cov_ij`` to the
-        variance, leaving the mean unchanged. Grouped inputs receive inverse
-        group-size weights, so each group contributes two to the expectation
-        :footcite:p:`brown1975method`.
+        variance, leaving the mean unchanged. Without external weights,
+        grouped inputs receive inverse group-size weights, so each group
+        contributes two to the expectation :footcite:p:`brown1975method`.
 
         References
         ----------
         .. footbibliography::
 
         """
-        n_studies = z.shape[0]
+        n_observations = z.shape[0]
         if weights is None:
-            weights = self._group_weights(g, n_studies)
+            weights = self._group_weights(g, n_observations)
 
         expectation = 2.0 * weights.sum()
         variance = 4.0 * np.square(weights).sum()
@@ -363,16 +477,16 @@ class FisherCombinationTest(CombinationTest):
         else:
             raise ValueError("Group labels must be a one- or two-dimensional array.")
 
-        n_studies = z.shape[0]
-        if groups.shape[0] != n_studies:
+        n_observations = z.shape[0]
+        if groups.shape[0] != n_observations:
             raise ValueError(
-                f"Group labels must contain one label per study: expected {n_studies}, "
+                f"Group labels must contain one label per observation: expected {n_observations}, "
                 f"got {groups.shape[0]}."
             )
 
         if corr is not None:
             corr = np.asarray(corr)
-            expected_shape = (n_studies, n_studies)
+            expected_shape = (n_observations, n_observations)
             if corr.shape != expected_shape:
                 raise ValueError(
                     "Group labels must have the same length as the correlation matrix; "
@@ -381,21 +495,22 @@ class FisherCombinationTest(CombinationTest):
 
         return groups, corr
 
-    def fit(self, z, g=None, corr=None):
-        """Fit the estimator to z-values, optionally with groups."""
-        return super().fit(z, g=g, corr=corr)
+    def fit(self, z, g=None, corr=None, w=None):
+        """Fit the estimator with optional external weights and groups."""
+        self.corr_ = corr
+        return super().fit(z, g=g, corr=corr, w=w)
 
-    def p_value(self, z, g=None, corr=None):
+    def p_value(self, z, g=None, corr=None, w=None):
         """Calculate p-values."""
         g, corr = self._validate_dependence_inputs(z, g, corr)
 
         p = self._z_to_p(z)
-        weights = self._group_weights(g, z.shape[0])
-        if g is None:
+        weights = self._group_weights(g, z.shape[0], w=w)
+        if g is None and w is None:
             chi2 = -2 * np.log(p).sum(0)
         else:
             # p is not needed below, so turn it into the weighted log-p terms
-            # in place rather than allocating two additional map-sized arrays.
+            # in place rather than allocating two additional full-size arrays.
             np.log(p, out=p)
             p *= weights[:, None]
             chi2 = -2 * p.sum(0)
