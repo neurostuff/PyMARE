@@ -83,23 +83,76 @@ class MetaRegressionResults:
             p           The p value the estimate.
             ci_l/ci_u   Lower and upper bounds of the estimate.
             =========== ==========================================================================
+
+        Notes
+        -----
+        When the estimator was fitted with group labels, the standard errors
+        are cluster-robust and the sampling distribution of ``est / se`` is
+        referred to a t distribution with ``m - p`` degrees of freedom, where
+        m is the number of groups and p the number of predictors
+        :footcite:p:`tipton2015small`; see :attr:`fe_dof`. Otherwise a normal
+        reference is used, as before.
+
+        References
+        ----------
+        .. footbibliography::
+
         """
         beta, se = self.fe_params, self.fe_se
         epsilon = np.finfo(beta.dtype).eps
-        z_se = ss.norm.ppf(1 - alpha / 2)
         z = beta / se
-        p = 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
+
+        # Cluster-robust standard errors are asymptotic in the number of
+        # groups, so refer them to a t distribution rather than a normal.
+        dof = self.fe_dof
+        if dof is None:
+            crit = ss.norm.ppf(1 - alpha / 2)
+            p = 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
+        else:
+            crit = ss.t.ppf(1 - alpha / 2, dof)
+            p = 2 * ss.t.sf(np.abs(z), dof)
+
+        p = np.asarray(p, dtype=float)
         p[p == 0] += epsilon
+
+        if dof is not None:
+            # ``est / se`` is a t statistic here, so reporting it as "z" would
+            # leave the two entries disagreeing: thresholding the z map and
+            # thresholding the p map would select different results. Report the
+            # z that carries the same tail probability instead.
+            z = np.sign(z) * ss.norm.isf(np.clip(p, epsilon, 1.0) / 2)
+
         stats = {
             "est": beta,
             "se": se,
-            "ci_l": beta - z_se * se,
-            "ci_u": beta + z_se * se,
+            "ci_l": beta - crit * se,
+            "ci_u": beta + crit * se,
             "z": z,
             "p": p,
         }
 
         return stats
+
+    @property
+    def fe_dof(self):
+        """Get the degrees of freedom used for fixed-effect inference.
+
+        ``m - p``, with m the number of groups and p the number of predictors,
+        following :footcite:t:`tipton2015small`, when the estimator was fitted
+        with group labels and therefore uses cluster-robust standard errors.
+        None when a normal reference is used instead.
+
+        References
+        ----------
+        .. footbibliography::
+
+        """
+        n_clusters = getattr(self.estimator, "n_clusters_", None)
+        if not n_clusters:
+            return None
+
+        n_preds = self.fe_params.shape[0]
+        return max(int(n_clusters) - int(n_preds), 1)
 
     @lru_cache(maxsize=16)
     def get_re_stats(self, method="QP", alpha=0.05):

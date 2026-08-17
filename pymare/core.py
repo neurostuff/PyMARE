@@ -39,12 +39,20 @@ class Dataset:
         1d array of study-level sample sizes (length K), or the name of the corresponding column
         in ``data``.
         Default = None.
+    g : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
+        1d array of study-level group (cluster) labels with length K, or the name of the
+        corresponding column in ``data``.
+        Estimates sharing a label are treated as statistically dependent, e.g. multiple
+        contrasts contributed by the same study.
+        Estimators that support dependent estimates use this to widen their inference
+        accordingly; estimators that do not simply ignore it.
+        Default = None.
     data : None or :obj:`pandas.DataFrame`, optional
-        A pandas DataFrame containing y, v, X, and/or n values.
+        A pandas DataFrame containing y, v, X, n, and/or g values.
         By default, columns are expected to have the same names as arguments
         (e.g., the y values will be expected in the 'y' column).
         This can be modified by passing strings giving column names to any of the ``y``, ``v``,
-        ``X``, or ``n`` arguments.
+        ``X``, ``n``, or ``g`` arguments.
         Default = None.
     X_names : None or :obj:`list` of :obj:`str`, optional
         List of length P containing the names of the predictors.
@@ -57,7 +65,15 @@ class Dataset:
     """
 
     def __init__(
-        self, y=None, v=None, X=None, n=None, data=None, X_names=None, add_intercept=True
+        self,
+        y=None,
+        v=None,
+        X=None,
+        n=None,
+        data=None,
+        X_names=None,
+        add_intercept=True,
+        g=None,
     ):
         if y is None and data is None:
             raise ValueError(
@@ -86,16 +102,27 @@ class Dataset:
             if (n is not None) or ("n" in data.columns):
                 n = data.loc[:, n or "n"].values
 
+            # g is optional
+            if (g is not None) or ("g" in data.columns):
+                g = data.loc[:, g or "g"].values
+
         self.y = ensure_2d(y)
         self.v = ensure_2d(v)
         self.n = ensure_2d(n)
+        self.g = ensure_2d(g)
         X, names = self._get_predictors(X, X_names, add_intercept)
         self.X = X
         self.X_names = names
 
         _check_inputs_shape(self.y, self.X, "y", "X", row=True)
         _check_inputs_shape(self.y, self.v, "y", "v", row=True, column=True)
-        _check_inputs_shape(self.y, self.n, "y", "n", row=True, column=True)
+        _check_inputs_shape(self.y, self.n, "y", "n", row=True)
+        # A single column of n broadcasts across parallel datasets. The
+        # estimators already handle that, and per-study quantities such as
+        # sample sizes or weights usually do not vary by dataset.
+        if self.n is not None and self.n.shape[1] != 1:
+            _check_inputs_shape(self.y, self.n, "y", "n", column=True)
+        _check_inputs_shape(self.y, self.g, "y", "g", row=True)
 
     def _get_predictors(self, X, names, add_intercept):
         if X is None and not add_intercept:
@@ -120,7 +147,7 @@ class Dataset:
         Returns
         -------
         :obj:`pandas.DataFrame`
-            A DataFrame containing the y, v, X, and n values.
+            A DataFrame containing the y, v, X, n, and g values.
         """
         if self.y.shape[1] == 1:
             df = pd.DataFrame({"y": self.y[:, 0]})
@@ -130,6 +157,9 @@ class Dataset:
 
             if self.n is not None:
                 df["n"] = self.n[:, 0]
+
+            if self.g is not None:
+                df["g"] = self.g[:, 0]
 
             df[self.X_names] = self.X
 
@@ -148,6 +178,9 @@ class Dataset:
 
                 if self.n is not None:
                     df["n"] = self.n[:, i_set]
+
+                if self.g is not None:
+                    df["g"] = self.g[:, 0]
 
                 # X is the same across sets
                 df[self.X_names] = self.X
@@ -170,6 +203,7 @@ def meta_regression(
     method="ML",
     ci_method="QP",
     alpha=0.05,
+    g=None,
     **kwargs,
 ):
     """Fit the standard meta-regression/meta-analysis model to provided data.
@@ -193,13 +227,13 @@ def meta_regression(
         in ``data``.
         Default = None.
     data : None or :obj:`pandas.DataFrame` or :obj:`~pymare.core.Dataset`, optional
-        If a Dataset instance is passed, the y, v, X, n and associated arguments are ignored,
+        If a Dataset instance is passed, the y, v, X, n, g and associated arguments are ignored,
         and data is passed directly to the selected estimator.
-        If a pandas DataFrame, y, v, X and/or n values are taken from the DF columns.
+        If a pandas DataFrame, y, v, X, n and/or g values are taken from the DF columns.
         By default, columns are expected to have the same names as arguments
         (e.g., the y values will be expected in the 'y' column).
-        This can be modified by passing strings giving column names to any of the y, v, X, or n
-        arguments.
+        This can be modified by passing strings giving column names to any of the y, v, X, n, or
+        g arguments.
     X_names : None or :obj:`list` of :obj:`str`, optional
         List of length P containing the names of the predictors.
         Ignored if ``data`` is provided (use ``X`` to specify columns).
@@ -224,6 +258,11 @@ def meta_regression(
         Ignored if ``method == 'Stan'``.
     alpha : :obj:`float`, optional
         Desired alpha level (CIs will have 1 - alpha coverage). Default = 0.05.
+    g : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
+        Group labels marking dependent estimates, or the name of the corresponding column in
+        ``data``. Estimates with the same label are treated as one cluster by estimators that
+        support cluster-robust inference.
+        Default = None.
     **kwargs
         Optional keyword arguments to pass onto the chosen estimator.
 
@@ -237,7 +276,7 @@ def meta_regression(
     """
     # if data is None or not isinstance(data, Dataset):
     if data is None or not data.__class__.__name__ == "Dataset":
-        data = Dataset(y, v, X, n, data, X_names, add_intercept)
+        data = Dataset(y, v, X, n, data, X_names, add_intercept, g=g)
 
     method = method.lower()
 
