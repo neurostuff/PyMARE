@@ -563,6 +563,44 @@ def test_group_weighted_heterogeneity_matches_collapsed_reference():
 # -----------------------------------------------------------------------------
 
 
+def test_kost_polynomial_matches_the_closed_form_covariances():
+    """The empirical cubic is pinned wherever cov(-2 ln p_i, -2 ln p_j) is known.
+
+    These three points are the justification for the coefficients, so they are
+    asserted rather than left as a claim in the docstring.
+    """
+    kost = FisherCombinationTest._kost_covariance
+
+    # Independence: no contribution, so Fisher's method is recovered exactly.
+    assert kost(0.0) == 0.0
+
+    # Comonotone: identical p-values, so the covariance is Var(chi^2_2) = 4.
+    assert np.isclose(kost(1.0), 4.0, atol=1e-12)
+
+    # Countermonotone: the Frechet lower bound for two chi^2_2 variates.
+    assert np.isclose(kost(-1.0), 4 * (1 - np.pi**2 / 6), atol=5e-4)
+
+    # Strictly increasing in between, so the variance correction never inverts.
+    grid = np.linspace(-1.0, 1.0, 1001)
+    assert np.all(np.diff(kost(grid)) > 0)
+
+
+def test_brown_moments_match_the_chi2_2_definition():
+    """Mean 2 and variance 4 per term come from -2 ln p ~ chi^2_2 under the null."""
+    estimator = FisherCombinationTest()
+    z = np.zeros((5, 3))
+
+    expectation, variance = estimator._brown_moments(z, None)
+
+    assert np.isclose(expectation, 2.0 * 5)
+    assert np.isclose(variance, 4.0 * 5)
+
+    # Under independence variance == 2 * expectation, so Brown's scale is 1 and
+    # its degrees of freedom collapse to 2k -- exactly Fisher's reference.
+    assert np.isclose(variance / (2.0 * expectation), 1.0)
+    assert np.isclose(2.0 * expectation**2 / variance, 2 * 5)
+
+
 def test_brown_reduces_to_fisher_with_singleton_groups():
     """One group per estimate means no dependence, so Fisher's result stands."""
     rng = np.random.RandomState(0)

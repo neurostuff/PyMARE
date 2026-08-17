@@ -16,7 +16,13 @@ try:
 except ImportError:
     az = None
 
-from pymare.stats import collapse_clusters, collapse_groups_by_n, q_gen, q_profile
+from pymare.stats import (
+    DEFAULT_CLUSTER_RHO,
+    collapse_clusters,
+    collapse_groups_by_n,
+    q_gen,
+    q_profile,
+)
 
 
 class MetaRegressionResults:
@@ -59,7 +65,7 @@ class MetaRegressionResults:
         X = self.dataset.X
         groups = getattr(self.dataset, "g", None)
         if getattr(self.estimator, "weight_scheme", None) == "group" and groups is not None:
-            rho = getattr(self.estimator, "cluster_rho", 0.8)
+            rho = getattr(self.estimator, "cluster_rho", DEFAULT_CLUSTER_RHO)
             y, v, X = collapse_clusters(y, v, X, groups, rho=rho)
         return y, v, X
 
@@ -72,7 +78,7 @@ class MetaRegressionResults:
         second = self.dataset.v if has_v else self.dataset.n
         if getattr(self.estimator, "weight_scheme", None) == "group" and groups is not None:
             if has_v:
-                rho = getattr(self.estimator, "cluster_rho", 0.8)
+                rho = getattr(self.estimator, "cluster_rho", DEFAULT_CLUSTER_RHO)
                 y, second, X = collapse_clusters(y, second, X, groups, rho=rho)
             else:
                 y, second, X = collapse_groups_by_n(y, second, X, groups)
