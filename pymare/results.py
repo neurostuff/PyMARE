@@ -708,8 +708,6 @@ class CombinationTestResults:
         n_obs, n_datasets = self.dataset.y.shape
         groups = getattr(self.dataset, "g", None)
         # Dependence-labelled rows are exchangeable only as complete groups.
-        # This applies to every grouped combination method, not only to
-        # Stouffer's optional group-first statistic.
         if groups is not None:
             groups = np.asarray(groups).ravel()
             _, group_codes = np.unique(groups, return_inverse=True)
