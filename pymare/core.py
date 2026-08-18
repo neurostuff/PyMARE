@@ -101,9 +101,11 @@ class Dataset:
             if (n is not None) or ("n" in data.columns):
                 n = data.loc[:, n or "n"].values
 
-            # g is optional
+            # g is optional. Compare against None explicitly: `g or "g"` calls
+            # bool() on the value, which raises for an array of labels passed
+            # alongside a DataFrame.
             if (g is not None) or ("g" in data.columns):
-                g = data.loc[:, g or "g"].values
+                g = data.loc[:, "g" if g is None else g].values if np.ndim(g) == 0 else g
 
         self.y = ensure_2d(y)
         self.v = ensure_2d(v)
@@ -122,6 +124,13 @@ class Dataset:
         if self.n is not None and self.n.shape[1] != 1:
             _check_inputs_shape(self.y, self.n, "y", "n", column=True)
         _check_inputs_shape(self.y, self.g, "y", "g", row=True)
+        if self.g is not None and self.g.shape[1] != 1:
+            # One label per observation. A (K, D) array would be silently
+            # reduced to its first column later, quietly discarding the rest.
+            raise ValueError(
+                "g must contain one group label per observation, with shape "
+                f"(K,) or (K, 1); got {self.g.shape}."
+            )
 
     def _get_predictors(self, X, names, add_intercept):
         if X is None and not add_intercept:

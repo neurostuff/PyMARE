@@ -6,11 +6,28 @@ from abc import abstractmethod
 
 import numpy as np
 import scipy.stats as ss
-from scipy.special import ndtr
+from scipy.special import log_ndtr, ndtr
 
 from ..results import CombinationTestResults
 from ..stats import encode_groups, normalize_group_weights
 from .estimators import BaseEstimator
+
+
+def _check_estimable_correlation(z, group_indices):
+    """Reject a group whose rows carry no variance to correlate.
+
+    ``np.corrcoef`` divides by each row's standard deviation, so a row that is
+    constant across features yields NaN and the NaN propagates silently into
+    the p-values. The "all samples identical" guard elsewhere covers identical
+    *rows*, which still vary across features and legitimately correlate at 1;
+    this is the different case of a row that never varies.
+    """
+    if np.ptp(z[group_indices], axis=1).min() == 0:
+        raise ValueError(
+            "Cannot estimate a within-group correlation: at least one estimate "
+            "is constant across features, so its correlation with the others is "
+            "undefined. Supply `corr` explicitly if the dependence is known."
+        )
 
 
 class CombinationTest(BaseEstimator):
@@ -259,13 +276,20 @@ class StoufferCombinationTest(CombinationTest):
             if corr is None:
                 if z.shape[1] < 2:
                     raise ValueError("The number of features must be greater than 1.")
+                _check_estimable_correlation(z, group_indices)
                 group_corr = np.corrcoef(group_z, rowvar=True)
             else:
                 group_corr = corr[group_indices][:, group_indices]
 
             upper_indices = np.triu_indices(n_samples, k=1)
             non_diag_corr = group_corr[upper_indices]
-            w_i, w_j = weights[upper_indices[0]], weights[upper_indices[1]]
+            # upper_indices are positions *within* this group's block, so they
+            # have to index the group's own weights. Indexing the full weight
+            # array with them silently reuses rows 0..n_j-1 of the dataset for
+            # every group, which both understates the inflation and makes the
+            # result depend on row order. _brown_moments does this correctly.
+            group_weights = weights[group_indices]
+            w_i, w_j = group_weights[upper_indices[0]], group_weights[upper_indices[1]]
 
             sigma += (2 * w_i * w_j * non_diag_corr).sum()
 
@@ -280,6 +304,22 @@ class StoufferCombinationTest(CombinationTest):
         """Calculate p-values."""
         if w is None:
             w = np.ones_like(z)
+        else:
+            # Match FisherCombinationTest, which already rejects these. Silently
+            # accepting a negative or non-finite weight yields a NaN p-value or,
+            # worse, a plausible-looking one with the sign of the effect flipped.
+            w = np.asarray(w, dtype=float)
+            if np.any(~np.isfinite(w)) or np.any(w <= 0):
+                raise ValueError("Weights must be finite positive values.")
+
+        if g is not None:
+            # Reduces (K, D) labels to (K,), raising if they differ by feature.
+            g = self._validate_groups(g, z.shape[0])[:, None]
+            if corr is not None:
+                corr = np.asarray(corr, dtype=float)
+                expected = (z.shape[0], z.shape[0])
+                if corr.shape != expected:
+                    raise ValueError(f"Correlation matrix must have shape {expected}.")
 
         if self.group_level and g is not None:
             group_z, group_w = self._group_statistics(z, w, g, corr=corr)
@@ -507,6 +547,7 @@ class FisherCombinationTest(CombinationTest):
             if corr is None:
                 if z.shape[1] < 2:
                     raise ValueError("The number of features must be greater than 1.")
+                _check_estimable_correlation(z_centered, group_indices)
                 group_corr = np.corrcoef(z_centered[group_indices], rowvar=True)
             else:
                 group_corr = corr[group_indices][:, group_indices]
@@ -566,16 +607,18 @@ class FisherCombinationTest(CombinationTest):
         """Calculate p-values."""
         g, corr = self._validate_dependence_inputs(z, g, corr)
 
-        p = self._z_to_p(z)
+        # Work in log space throughout. Going via p underflows to exactly 0
+        # around z = 38, after which log(p) is -inf and the combined result
+        # collapses to p = 0 with z = inf, no matter how many other inputs
+        # argue otherwise. log_ndtr is accurate far into that tail, so a single
+        # extreme z no longer destroys the statistic.
+        log_p = log_ndtr(-z)
         weights = self._group_weights(g, z.shape[0], w=w)
         if g is None and w is None:
-            chi2 = -2 * np.log(p).sum(0)
+            chi2 = -2 * log_p.sum(0)
         else:
-            # p is not needed below, so turn it into the weighted log-p terms
-            # in place rather than allocating two additional full-size arrays.
-            np.log(p, out=p)
-            p *= weights[:, None]
-            chi2 = -2 * p.sum(0)
+            log_p *= weights[:, None]
+            chi2 = -2 * log_p.sum(0)
 
         expectation, variance = self._brown_moments(z, g, corr=corr, weights=weights)
 

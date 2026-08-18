@@ -285,9 +285,11 @@ def collapse_clusters(y, v, X, groups, rho=DEFAULT_CLUSTER_RHO):
         raise ValueError(f"rho must lie in [0, 1]; got {rho}.")
 
     groups = np.asarray(groups).ravel()
-    _, group_codes = np.unique(groups, return_inverse=True)
-    group_codes = np.ravel(group_codes)
-    n_groups = int(group_codes.max()) + 1
+    # encode_groups, not np.unique: group_mean() below encodes by first
+    # occurrence, so using np.unique's sorted-label codes here would pair each
+    # collapsed effect with a different group's variance.
+    group_codes, group_labels = encode_groups(groups)
+    n_groups = group_labels.size
 
     collapsed_y = group_mean(y, group_codes)
     collapsed_v = np.empty((n_groups, v.shape[1]))
@@ -349,9 +351,11 @@ def collapse_clusters_by_n(y, n, X, groups, rho=DEFAULT_CLUSTER_RHO):
         raise ValueError(f"rho must lie in [0, 1]; got {rho}.")
 
     groups = np.asarray(groups).ravel()
-    _, group_codes = np.unique(groups, return_inverse=True)
-    group_codes = np.ravel(group_codes)
-    n_groups = int(group_codes.max()) + 1
+    # encode_groups, not np.unique: group_mean() below encodes by first
+    # occurrence, so using np.unique's sorted-label codes here would pair each
+    # collapsed effect with a different group's variance.
+    group_codes, group_labels = encode_groups(groups)
+    n_groups = group_labels.size
 
     collapsed_y = group_mean(y, group_codes)
     collapsed_n = np.empty((n_groups, n.shape[1]))
@@ -410,8 +414,11 @@ def collapse_groups_by_n(y, n, X, groups):
             f"got {groups.shape[0]}."
         )
 
-    _, group_codes = np.unique(groups, return_inverse=True)
-    n_groups = int(group_codes.max()) + 1
+    # encode_groups, not np.unique: group_mean() below encodes by first
+    # occurrence, so using np.unique's sorted-label codes here would pair each
+    # collapsed effect with a different group's ``n``.
+    group_codes, group_labels = encode_groups(groups)
+    n_groups = group_labels.size
     collapsed_y = group_mean(y, group_codes)
     collapsed_n = np.empty((n_groups, n.shape[1]))
     collapsed_X = group_mean(X, group_codes)
@@ -674,6 +681,79 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
     return (beta, precision) if return_cov else beta
 
 
+def _symmetric_sqrt(matrices):
+    """Return L with ``L @ L.T`` equal to each symmetric PSD input matrix."""
+    evals, evecs = np.linalg.eigh(matrices)
+    return evecs * np.sqrt(np.maximum(evals, 0.0))[..., None, :]
+
+
+def _cr2_low_rank_factors(group_X, chol):
+    r"""Factor the CR2 adjustment using only :math:`p \times p` work.
+
+    :math:`H_j = \tilde{X}_j M \tilde{X}_j'` is an outer product of an
+    :math:`n_j \times p` matrix with itself, so its rank is at most :math:`p`.
+    Eigendecomposing the full :math:`n_j \times n_j` block therefore spends
+    :math:`O(n_j^3)` to recover at most :math:`p` non-unit eigenvalues plus
+    :math:`n_j - p` copies of 1. Writing :math:`M = LL'` and
+    :math:`B = \tilde{X}_j L`, the non-zero eigenvalues :math:`\mu_i` of
+    :math:`H_j = BB'` are exactly the eigenvalues of the :math:`p \times p`
+    matrix :math:`B'B`, whose eigenvectors :math:`q_i` lift to
+    :math:`u_i = Bq_i / \sqrt{\mu_i}`. Since the orthogonal complement of the
+    :math:`u_i` is an eigenspace of :math:`I - H_j` with eigenvalue 1, and
+    therefore needs no adjustment at all,
+
+    .. math::
+        (I_j - H_j)^{-1/2}
+            = I + \sum_i \left[(1 - \mu_i)^{-1/2} - 1\right] u_iu_i'
+            = I + BGB', \qquad
+        G = Q \operatorname{diag}(c) Q',
+
+    with :math:`c_i = \left[(1 - \mu_i)^{-1/2} - 1\right] / \mu_i`. The
+    adjustment is never formed: callers apply ``I + B G B'`` to a right-hand
+    side, so nothing larger than :math:`(n_j, p)` is materialized.
+
+    ``c_i`` has a removable singularity at :math:`\mu_i = 0`, where the limit
+    is :math:`1/2`. Substituting it is cosmetic rather than load-bearing --
+    :math:`Bq_i` vanishes with :math:`\mu_i`, since
+    :math:`\lVert Bq_i \rVert^2 = \mu_i`, so the whole term is killed either
+    way -- but it keeps the intermediate finite.
+
+    Parameters
+    ----------
+    group_X : :obj:`numpy.ndarray` of shape (..., n, p)
+        Whitened design rows for one group.
+    chol : :obj:`numpy.ndarray` of shape (..., p, p)
+        Any factor with ``chol @ chol.T == M``, e.g. from
+        :func:`_symmetric_sqrt`.
+
+    Returns
+    -------
+    :obj:`tuple`
+        ``(B, G, degenerate)``. ``degenerate`` flags a group whose leverage
+        reached one, where the adjustment does not exist and the eigenvalue
+        floor took over.
+    """
+    b_factor = group_X @ chol
+    gram = np.swapaxes(b_factor, -1, -2) @ b_factor
+    mu, evecs = np.linalg.eigh(gram)
+
+    complement = 1.0 - mu
+    degenerate = bool(np.any(complement < _MIN_LEVERAGE_COMPLEMENT))
+    complement = np.maximum(complement, _MIN_LEVERAGE_COMPLEMENT)
+
+    numerator = complement**-0.5 - 1.0
+    safe_mu = np.where(np.abs(mu) > _MIN_LEVERAGE_COMPLEMENT, mu, 1.0)
+    coefficients = np.where(np.abs(mu) > _MIN_LEVERAGE_COMPLEMENT, numerator / safe_mu, 0.5)
+
+    middle = (evecs * coefficients[..., None, :]) @ np.swapaxes(evecs, -1, -2)
+    return b_factor, middle, degenerate
+
+
+def _cr2_low_rank_apply(b_factor, middle, rhs):
+    """Apply ``I + B G B'`` to ``rhs`` of shape ``(..., n, q)``."""
+    return rhs + b_factor @ (middle @ (np.swapaxes(b_factor, -1, -2) @ rhs))
+
+
 def _cr2_scores(X, w, resid, group_members, bread):
     r"""Compute bias-reduced (CR2) cluster scores.
 
@@ -711,30 +791,264 @@ def _cr2_scores(X, w, resid, group_members, bread):
     whitened_X = X[:, None, :] * sqrt_w[:, :, None]
     whitened_resid = sqrt_w * resid
 
+    # The adjustment (I - H_j) depends on the weights and the design, never on
+    # y, so identical weight columns give identical eigendecompositions. Solve
+    # the first column only and reuse it: the residuals still vary per dataset,
+    # but the expensive part does not. This is the case whenever v arrives as a
+    # single shared column, which cluster_robust_cov broadcasts on entry.
+    shared_weights = n_iters > 1 and bool(np.all(w == w[:, [0]]))
+    if shared_weights:
+        design_slice, bread_slice = slice(0, 1), bread[:1]
+    else:
+        design_slice, bread_slice = slice(None), bread
+
+    # Factor of the bread, reused by every group that takes the low-rank path.
+    chol = _symmetric_sqrt(bread_slice)
+
+    degenerate = False
     scores = np.empty((n_iters, n_preds, n_groups))
     for group, members in enumerate(group_members):
         # (i, n_j, p) and (i, n_j)
         group_X = np.transpose(whitened_X[members], (1, 0, 2))
         group_resid = whitened_resid[members].T
+        adjust_X = group_X[design_slice]
 
         if members.size == 1:
-            leverage = np.einsum("iap,ipq,iaq->ia", group_X, bread, group_X)
-            group_resid = group_resid / np.sqrt(
-                np.maximum(1.0 - leverage, _MIN_LEVERAGE_COMPLEMENT)
-            )
+            leverage = np.einsum("iap,ipq,iaq->ia", adjust_X, bread_slice, adjust_X)
+            complement = 1.0 - leverage
+            degenerate = degenerate or bool(np.any(complement < _MIN_LEVERAGE_COMPLEMENT))
+            group_resid = group_resid / np.sqrt(np.maximum(complement, _MIN_LEVERAGE_COMPLEMENT))
+        elif members.size > n_preds:
+            # H_j has rank at most p, so decomposing the p x p Gram matrix
+            # recovers the same adjustment for O(n_j p^2) instead of O(n_j^3).
+            b_factor, middle, group_degenerate = _cr2_low_rank_factors(adjust_X, chol)
+            degenerate = degenerate or group_degenerate
+            group_resid = _cr2_low_rank_apply(b_factor, middle, group_resid[..., None])[..., 0]
         else:
             identity = np.eye(members.size)
-            adjustment = identity - group_X @ bread @ np.transpose(group_X, (0, 2, 1))
+            adjustment = identity - adjust_X @ bread_slice @ np.transpose(adjust_X, (0, 2, 1))
             # (I - H_j) is symmetric positive semi-definite, so its inverse
-            # square root follows from an eigendecomposition.
+            # square root follows from an eigendecomposition. Only reached when
+            # the group is no larger than the design, where n_j x n_j is the
+            # cheaper of the two decompositions.
             evals, evecs = np.linalg.eigh(adjustment)
+            degenerate = degenerate or bool(np.any(evals < _MIN_LEVERAGE_COMPLEMENT))
             evals = np.maximum(evals, _MIN_LEVERAGE_COMPLEMENT)
             inv_sqrt = (evecs * (evals**-0.5)[:, None, :]) @ np.transpose(evecs, (0, 2, 1))
             group_resid = np.einsum("iab,ib->ia", inv_sqrt, group_resid)
 
         scores[:, :, group] = np.einsum("iap,ia->ip", group_X, group_resid)
 
+    if degenerate:
+        warnings.warn(
+            "At least one group has full leverage, so its CR2 residual "
+            "adjustment does not exist and was floored. That group contributes "
+            "nothing to the sandwich, which therefore understates the standard "
+            "errors. Treat the affected coefficients as untrustworthy.",
+            UserWarning,
+            stacklevel=3,
+        )
+
     return scores
+
+
+def satterthwaite_dof(X, w, groups, inv_cov=None):
+    r"""Satterthwaite degrees of freedom for CR2 cluster-robust tests.
+
+    Cluster-robust standard errors are asymptotic in the number of groups, so
+    the reference distribution matters when that number is small. The naive
+    :math:`m - p` degrees of freedom of :footcite:t:`hedges2010robust` are
+    adequate only when weight is spread evenly across groups. When a covariate
+    is unbalanced at the group level -- a handful of groups carrying the only
+    non-zero values of a predictor, say -- the effective sample size for that
+    coefficient is far smaller than :math:`m - p` and the test becomes badly
+    anti-conservative. :footcite:t:`tipton2015small` showed this and proposed
+    matching moments instead, which is what this function computes and what the
+    R packages `clubSandwich <https://cran.r-project.org/package=clubSandwich>`_
+    :footcite:p:`pustejovsky2018small` and `robumeta
+    <https://cran.r-project.org/package=robumeta>`_ use by default.
+
+    For a single coefficient :math:`c'\beta`, the CR2 variance estimate is a
+    quadratic form :math:`u'\left(\sum_j g_jg_j'\right)u` in the whitened data
+    :math:`u = W^{1/2}y`, with
+
+    .. math::
+        g_j = (I - \tilde{H})b_j, \qquad
+        b_j = P_j'A_j\tilde{X}_jMc,
+
+    where :math:`M = (X'WX)^{-1}`, :math:`\tilde{X} = W^{1/2}X`,
+    :math:`\tilde{H} = \tilde{X}M\tilde{X}'`, :math:`A_j` is the CR2
+    adjustment of :func:`_cr2_scores`, and :math:`P_j` selects group
+    :math:`j`. Matching the first two moments of that form to a scaled
+    chi-squared gives
+
+    .. math::
+        \nu = \frac{\left(\operatorname{tr}S\right)^2}
+                   {\operatorname{tr}\left(S^2\right)},
+        \qquad S = G'G, \quad G = [g_1, \ldots, g_m].
+
+    Notes
+    -----
+    Forming :math:`G` explicitly would cost a :math:`K \times K` matrix per
+    parallel dataset, which is prohibitive when there are many of them. It is
+    unnecessary: the :math:`b_j` have disjoint support, so :math:`b_j'b_l`
+    vanishes off the diagonal, and :math:`M(\tilde{X}'\tilde{X})M = M`
+    collapses the cross terms. Writing :math:`t_j = \tilde{X}_j'b_j`, the
+    whole matrix reduces to
+
+    .. math::
+        S_{jl} = \delta_{jl}\lVert b_j \rVert^2 - t_j'Mt_l,
+
+    which involves only :math:`p`-vectors. Factoring :math:`M = LL'` and
+    setting :math:`R_j = L't_j` gives both traces from :math:`R` alone, so
+    nothing larger than :math:`(m, p)` per dataset is ever materialized.
+
+    Parameters
+    ----------
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    w : :obj:`numpy.ndarray` of shape (K,) or (K, D)
+        The weights used to fit the coefficients, matching those passed to
+        :func:`~pymare.stats.cluster_robust_cov`.
+    groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
+        Group (cluster) labels, one per observation.
+    inv_cov : None or :obj:`numpy.ndarray` of shape (P, P, D), optional
+        The model-based ``(X'WX)^-1``, reused when the caller already has it.
+        Default = None.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray` of shape (P, D)
+        Degrees of freedom, one per predictor and parallel dataset.
+
+    References
+    ----------
+    .. footbibliography::
+
+    """
+    X = np.asarray(X, dtype=float)
+    w = np.asarray(w, dtype=float)
+    if w.ndim == 1:
+        w = w[:, None]
+    n_observations, n_preds = X.shape
+    if w.shape[0] != n_observations:
+        raise ValueError("w must have one row per observation.")
+
+    group_codes, group_labels = encode_groups(np.asarray(groups).ravel(), n_observations)
+    members = [np.flatnonzero(group_codes == j) for j in range(group_labels.size)]
+    n_groups = len(members)
+    n_datasets = w.shape[1]
+
+    by_size = {}
+    for group, idx in enumerate(members):
+        by_size.setdefault(idx.size, []).append((group, idx))
+
+    # The dof depend on the design and the weights, not on y, so identical
+    # weight columns give identical dof. Solve once and broadcast: this is the
+    # common case when v is supplied as a single column.
+    if n_datasets > 1 and np.all(w == w[:, [0]]):
+        shared = satterthwaite_dof(
+            X, w[:, [0]], groups, None if inv_cov is None else inv_cov[:, :, [0]]
+        )
+        return np.repeat(shared, n_datasets, axis=1)
+
+    sqrt_w = np.sqrt(w)
+    dof = np.empty((n_preds, n_datasets))
+    degenerate = False
+
+    # Chunk over parallel datasets: the working arrays are (chunk, m, p, p).
+    chunk = max(1, int(4_000_000 // max(n_groups * n_preds * n_preds, 1)))
+    for start in range(0, n_datasets, chunk):
+        stop = min(start + chunk, n_datasets)
+        sw = sqrt_w[:, start:stop]
+        size = stop - start
+
+        if inv_cov is None:
+            bread = np.linalg.pinv(np.einsum("kp,kd,kq->dpq", X, w[:, start:stop], X))
+        else:
+            bread = np.moveaxis(np.asarray(inv_cov)[:, :, start:stop], -1, 0)
+
+        # M = LL' via its symmetric square root. It factors the quadratic form
+        # below (t_j'Mt_l = (L't_j).(L't_l)) and is also the factor the
+        # low-rank CR2 path needs, so it is built once for both.
+        chol = _symmetric_sqrt(bread)
+
+        # ||b_j||^2 and t_j, both indexed (dataset, group, predictor).
+        norms = np.empty((size, n_groups, n_preds))
+        scores = np.empty((size, n_groups, n_preds, n_preds))
+
+        # Every group needs an eigendecomposition of its own (I - H_j), but
+        # groups of equal size have equal-shaped blocks and can go through
+        # numpy in a single batched call. Meta-analytic group sizes repeat
+        # heavily, so this usually collapses m calls down to one or two.
+        for members_of_size in by_size.values():
+            group_index = np.array([group for group, _ in members_of_size])
+            rows = np.stack([idx for _, idx in members_of_size])  # (c, s)
+
+            # Whitened design, (d, c, s, p).
+            group_X = X[rows][None] * np.transpose(sw[rows], (2, 0, 1))[..., None]
+            group_XM = np.einsum("dcsp,dpq->dcsq", group_X, bread)
+            group_size = rows.shape[1]
+            if group_size == 1:
+                # Singleton groups reduce CR2 to HC2: the block is the scalar
+                # 1 - h_j, so the matrix inverse square root is just 1/sqrt.
+                # Worth special-casing because one group per estimate is a
+                # documented usage and eigh on 1x1 blocks is pure overhead.
+                complement = 1.0 - np.einsum("dcsq,dcsq->dcs", group_XM, group_X)[..., 0]
+                if np.any(complement < _MIN_LEVERAGE_COMPLEMENT):
+                    degenerate = True
+                scale = np.maximum(complement, _MIN_LEVERAGE_COMPLEMENT) ** -0.5
+                b = group_XM * scale[..., None, None]
+            elif group_size > n_preds:
+                # H_j has rank at most p, so the p x p Gram matrix carries the
+                # whole adjustment; see _cr2_low_rank_factors.
+                b_factor, middle, group_degenerate = _cr2_low_rank_factors(group_X, chol[:, None])
+                degenerate = degenerate or group_degenerate
+                b = _cr2_low_rank_apply(b_factor, middle, group_XM)
+            else:
+                adjustment = np.eye(group_size) - np.einsum("dcsq,dctq->dcst", group_XM, group_X)
+                evals, evecs = np.linalg.eigh(adjustment)
+                if np.any(evals < _MIN_LEVERAGE_COMPLEMENT):
+                    degenerate = True
+                evals = np.maximum(evals, _MIN_LEVERAGE_COMPLEMENT)
+                # Raise to the power before broadcasting, not after. Written as
+                # ``evals[..., None, :] ** -0.5`` the power is evaluated on the
+                # broadcast view, so it runs once per matrix *entry* rather than
+                # once per eigenvalue -- s times the work for identical bits.
+                scale = evals**-0.5
+                inv_sqrt = (scale[..., None, :] * evecs) @ np.swapaxes(evecs, -1, -2)
+                b = np.einsum("dcst,dctq->dcsq", inv_sqrt, group_XM)
+            norms[:, group_index, :] = np.square(b).sum(axis=2)
+            scores[:, group_index, :, :] = np.einsum("dcsp,dcsr->dcpr", group_X, b)
+
+        for pred in range(n_preds):
+            r = scores[:, :, :, pred] @ chol  # (d, m, p), rows L't_j
+            diagonal = np.square(r).sum(axis=2)  # t_j'Mt_j
+            nb = norms[:, :, pred]
+            gram = np.einsum("dmp,dmq->dpq", r, r)  # R'R, (d, p, p)
+
+            trace = nb.sum(axis=1) - diagonal.sum(axis=1)
+            trace_sq = (
+                np.square(gram).sum(axis=(1, 2))
+                - 2.0 * (nb * diagonal).sum(axis=1)
+                + np.square(nb).sum(axis=1)
+            )
+            with np.errstate(divide="ignore", invalid="ignore"):
+                dof[pred, start:stop] = np.square(trace) / trace_sq
+
+    if degenerate:
+        warnings.warn(
+            "At least one group has full leverage on a coefficient, so the CR2 "
+            "adjustment does not exist for it. This happens when a single group "
+            "supplies all the information about a predictor. The degrees of "
+            "freedom are floored at 1 and the corresponding test should not be "
+            "trusted.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    dof = np.where(np.isfinite(dof), dof, 1.0)
+    return np.maximum(dof, 1.0)
 
 
 def cluster_robust_cov(
@@ -847,17 +1161,26 @@ def cluster_robust_cov(
     if method not in ("CR0", "CR2"):
         raise ValueError(f"Invalid method '{method}'; must be one of 'CR2', 'CR0'.")
 
-    _, group_codes = np.unique(groups, return_inverse=True)
-    group_codes = np.ravel(group_codes)
-    n_groups = int(group_codes.max()) + 1
+    # encode_groups, not np.unique: the docstring promises any hashable label,
+    # and np.unique additionally requires them to be *sortable*, so a mix of
+    # str and int raises. Every quantity below is a sum over groups, so the
+    # coding order does not matter.
+    group_codes, group_labels = encode_groups(groups, n_observations=y.shape[0])
+    n_groups = group_labels.size
     n_preds = X.shape[1]
 
-    if small_sample and method == "CR0" and n_groups <= n_preds:
+    if n_groups <= n_preds:
+        # Every group's leverage is then exactly one: the design is saturated at
+        # the group level, so each group's residuals are fitted away and the
+        # meat collapses to zero. CR0 with the m/(m-p) scaling also divides by
+        # zero. Left alone this returns a standard error of ~1e-12 and a
+        # p-value of ~1e-11 -- maximally significant -- rather than admitting
+        # that the sandwich is undefined.
         raise ValueError(
-            f"Cannot apply the small-sample correction with {n_groups} "
-            f"group(s) and {n_preds} predictor(s); the number of groups "
-            "must exceed the number of predictors. Pass "
-            "small_sample=False to skip the correction."
+            f"Cluster-robust variance estimation needs more groups than "
+            f"predictors, but got {n_groups} group(s) and {n_preds} "
+            "predictor(s). The sandwich is undefined here: every group has "
+            "full leverage, so there are no residuals left to estimate from."
         )
 
     if n_groups <= MIN_CLUSTERS_FOR_RVE:
@@ -873,6 +1196,16 @@ def cluster_robust_cov(
         )
 
     w = 1.0 / (v + tau2) if w is None else w
+
+    # A single column of weights applies to every parallel dataset. The CR0
+    # path broadcasts it for free, but CR2 slices per group and needs the
+    # dataset axis to be real, so materialize it once here rather than letting
+    # the two methods disagree about which inputs they accept. ensure_2d also
+    # accepts the 1-D form that satterthwaite_dof documents, so the two
+    # functions agree about what weights look like.
+    w = ensure_2d(np.asarray(w, dtype=float))
+    if w.shape[1] != y.shape[1]:
+        w = np.broadcast_to(w, y.shape)
 
     # Einsum indices: k = observations, p/q = predictors, i = parallel iterates,
     # j = groups.

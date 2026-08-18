@@ -1,6 +1,7 @@
 """Tests for dependent-estimate support (cluster-robust variance, Brown's method)."""
 
 import numpy as np
+import pandas as pd
 import pytest
 import scipy.stats as ss
 
@@ -14,7 +15,12 @@ from pymare.estimators import (
     VarianceBasedLikelihoodEstimator,
     WeightedLeastSquares,
 )
+from pymare.estimators.estimators import _group_n_inputs
 from pymare.stats import (
+    DEFAULT_CLUSTER_RHO,
+    _cr2_low_rank_apply,
+    _cr2_low_rank_factors,
+    _symmetric_sqrt,
     cluster_robust_cov,
     cluster_weights,
     collapse_clusters,
@@ -25,6 +31,7 @@ from pymare.stats import (
     group_mean,
     normalize_group_weights,
     one_sample_t_from_sufficient_statistics,
+    satterthwaite_dof,
     undo_centering_shrinkage,
     weighted_intercept_cr2,
     weighted_intercept_cr2_sufficient_statistics,
@@ -126,6 +133,222 @@ def test_stouffer_group_level_rejects_inconsistent_group_weights():
         )
 
 
+def test_combination_permutation_accepts_weights():
+    """Weights are per observation and must be repeated across permutations.
+
+    They live on the Dataset as ``n`` with one column per parallel dataset,
+    while the permuted z array has one column per permutation, so passing the
+    stored array straight through only lines up by coincidence.
+    """
+    rng = np.random.RandomState(0)
+    z = rng.randn(8, 3)
+    w = np.abs(rng.randn(8, 3)) + 1.0
+
+    result = StoufferCombinationTest().fit_dataset(Dataset(y=z, n=w)).summary()
+    perm = result.permutation_test(n_perm=40)
+
+    assert perm.perm_p["fe_p"].shape == np.ravel(result.p).shape
+    assert np.all(perm.perm_p["fe_p"] > 0)
+    assert np.all(perm.perm_p["fe_p"] <= 1)
+
+
+@pytest.mark.parametrize("estimator", [StoufferCombinationTest, FisherCombinationTest])
+def test_combination_permutation_rejects_undirected_mode(estimator):
+    """abs(z) makes the statistic invariant to sign flips, so there is no null."""
+    rng = np.random.RandomState(0)
+    result = estimator(mode="undirected").fit_dataset(Dataset(y=rng.randn(8, 2))).summary()
+
+    with pytest.raises(ValueError, match="not available for mode='undirected'"):
+        result.permutation_test(n_perm=40)
+
+
+def test_combination_permutation_survives_saturated_p_values():
+    """Concordant p caps at 1, so its z is -inf and cannot be compared.
+
+    Ranking on z made every permutation tie at -inf, which read as "more
+    extreme than nothing" and returned the smallest achievable p-value.
+    """
+    # Perfectly balanced z: neither tail wins, so both directed p-values are
+    # 0.5 and the doubled minimum is capped at exactly 1.
+    z = np.array([0.4, -0.4] * 5)[:, None]
+    result = FisherCombinationTest(mode="concordant").fit_dataset(Dataset(y=z)).summary()
+
+    assert np.ravel(result.p)[0] == 1.0
+    assert not np.isfinite(result.z).all()  # the condition that used to break it
+
+    # Ranking on z gave 1 / n_perm here. This data is as far from significant
+    # as it gets, so the permutation p-value should sit at the other end.
+    perm = result.permutation_test(n_perm=200)
+    assert perm.perm_p["fe_p"].ravel()[0] == 1.0
+
+
+def test_stouffer_inflation_uses_each_group_own_weights():
+    """The pairwise loop must index the group's weights, not the array's head.
+
+    upper_indices are positions within a group's block, so indexing the full
+    weight array with them reuses rows 0..n_j-1 for every group. That both
+    understates the variance inflation and makes the answer depend on the
+    order the rows happen to arrive in.
+    """
+    z = np.array([[1.0, 0.5], [2.0, 1.5], [0.5, 2.0], [1.0, 0.0]])
+    weights = np.repeat(np.array([[1.0], [1.0], [5.0], [5.0]]), 2, axis=1)
+    groups = np.repeat(np.array([[0], [0], [1], [1]]), 2, axis=1)
+    corr = np.eye(4)
+    corr[0, 1] = corr[1, 0] = 0.6
+    corr[2, 3] = corr[3, 2] = 0.6
+
+    observed = StoufferCombinationTest().fit(z, w=weights, g=groups, corr=corr).params_["p"]
+
+    # Reference: Var(sum w_i z_i) = w' C w.
+    flat = weights[:, 0]
+    expected = ss.norm.sf((z * flat[:, None]).sum(0) / np.sqrt(flat @ corr @ flat))
+    assert np.allclose(observed, expected)
+
+    order = np.array([2, 3, 0, 1])
+    reordered = StoufferCombinationTest().fit(
+        z[order], w=weights[order], g=groups[order], corr=corr[np.ix_(order, order)]
+    )
+    assert np.allclose(reordered.params_["p"], expected)
+
+
+def test_fisher_does_not_underflow_on_extreme_z():
+    """Going via p collapses to exactly 0 once any |z| exceeds about 38."""
+    z = np.zeros((100, 2))
+    z[0] = 40.0
+
+    p = FisherCombinationTest().fit(z).params_["p"]
+
+    assert np.all(p > 0)
+    assert np.all(np.isfinite(FisherCombinationTest().fit(z).params_["z"]))
+    assert np.allclose(p, 1.035e-244, rtol=1e-3)
+
+
+@pytest.mark.parametrize("estimator", [StoufferCombinationTest, FisherCombinationTest])
+def test_constant_estimates_cannot_yield_a_correlation(estimator):
+    """A row that never varies has no correlation, so do not return NaN."""
+    z = np.full((4, 5), 1.3)
+    groups = np.array([0, 0, 1, 1])
+    if estimator is StoufferCombinationTest:
+        groups = np.tile(groups[:, None], (1, 5))
+
+    with pytest.raises(ValueError, match="constant across features"):
+        estimator().p_value(z, g=groups)
+
+
+def test_stouffer_validates_its_inputs_like_fisher():
+    """Silently accepting these produced NaN or a plausible wrong answer."""
+    z = np.random.RandomState(0).randn(4, 3)
+
+    with pytest.raises(ValueError, match="same for every feature"):
+        StoufferCombinationTest().p_value(
+            z, g=np.array([[0, 1, 0], [0, 0, 0], [1, 1, 1], [1, 0, 1]])
+        )
+
+    with pytest.raises(ValueError, match="finite positive"):
+        StoufferCombinationTest().p_value(z, w=np.full((4, 3), -1.0))
+
+    with pytest.raises(ValueError, match="must have shape"):
+        StoufferCombinationTest().p_value(
+            z, g=np.tile(np.array([0, 0, 1, 1])[:, None], (1, 3)), corr=np.eye(5)[:4, :5]
+        )
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+@pytest.mark.parametrize("weight_scheme", ["individual", "cluster", "group"])
+def test_permutation_flips_whole_groups_and_leaves_the_estimator_alone(weight_scheme):
+    """Dependent rows are exchangeable only as complete groups.
+
+    Flipping them independently builds a null about half as wide as the truth,
+    which showed up as ~25% rejection at a nominal 5%. Separately, refitting
+    through the live estimator overwrote params_["dof"] with a
+    permutation-shaped array, so fe_dof and to_df broke afterwards.
+    """
+    rng = np.random.default_rng(0)
+    groups = np.repeat(np.arange(8), 2)
+    dataset = Dataset(y=rng.normal(size=16), v=np.full(16, 0.2), g=groups)
+    results = DerSimonianLaird(weight_scheme=weight_scheme).fit_dataset(dataset).summary()
+
+    before = np.ravel(results.fe_dof).copy()
+    perm = results.permutation_test(n_perm=100000)
+
+    # 8 groups, not 16 rows: 2**8 sign patterns exhaust the null.
+    assert perm.n_perm == 2**8
+    assert perm.exact
+    assert np.allclose(np.ravel(results.fe_dof), before)
+    perm.to_df()
+
+
+@pytest.mark.parametrize("estimator", [StoufferCombinationTest, FisherCombinationTest])
+def test_combination_permutation_accepts_weights_for_both_estimators(estimator):
+    """Fisher takes one scalar weight per observation, not one per permutation."""
+    rng = np.random.default_rng(0)
+    dataset = Dataset(y=rng.normal(size=(12, 4)), n=np.full((12, 1), 3.0))
+
+    perm = estimator().fit_dataset(dataset).summary().permutation_test(n_perm=100)
+
+    assert np.all(perm.perm_p["fe_p"] > 0)
+
+
+def test_combination_permutation_holds_the_correlation_fixed():
+    """Re-estimating corr from the permuted array reads the wrong axis.
+
+    y_perm's second axis is permutations, and whole groups share a sign, so
+    rows within a group come back near-perfectly correlated along it. That
+    inflates the variance correction, and with n_perm < 2 it cannot be
+    estimated at all.
+    """
+    rng = np.random.default_rng(3)
+    groups = np.repeat(np.arange(3), 3)
+    z = rng.standard_normal((9, 4))
+    results = StoufferCombinationTest().fit_dataset(Dataset(y=z, g=groups)).summary()
+
+    # Used to raise "The number of features must be greater than 1."
+    single = results.permutation_test(n_perm=1)
+    assert np.all(np.isfinite(single.perm_p["fe_p"]))
+
+
+def test_heterogeneity_is_undefined_when_the_design_exhausts_the_df():
+    """Q on zero degrees of freedom is rounding noise, not zero heterogeneity.
+
+    Collapsing to one row per group makes df = m - p, which reaches zero far
+    more easily than the old K - p. Reported as-is it came out I^2 = 100% and
+    H = inf, which reads as total heterogeneity rather than no information.
+    """
+    rng = np.random.default_rng(0)
+    X = np.c_[np.ones(3), rng.normal(size=3), rng.normal(size=3)]  # K == p == 3
+    dataset = Dataset(y=rng.normal(size=3), v=np.full(3, 0.2), X=X, add_intercept=False)
+    results = WeightedLeastSquares().fit_dataset(dataset).summary()
+
+    stats = results.get_heterogeneity_stats()
+    assert all(np.all(np.isnan(stats[key])) for key in ("Q", "p(Q)", "I^2", "H"))
+
+
+def test_undefined_standard_errors_do_not_read_as_significant():
+    """Dividing by a zero standard error yields p = 0, i.e. maximal certainty."""
+    rng = np.random.default_rng(0)
+    dataset = Dataset(y=rng.normal(size=8), v=np.ones(8))
+    results = WeightedLeastSquares().fit_dataset(dataset).summary()
+    results.fe_cov = np.zeros_like(results.fe_cov)  # force a degenerate SE
+    results.__dict__.pop("fe_se", None)
+
+    stats = results.get_fe_stats()
+    assert np.all(np.isnan(stats["p"]))
+    assert np.all(np.isnan(stats["ci_l"])) and np.all(np.isnan(stats["ci_u"]))
+
+
+def test_dataset_rejects_group_labels_with_a_second_dimension():
+    """One label per observation; a (K, D) array was silently truncated."""
+    with pytest.raises(ValueError, match="one group label per observation"):
+        Dataset(y=np.arange(6.0), v=np.ones(6), g=np.tile(np.arange(3), (6, 1))[:, :2])
+
+
+def test_dataset_accepts_group_labels_alongside_a_dataframe():
+    """`g or "g"` called bool() on the array and raised."""
+    frame = pd.DataFrame({"y": np.arange(6.0), "v": np.ones(6)})
+    dataset = Dataset(data=frame, g=np.array([0, 0, 1, 1, 2, 2]))
+    assert np.array_equal(np.ravel(dataset.g), [0, 0, 1, 1, 2, 2])
+
+
 def _dependent_data(rng, n_groups=10, n_per_group=3, n_datasets=4, rho_sd=1.0):
     """Build data where estimates within a group share a common offset."""
     n_estimates = n_groups * n_per_group
@@ -149,6 +372,297 @@ def test_encode_groups_preserves_first_occurrence_order():
 
     assert np.array_equal(codes, [0, 0, 1, 2, 1])
     assert np.array_equal(labels, ["later", "first", "last"])
+
+
+@pytest.mark.parametrize(
+    "collapse, second",
+    [
+        (lambda y, s, X, g: collapse_clusters(y, s, X, g, rho=0.0), np.array([[1.0], [1.0]])),
+        (lambda y, s, X, g: collapse_clusters_by_n(y, s, X, g, rho=0.0), None),
+        (lambda y, s, X, g: collapse_groups_by_n(y, s, X, g), None),
+    ],
+)
+def test_collapse_keeps_effects_paired_with_their_own_group(collapse, second):
+    """Effects and their variances must not be ordered by different rules.
+
+    group_mean encodes labels by first occurrence. Indexing the second array by
+    np.unique's sorted-label codes instead silently pairs each collapsed effect
+    with a different group's variance whenever the labels do not happen to
+    appear in sorted order.
+    """
+    groups = np.array([1, 1, 0, 0])  # first occurrence order != sorted order
+    y = np.array([[10.0], [10.0], [100.0], [100.0]])
+    X = np.ones((4, 1))
+    values = np.array([[1.0], [1.0], [9.0], [9.0]])
+
+    collapsed_y, collapsed_second, _ = collapse(y, values, X, groups)
+
+    # Group 1 (y=10) carries the small value; group 0 (y=100) the large one.
+    assert collapsed_y[0, 0] == 10.0
+    assert collapsed_y[1, 0] == 100.0
+    assert collapsed_second[0, 0] < collapsed_second[1, 0]
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+@pytest.mark.parametrize("method", ["CR0", "CR2"])
+def test_cluster_robust_cov_shared_weights_take_the_fast_path(method):
+    """Deduplicating identical weight columns must not change the answer.
+
+    (I - H_j) depends on the weights and the design but never on y, so
+    identical weight columns give identical eigendecompositions and only the
+    first needs solving.
+
+    Checked against a per-column reference rather than bitwise: numpy's own
+    reductions are not bit-stable across batch shapes, so a ``(p, p, d)``
+    contraction and ``d`` separate ``(p, p, 1)`` ones disagree in the last
+    place regardless of this optimization -- CR0, which never touches the
+    deduplicated code, disagrees by the same ~1e-17. Bitwise stability of the
+    fast path at a *fixed* shape is covered separately.
+    """
+    rng = np.random.RandomState(3)
+    n_estimates, n_datasets = 16, 6
+    y = rng.randn(n_estimates, n_datasets)
+    v = np.abs(rng.randn(n_estimates, 1)) + 0.5
+    X = np.c_[np.ones(n_estimates), rng.randn(n_estimates)]
+    groups = np.repeat(np.arange(8), 2)
+
+    beta, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
+    fast = cluster_robust_cov(
+        y, v, X, beta, groups, inv_cov=inv_cov, method=method, small_sample=False
+    )
+
+    # Same weights, but perturbed so the columns are no longer detected as
+    # identical -- forces the per-column path for the same numbers.
+    per_column = np.repeat(v, n_datasets, axis=1)
+    slow = np.stack(
+        [
+            cluster_robust_cov(
+                y[:, [i]],
+                per_column[:, [i]],
+                X,
+                beta[:, [i]],
+                groups,
+                inv_cov=inv_cov[:, :, [0]],
+                method=method,
+                small_sample=False,
+            )[:, :, 0]
+            for i in range(n_datasets)
+        ],
+        axis=-1,
+    )
+
+    assert np.allclose(fast, slow, rtol=0, atol=1e-15)
+
+    # At a fixed shape the fast path is exactly reproducible run to run.
+    again = cluster_robust_cov(
+        y, v, X, beta, groups, inv_cov=inv_cov, method=method, small_sample=False
+    )
+    assert np.array_equal(fast, again)
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+@pytest.mark.parametrize("method", ["CR0", "CR2"])
+def test_cluster_robust_cov_accepts_one_shared_variance_column(method):
+    """A single column of v applies to every parallel dataset, for both methods."""
+    rng = np.random.RandomState(0)
+    n_estimates, n_datasets = 12, 5
+    y = rng.randn(n_estimates, n_datasets)
+    v = np.abs(rng.randn(n_estimates, 1)) + 0.5
+    X = np.ones((n_estimates, 1))
+    groups = np.repeat(np.arange(6), 2)
+
+    beta, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
+    shared = cluster_robust_cov(
+        y, v, X, beta, groups, inv_cov=inv_cov, method=method, small_sample=False
+    )
+    expanded = cluster_robust_cov(
+        y,
+        np.repeat(v, n_datasets, axis=1),
+        X,
+        beta,
+        groups,
+        inv_cov=inv_cov,
+        method=method,
+        small_sample=False,
+    )
+
+    assert shared.shape == (1, 1, n_datasets)
+    assert np.allclose(shared, expanded)
+
+
+@pytest.mark.parametrize("n_rows,n_preds", [(2, 1), (3, 1), (5, 1), (4, 2), (6, 2), (8, 3)])
+def test_cr2_low_rank_factorization_matches_the_full_eigendecomposition(n_rows, n_preds):
+    """The p x p route must reproduce the n x n adjustment it replaces.
+
+    H_j is an outer product of an (n_j, p) matrix, so it has at most p
+    non-unit eigenvalues and the remaining n_j - p directions need no
+    adjustment at all. Decomposing the Gram matrix recovers the same operator
+    for O(n_j p^2) instead of O(n_j^3).
+    """
+    rng = np.random.RandomState(n_rows * 10 + n_preds)
+    group_X = rng.randn(n_rows, n_preds)
+    bread = np.eye(n_preds) / (10.0 * n_rows)  # keeps leverage well below one
+
+    hat = group_X @ bread @ group_X.T
+    evals, evecs = np.linalg.eigh(np.eye(n_rows) - hat)
+    expected = (evecs * np.maximum(evals, 1e-10) ** -0.5) @ evecs.T
+
+    b_factor, middle, degenerate = _cr2_low_rank_factors(group_X, _symmetric_sqrt(bread))
+    observed = _cr2_low_rank_apply(b_factor, middle, np.eye(n_rows))
+
+    assert not degenerate
+    assert np.allclose(observed, expected, rtol=0, atol=1e-12)
+
+
+def test_cr2_low_rank_handles_rank_deficient_and_degenerate_groups():
+    """Duplicated rows and full leverage are the two ways the rank drops."""
+    # Three identical rows: H_j has rank 1, not 3.
+    duplicated = np.ones((3, 1))
+    bread = np.array([[0.2]])
+    hat = duplicated @ bread @ duplicated.T
+    evals, evecs = np.linalg.eigh(np.eye(3) - hat)
+    expected = (evecs * np.maximum(evals, 1e-10) ** -0.5) @ evecs.T
+    b_factor, middle, degenerate = _cr2_low_rank_factors(duplicated, _symmetric_sqrt(bread))
+    assert not degenerate
+    assert np.allclose(_cr2_low_rank_apply(b_factor, middle, np.eye(3)), expected, atol=1e-12)
+
+    # Leverage exactly one: the adjustment does not exist and must be flagged.
+    _, _, degenerate = _cr2_low_rank_factors(np.ones((2, 1)), _symmetric_sqrt(np.array([[0.5]])))
+    assert degenerate
+
+    # A design contributing nothing leaves the identity, with no 0/0.
+    b_factor, middle, _ = _cr2_low_rank_factors(np.zeros((4, 2)), _symmetric_sqrt(np.eye(2)))
+    identity = _cr2_low_rank_apply(b_factor, middle, np.eye(4))
+    assert np.isfinite(identity).all()
+    assert np.allclose(identity, np.eye(4))
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+@pytest.mark.parametrize("weight_scheme", ["cluster", "group"])
+def test_tau2_interval_and_heterogeneity_use_the_same_units_as_tau2(weight_scheme):
+    """A point estimate must not fall outside its own confidence interval.
+
+    Both "cluster" and "group" estimate tau^2 from one aggregate per group.
+    Results statistics have to collapse on the same condition, or the interval
+    and Q describe a different set of units than the estimate they accompany.
+    """
+    rng = np.random.default_rng(2)
+    groups = np.repeat(np.arange(12), 4)
+    n_estimates = groups.size
+    y = rng.normal(size=n_estimates) + np.repeat(rng.normal(scale=0.3, size=12), 4)
+    dataset = Dataset(y=y, v=np.full(n_estimates, 0.2), g=groups)
+
+    results = DerSimonianLaird(weight_scheme=weight_scheme).fit_dataset(dataset).summary()
+    re_stats = results.get_re_stats()
+    tau2 = float(np.ravel(re_stats["tau^2"])[0])
+    lower = float(np.ravel(re_stats["ci_l"])[0])
+    upper = float(np.ravel(re_stats["ci_u"])[0])
+    assert lower <= tau2 <= upper
+
+    # Q must be referred to the number of independent groups, not rows.
+    heterogeneity = results.get_heterogeneity_stats()
+    raw = DerSimonianLaird().fit_dataset(dataset).summary().get_heterogeneity_stats()
+    assert float(np.ravel(heterogeneity["Q"])[0]) < float(np.ravel(raw["Q"])[0])
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+@pytest.mark.parametrize("estimator", [WeightedLeastSquares, DerSimonianLaird, Hedges])
+def test_dof_matches_fe_params_when_v_is_a_shared_column(estimator):
+    """A single column of v still has to yield one dof per parallel dataset."""
+    y = np.repeat(np.arange(12.0)[:, None] / 10, 4, axis=1) + np.array([0, 0.1, 0.2, 0.3])
+    fitted = estimator().fit(
+        y=y,
+        X=np.ones((12, 1)),
+        v=np.full((12, 1), 0.1),
+        g=np.repeat(np.arange(6), 2),
+    )
+    assert fitted.params_["dof"].shape == fitted.params_["fe_params"].shape
+
+
+@pytest.mark.parametrize("estimator", [Hedges, DerSimonianLaird, VarianceBasedLikelihoodEstimator])
+def test_group_collapse_rejects_a_saturated_collapsed_design(estimator):
+    """Collapsing can saturate a design that was identified before it.
+
+    Nine rows and three predictors is unremarkable, but three groups leave
+    m == p, where the moment estimators divide by zero and report tau^2 = inf
+    with zero standard errors.
+    """
+    groups = np.repeat([0, 1, 2], 3)
+    X = np.c_[np.ones(9), np.repeat([0.0, 1.0, 2.0], 3), np.repeat([0.0, 0.0, 1.0], 3)]
+    y = np.random.RandomState(0).randn(9, 1)
+
+    with pytest.raises(ValueError, match="number of groups must exceed"):
+        estimator(weight_scheme="group").fit(y=y, v=np.full((9, 1), 0.1), X=X, g=groups)
+
+
+def test_group_design_check_tolerates_floating_point_noise():
+    """A predictor constant in intent may differ in its last bits."""
+    groups = np.repeat([0, 1, 2], 3)
+    y = np.random.RandomState(0).randn(9, 1)
+    v = np.full((9, 1), 0.1)
+
+    X = np.c_[np.ones(9), np.repeat([1.0, 2.0, 3.0], 3)]
+    X[1, 1] += 1e-15
+    Hedges(weight_scheme="group").fit(y=y, v=v, X=X, g=groups)  # must not raise
+
+    # Genuine within-group variation is still rejected.
+    X[1, 1] = 99.0
+    with pytest.raises(ValueError, match="constant"):
+        Hedges(weight_scheme="group").fit(y=y, v=v, X=X, g=groups)
+
+
+def test_sample_size_identifiability_is_checked_on_the_fitted_values():
+    """sigma^2 and tau^2 are identified by the n the likelihood actually sees.
+
+    Under weight_scheme='cluster' those are effective sample sizes, which vary
+    with group size even when every raw n is identical.
+    """
+    sizes = [1] * 6 + [20] * 6
+    groups = np.concatenate([[j] * s for j, s in enumerate(sizes)])
+    n_estimates = groups.size
+    n = np.full((n_estimates, 1), 50.0)  # every raw n identical
+    X = np.ones((n_estimates, 1))
+    y = 0.5 + np.random.RandomState(2).randn(n_estimates, 1) * 0.4
+
+    fitted = SampleSizeBasedLikelihoodEstimator(weight_scheme="cluster", cluster_rho=0.3).fit(
+        y=y, n=n, X=X, g=groups
+    )
+    assert np.isfinite(fitted.params_["sigma2"]).all()
+
+    # Genuinely unidentifiable input is still refused.
+    with pytest.raises(ValueError, match="all-equal sample sizes"):
+        SampleSizeBasedLikelihoodEstimator().fit(y=y, n=n, X=X)
+
+
+def test_near_equal_sample_sizes_warn_rather_than_abort():
+    """``raise Warning`` aborts the fit; this path should only warn."""
+    n = np.full((20, 1), 100.0)
+    n[0] = 101.0
+    y = np.random.RandomState(0).randn(20, 1)
+
+    with pytest.warns(UserWarning, match="too close"):
+        SampleSizeBasedLikelihoodEstimator().fit(y=y, n=n, X=np.ones((20, 1)))
+
+
+def test_heterogeneity_uses_the_aggregation_the_estimator_fitted():
+    """Sample-size estimators collapse by n, so results must not use v."""
+    rng = np.random.RandomState(0)
+    groups = np.repeat(np.arange(12), 3)
+    n = np.repeat(rng.randint(30, 200, 12).astype(float), 3)[:, None]
+    y = (rng.randn(12, 1) * 0.5).repeat(3, axis=0) + rng.randn(groups.size, 1) * 0.2
+
+    results = (
+        SampleSizeBasedLikelihoodEstimator(weight_scheme="group")
+        .fit_dataset(Dataset(y=y, n=n, g=groups))
+        .summary()
+    )
+    _, analysis_v, _ = results._analysis_arrays()
+
+    _, collapsed_n, _ = collapse_clusters_by_n(
+        y, n, results.dataset.X, groups, rho=DEFAULT_CLUSTER_RHO
+    )
+    sigma2 = np.asarray(results.estimator.params_["sigma2"], dtype=float)
+    assert np.allclose(analysis_v, sigma2 / collapsed_n)
 
 
 def test_group_mean_uses_ten_distinct_observations_from_one_group():
@@ -340,8 +854,16 @@ def test_cluster_robust_cov_wrong_group_length():
 
 
 @pytest.mark.filterwarnings("ignore:Cluster-robust")
-def test_cluster_robust_cov_too_few_groups_for_correction():
-    """The small-sample correction needs more groups than predictors."""
+@pytest.mark.parametrize("method", ["CR0", "CR2"])
+@pytest.mark.parametrize("small_sample", [True, False])
+def test_cluster_robust_cov_rejects_saturated_group_designs(method, small_sample):
+    """With m <= p the sandwich is undefined and must not return a number.
+
+    Every group then has leverage one, so its residuals are fitted away and
+    the meat collapses to ~1e-24. Returning that yields a standard error of
+    ~1e-12 and a p-value of ~1e-11 -- maximally significant -- from data that
+    carries no information about the coefficients at all.
+    """
     rng = np.random.RandomState(0)
     n_estimates = 6
     y = rng.randn(n_estimates, 1)
@@ -350,8 +872,54 @@ def test_cluster_robust_cov_too_few_groups_for_correction():
     beta = weighted_least_squares(y, v, X)
     groups = np.repeat([0, 1], 3)  # 2 groups, 2 predictors
 
-    with pytest.raises(ValueError, match="must exceed the number of predictors"):
-        cluster_robust_cov(y, v, X, beta, groups, method="CR0")
+    with pytest.raises(ValueError, match="more groups than predictors"):
+        cluster_robust_cov(y, v, X, beta, groups, method=method, small_sample=small_sample)
+
+
+def test_cluster_robust_cov_rejects_a_single_group():
+    """One group is the extreme case: nothing to compare against."""
+    rng = np.random.RandomState(0)
+    y = rng.randn(10, 1)
+    v = np.ones((10, 1))
+    X = np.ones((10, 1))
+    beta = weighted_least_squares(y, v, X)
+
+    with pytest.raises(ValueError, match="more groups than predictors"):
+        cluster_robust_cov(y, v, X, beta, np.zeros(10))
+
+
+def test_cluster_robust_cov_accepts_unsortable_labels():
+    """The docstring promises hashable labels, not sortable ones."""
+    rng = np.random.RandomState(0)
+    y = rng.randn(12, 1)
+    v = np.ones((12, 1))
+    X = np.ones((12, 1))
+    beta = weighted_least_squares(y, v, X)
+    mixed = np.array([1, 1, "b", "b", 2, 2, "d", "d", 3, 3, "f", "f"], dtype=object)
+
+    with pytest.warns(UserWarning, match="Cluster-robust"):
+        from_mixed = cluster_robust_cov(y, v, X, beta, mixed)
+    with pytest.warns(UserWarning, match="Cluster-robust"):
+        from_ints = cluster_robust_cov(y, v, X, beta, np.repeat(np.arange(6), 2))
+
+    assert np.allclose(from_mixed, from_ints)
+
+
+def test_cluster_robust_cov_accepts_one_dimensional_weights():
+    """satterthwaite_dof documents (K,) weights, so the sandwich must too."""
+    rng = np.random.RandomState(0)
+    y = rng.randn(12, 1)
+    v = np.abs(rng.randn(12, 1)) + 0.5
+    X = np.ones((12, 1))
+    beta = weighted_least_squares(y, v, X)
+    groups = np.repeat(np.arange(6), 2)
+
+    with pytest.warns(UserWarning, match="Cluster-robust"):
+        flat = cluster_robust_cov(y, v, X, beta, groups, w=(1.0 / v).ravel())
+    with pytest.warns(UserWarning, match="Cluster-robust"):
+        column = cluster_robust_cov(y, v, X, beta, groups, w=1.0 / v)
+
+    assert np.array_equal(flat, column)
 
 
 def test_cluster_robust_cov_warns_with_few_groups():
@@ -497,7 +1065,7 @@ def test_dataset_groups_wrong_length():
 
 
 def test_results_use_t_reference_with_groups():
-    """Robust fits should report a t reference with m - p degrees of freedom."""
+    """Robust fits should report a t reference with Satterthwaite dof."""
     rng = np.random.RandomState(0)
     y, v, X, groups = _dependent_data(rng, n_datasets=1)
 
@@ -506,8 +1074,12 @@ def test_results_use_t_reference_with_groups():
     naive_dataset = Dataset(y=y, v=v, X=X, add_intercept=False)
     naive = WeightedLeastSquares().fit_dataset(naive_dataset).summary()
 
+    # This design is balanced -- one predictor, equal-sized groups -- which is
+    # the regime where m - p is adequate, so the two should nearly agree.
     n_groups = np.unique(groups).size
-    assert robust.fe_dof == n_groups - X.shape[1]
+    assert robust.fe_dof.shape == robust.fe_params.shape
+    assert np.all(robust.fe_dof <= n_groups - X.shape[1])
+    assert np.allclose(robust.fe_dof, n_groups - X.shape[1], rtol=0.15)
     assert naive.fe_dof is None
 
     # A t reference with finite df is heavier tailed than a normal, so for the
@@ -520,6 +1092,57 @@ def test_results_use_t_reference_with_groups():
     width_robust = robust_stats["ci_u"] - robust_stats["ci_l"]
     width_naive = naive_stats["ci_u"] - naive_stats["ci_l"]
     assert np.all(width_robust > width_naive)
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+def test_satterthwaite_dof_collapses_for_unbalanced_group_level_predictors():
+    """The whole point of Satterthwaite dof: m - p is blind to imbalance.
+
+    When only a few groups carry the non-zero values of a predictor, that
+    coefficient is informed by far fewer than m groups. m - p does not notice,
+    which is what makes the naive reference reject far too often.
+    """
+    m, size = 20, 4
+    groups = np.repeat(np.arange(m), size)
+
+    slopes = []
+    for n_nonzero in (10, 5, 3, 2):
+        x = np.repeat((np.arange(m) < n_nonzero).astype(float), size)
+        X = np.c_[np.ones(m * size), x]
+        slopes.append(satterthwaite_dof(X, np.ones(m * size), groups)[1, 0])
+
+    # m - p would report 18 for every one of these designs.
+    assert np.isclose(slopes[0], m - 2, rtol=0.05)
+    assert np.all(np.diff(slopes) < 0)
+    assert slopes[-1] < 2.0
+
+
+def test_satterthwaite_dof_warns_when_one_group_determines_a_coefficient():
+    """A predictor supported by a single group leaves no CR2 adjustment."""
+    m, size = 20, 4
+    groups = np.repeat(np.arange(m), size)
+    x = np.repeat((np.arange(m) < 1).astype(float), size)
+    X = np.c_[np.ones(m * size), x]
+
+    with pytest.warns(UserWarning, match="full leverage"):
+        dof = satterthwaite_dof(X, np.ones(m * size), groups)
+
+    # Floored rather than reported as a comfortable m - p = 18.
+    assert dof[1, 0] == 1.0
+
+
+def test_satterthwaite_dof_is_shared_when_weights_do_not_vary():
+    """Identical weight columns must give identical dof, via the fast path."""
+    m, size = 12, 3
+    groups = np.repeat(np.arange(m), size)
+    X = np.c_[np.ones(m * size), np.repeat(np.arange(m) % 3, size).astype(float)]
+    w = np.ones((m * size, 1))
+
+    one = satterthwaite_dof(X, w, groups)
+    many = satterthwaite_dof(X, np.repeat(w, 7, axis=1), groups)
+
+    assert many.shape == (2, 7)
+    assert np.allclose(many, one)
 
 
 @pytest.mark.filterwarnings("ignore:Cluster-robust")
@@ -939,12 +1562,20 @@ def test_variance_estimators_group_mode_matches_explicit_collapse(estimator):
 
 @pytest.mark.filterwarnings("ignore:Cluster-robust")
 def test_sample_size_likelihood_group_mode_matches_explicit_collapse():
-    """The likelihood receives one unchanged n value per independent group."""
+    """The likelihood receives one effective n per independent group.
+
+    Effective, not raw. Rows in a group share subjects, so n must not be
+    counted once per row -- but they are not perfect duplicates either, and
+    pinning n at the group's raw value assumes they are. The effective size
+    ``s*n / (1 + rho(s-1))`` interpolates between the two.
+    """
     y = np.array([[1.0], [3.0], [6.0], [10.0], [20.0], [22.0]])
     n = np.array([[20.0], [20.0], [50.0], [50.0], [100.0], [100.0]])
     X = np.ones((6, 1))
     groups = np.array([0, 0, 1, 1, 2, 2])
-    collapsed_y, collapsed_n, collapsed_X = collapse_groups_by_n(y, n, X, groups)
+    collapsed_y, collapsed_n, collapsed_X = collapse_clusters_by_n(
+        y, n, X, groups, rho=DEFAULT_CLUSTER_RHO
+    )
 
     expected = SampleSizeBasedLikelihoodEstimator().fit(
         y=collapsed_y,
@@ -961,6 +1592,46 @@ def test_sample_size_likelihood_group_mode_matches_explicit_collapse():
 
     for key in ("fe_params", "sigma2", "tau2", "inv_cov"):
         assert np.allclose(observed.params_[key], expected.params_[key])
+
+
+def test_group_mode_honours_cluster_rho_for_sample_sizes():
+    """rho=1 is the only value for which a group's raw n is its effective n.
+
+    Rows in a group share subjects, so n must not be counted once per row --
+    but they are not perfect duplicates either. For s estimates from the same
+    n subjects correlated at rho, Var(ybar) = (sigma^2 / n)(1 + rho(s-1))/s,
+    i.e. an effective size s*n / (1 + rho(s-1)) running from n at rho=1 up to
+    s*n at rho=0. Pinning it at n biases sigma^2 low by (1 + rho(s-1))/s --
+    a factor of five for four uncorrelated estimates per group. Images from
+    one study share subjects but measure different contrasts, so rho is well
+    below one and the bias is real.
+    """
+    rng = np.random.RandomState(0)
+    n_groups, group_size = 10, 4
+    groups = np.repeat(np.arange(n_groups), group_size)
+    n_estimates = groups.size
+    n = np.repeat(rng.randint(40, 160, n_groups).astype(float), group_size)[:, None]
+    y = rng.randn(n_estimates, 1)
+    X = np.ones((n_estimates, 1))
+
+    effective = {}
+    for rho in (0.0, 0.5, 1.0):
+        _, collapsed_n, _, _ = _group_n_inputs(y, n, X, groups, "group", rho)
+        effective[rho] = collapsed_n
+
+    # Less assumed correlation means more independent information per group.
+    assert np.all(effective[0.0] > effective[0.5])
+    assert np.all(effective[0.5] > effective[1.0])
+
+    # The endpoints are the two formulas being interpolated between.
+    _, raw_n, _ = collapse_groups_by_n(y, n, X, groups)
+    assert np.allclose(effective[1.0], raw_n)
+    assert np.allclose(effective[0.0], group_size * raw_n)
+
+    # And the closed form, checked directly.
+    for rho in (0.0, 0.5, 1.0):
+        expected = group_size * raw_n / (1.0 + rho * (group_size - 1))
+        assert np.allclose(effective[rho], expected)
 
 
 def test_estimator_rejects_unknown_weight_scheme():

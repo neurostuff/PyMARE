@@ -59,8 +59,22 @@ def test_stouffer_adjusted():
 
     results = StoufferCombinationTest("directed").fit(z=data, w=weights, g=groups).params_
 
-    z_expected = np.array([5.00088912, 3.70356943, 4.05465924, 5.4633001, 5.18927878])
+    # These values changed when _inflation_term was fixed to index each group's
+    # own weights. Group 2 occupies rows 3-5 with weights (10, 15, 10), but the
+    # pairwise loop indexed the full weight array with block-local positions and
+    # so used rows 0-2's weights (4, 3, 4) instead. That understated the variance
+    # inflation, inflating z by ~50%. Verified against Var(sum w_i z_i) = w'Cw.
+    z_expected = np.array([3.34419412, 2.47665061, 2.71143136, 3.65341755, 3.47017404])
     assert np.allclose(results["z"], z_expected, atol=1e-5)
+
+    # The same numbers must come out regardless of the order the rows arrive in.
+    order = np.array([3, 4, 5, 0, 1, 2])
+    reordered = (
+        StoufferCombinationTest("directed")
+        .fit(z=data[order], w=weights[order], g=groups[order])
+        .params_
+    )
+    assert np.allclose(reordered["z"], z_expected, atol=1e-5)
 
     # Test with weights and no groups. Limiting cases.
     # Limiting case 1: all correlations are one.
@@ -82,7 +96,7 @@ def test_stouffer_adjusted():
         StoufferCombinationTest("directed").fit(z=data, w=weights, g=groups, corr=corr).params_
     )
 
-    z_corr_expected = np.array([5.00088912, 3.70356943, 4.05465924, 5.4633001, 5.18927878])
+    z_corr_expected = np.array([3.34419412, 2.47665061, 2.71143136, 3.65341755, 3.47017404])
     assert np.allclose(results_corr["z"], z_corr_expected, atol=1e-5)
 
     # Test with no correlation matrix and groups, but only one feature.

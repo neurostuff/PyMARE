@@ -282,3 +282,40 @@ def test_2d_loop_warning(dataset_2d):
         est.fit_dataset(dataset)
     # But not when it's smaller
     est.fit_dataset(dataset_2d)
+
+
+@pytest.mark.parametrize(
+    "estimator",
+    [WeightedLeastSquares, DerSimonianLaird, Hedges, VarianceBasedLikelihoodEstimator],
+    ids=["WLS", "DL", "HE", "ML"],
+)
+def test_model_based_cov_matches_the_fitted_weights(dataset, estimator):
+    """The reported covariance must be (X'WX)^-1 under the coefficients' own weights.
+
+    Every estimator here fits the coefficients with ``1 / (v + tau^2)`` weights, so
+    ``(X'WX)^-1`` under those same weights is the only matrix that is their covariance.
+    Hedges previously reported the covariance of an unweighted fit instead -- the OLS
+    fit it uses internally to obtain tau^2 -- which left the standard errors several
+    times too small and unrelated to the coefficients beside them.
+    """
+    results = estimator().fit_dataset(dataset).summary()
+    tau2 = np.ravel(results.tau2)[0]
+    w = 1.0 / (dataset.v + tau2)
+    expected = np.linalg.pinv(dataset.X.T @ np.diag(w.ravel()) @ dataset.X)
+
+    assert np.allclose(results.fe_se.ravel(), np.sqrt(np.diag(expected)))
+
+
+def test_hedges_reports_the_weighted_standard_errors(dataset):
+    """Regression test for the Hedges covariance, pinned to explicit values.
+
+    tau^2 and the coefficients are unchanged by that fix, so they are asserted here
+    too: they still match the metafor ground truth used by ``test_hedges_estimator``.
+    """
+    results = Hedges().fit_dataset(dataset).summary()
+
+    assert np.allclose(results.fe_params.ravel(), [-0.1066, 0.7704], atol=1e-4)
+    assert np.allclose(np.ravel(results.tau2), 11.3881, atol=1e-4)
+    assert np.allclose(results.fe_se.ravel(), [3.0479, 1.1335], atol=1e-4)
+    # The unweighted fit that produces tau^2 would have given these instead.
+    assert not np.allclose(results.fe_se.ravel(), [0.8639, 0.3217], atol=1e-4)
