@@ -1,4 +1,18 @@
-"""Miscellaneous statistical functions."""
+"""Miscellaneous statistical functions.
+
+Vocabulary
+----------
+A **group** is the unit of dependence: rows sharing a label in ``g`` came from
+one sampling unit and are not independent of each other. That is the word used
+throughout for the unit itself, and it matches the ``g``/``groups`` arguments.
+
+The word **cluster** is retained only where it is the established term for a
+method rather than a description of the data -- "cluster-robust variance
+estimation", :func:`cluster_robust_cov`, ``MIN_CLUSTERS_FOR_RVE``, and the
+CR0/CR2 family. Those names tie the code to its own citations and are not
+renamed. A group and a cluster are the same thing; only the provenance of the
+word differs.
+"""
 
 import warnings
 from typing import NamedTuple
@@ -23,10 +37,10 @@ MIN_DOF_FOR_SATTERTHWAITE = 4.0
 # the CR2 adjustment diverges. Floor it rather than emit infinities.
 _MIN_LEVERAGE_COMPLEMENT = 1e-10
 
-# Assumed correlation between estimates within a cluster, used only to collapse
-# clusters before estimating tau^2. Results are very weakly sensitive to it; 0.8
+# Assumed correlation between estimates within a group, used only to collapse
+# groups before estimating tau^2. Results are very weakly sensitive to it; 0.8
 # is the conventional choice for correlated effects.
-DEFAULT_CLUSTER_RHO = 0.8
+DEFAULT_RHO = 0.8
 
 
 class WeightedInterceptCR2Statistics(NamedTuple):
@@ -199,58 +213,58 @@ def weighted_intercept_cr2(signs, sufficient_statistics):
     return statistics
 
 
-def cluster_weights(v, groups, tau2=0.0):
+def group_weights(v, groups, tau2=0.0):
     r"""Rescale inverse-variance weights so replication does not buy influence.
 
-    The ordinary weight :math:`1 / (v_i + \tau^2)` gives a cluster that
-    contributed :math:`n_j` estimates :math:`n_j` times the pull of a cluster
+    The ordinary weight :math:`1 / (v_i + \tau^2)` gives a group that
+    contributed :math:`n_j` estimates :math:`n_j` times the pull of a group
     that contributed one, because the weights of its members are summed. This
-    divides each weight by its cluster size,
+    divides each weight by its group size,
 
     .. math::
         w_i = \frac{1}{n_j (v_i + \tau^2)},
 
-    so a cluster's total weight is the *mean* of its members' weights rather
+    so a group's total weight is the *mean* of its members' weights rather
     than their sum. Replication therefore stops buying influence in proportion
-    to row count, while genuinely more precise clusters still count more.
+    to row count, while genuinely more precise groups still count more.
 
     This follows the "correlated effects" weighting of
     :footcite:t:`hedges2010robust`, but is not identical to the version in the R
     package `robumeta <https://cran.r-project.org/package=robumeta>`_
-    :footcite:p:`fisher2015robumeta`, which assigns every row in a cluster the
-    *same* weight built from the cluster's mean variance,
+    :footcite:p:`fisher2015robumeta`, which assigns every row in a group the
+    *same* weight built from the group's mean variance,
 
     .. math::
         w_{ij}^{\text{robumeta}} = \frac{1}{n_j(\bar{v}_j + \tau^2)},
         \qquad \bar{v}_j = \frac{1}{n_j}\sum_i v_{ij}.
 
-    The two agree exactly for singleton clusters and for clusters whose ``v`` is
-    constant, and differ otherwise: this function's cluster total is
+    The two agree exactly for singleton groups and for groups whose ``v`` is
+    constant, and differ otherwise: this function's group total is
     :math:`\operatorname{mean}_i(1/v_i)` while robumeta's is
     :math:`1/\operatorname{mean}_i(v_i)`, so by the arithmetic-harmonic mean
-    inequality this function never gives a cluster *less* total weight than
+    inequality this function never gives a group *less* total weight than
     robumeta does. Keeping the row-specific :math:`v_i` preserves genuine
     precision differences between rows; robumeta equalizes them because its
-    working model assumes :math:`v_{ij} \approx v_j` within a cluster. Expect
-    the weights to differ when within-cluster variances differ.
+    working model assumes :math:`v_{ij} \approx v_j` within a group. Expect
+    the weights to differ when within-group variances differ.
 
     Notes
     -----
     Invariance to duplication is exact only when the duplicated row's precision
-    equals its cluster's mean precision -- which is automatic when ``v`` is
-    constant within the cluster. With heterogeneous within-cluster variances,
-    duplicating an above-average-precision row still raises its cluster's total
+    equals its group's mean precision -- which is automatic when ``v`` is
+    constant within the group. With heterogeneous within-group variances,
+    duplicating an above-average-precision row still raises its group's total
     weight somewhat (and duplicating a below-average one lowers it). This is a
     property of correlated-effects weighting rather than of this implementation;
-    robumeta behaves the same way. Use ``weight_scheme="group"`` if one row per
-    cluster is what the design actually warrants.
+    robumeta behaves the same way. Use ``weight_scheme="collapse"`` if one row per
+    group is what the design actually warrants.
 
     Parameters
     ----------
     v : :obj:`numpy.ndarray` of shape (K, D)
         2d array of sampling variances.
     groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
-        Cluster labels, one per estimate. Any hashable labels are accepted.
+        Group labels, one per estimate. Any hashable labels are accepted.
     tau2 : :obj:`float` or :obj:`numpy.ndarray`, optional
         tau^2 estimate to use for the weights.
         Default = 0.
@@ -268,17 +282,17 @@ def cluster_weights(v, groups, tau2=0.0):
     return normalize_group_weights(1.0 / (v + tau2), groups)
 
 
-def collapse_clusters(y, v, X, groups, rho=DEFAULT_CLUSTER_RHO):
-    r"""Aggregate each cluster to a single effect estimate.
+def collapse_groups(y, v, X, groups, rho=DEFAULT_RHO):
+    r"""Aggregate each group to a single effect estimate.
 
     Moment-based estimators of :math:`\tau^2` count every row of ``y`` as an
-    independent observation. When a cluster contributes several rows, that
+    independent observation. When a group contributes several rows, that
     pseudo-replication biases :math:`\tau^2` downward: the duplicated rows agree
     with each other by construction, so the observed dispersion looks smaller
     than the number of observations would imply. Estimating :math:`\tau^2` from one
     effect per cluster removes the problem.
 
-    Each cluster is collapsed to the unweighted mean of its members, whose
+    Each group is collapsed to the unweighted mean of its members, whose
     sampling variance is
 
     .. math::
@@ -296,9 +310,9 @@ def collapse_clusters(y, v, X, groups, rho=DEFAULT_CLUSTER_RHO):
     X : :obj:`numpy.ndarray` of shape (K, P)
         Fixed effect design matrix.
     groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
-        Cluster labels, one per estimate.
+        Group labels, one per estimate.
     rho : :obj:`float`, optional
-        Assumed correlation between estimates within a cluster, in [0, 1].
+        Assumed correlation between estimates within a group, in [0, 1].
         Default = 0.8, matching the default of the R package `robumeta
         <https://cran.r-project.org/package=robumeta>`_, whose correlated
         effects model this follows.
@@ -306,7 +320,7 @@ def collapse_clusters(y, v, X, groups, rho=DEFAULT_CLUSTER_RHO):
     Returns
     -------
     :obj:`tuple`
-        ``(y, v, X)`` collapsed to one row per cluster.
+        ``(y, v, X)`` collapsed to one row per group.
 
     Notes
     -----
@@ -314,7 +328,7 @@ def collapse_clusters(y, v, X, groups, rho=DEFAULT_CLUSTER_RHO):
     across its whole range typically moves downstream error rates by well under
     a percentage point, because it enters only through the relative weighting of
     already-aggregated clusters. Assuming a single value is therefore reasonable
-    even when the true within-cluster correlation varies between clusters.
+    even when the true within-group correlation varies between groups.
 
     """
     if not 0.0 <= rho <= 1.0:
@@ -346,10 +360,10 @@ def collapse_clusters(y, v, X, groups, rho=DEFAULT_CLUSTER_RHO):
     return collapsed_y, collapsed_v, collapsed_X
 
 
-def collapse_clusters_by_n(y, n, X, groups, rho=DEFAULT_CLUSTER_RHO):
-    r"""Aggregate each cluster to one effect with an effective sample size.
+def collapse_groups_by_n(y, n, X, groups, rho=DEFAULT_RHO):
+    r"""Aggregate each group to one effect with an effective sample size.
 
-    The counterpart to :func:`~pymare.stats.collapse_clusters` for models
+    The counterpart to :func:`~pymare.stats.collapse_groups` for models
     parameterized by sample size rather than sampling variance, where
     :math:`v_i = \sigma^2 / n_i` and :math:`\sigma^2` is itself being
     estimated. Requiring the collapsed effect to satisfy
@@ -372,15 +386,15 @@ def collapse_clusters_by_n(y, n, X, groups, rho=DEFAULT_CLUSTER_RHO):
     X : :obj:`numpy.ndarray` of shape (K, P)
         Fixed effect design matrix.
     groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
-        Cluster labels, one per estimate.
+        Group labels, one per estimate.
     rho : :obj:`float`, optional
-        Assumed correlation between estimates within a cluster, in [0, 1].
+        Assumed correlation between estimates within a group, in [0, 1].
         Default = 0.8.
 
     Returns
     -------
     :obj:`tuple`
-        ``(y, n, X)`` collapsed to one row per cluster.
+        ``(y, n, X)`` collapsed to one row per group.
 
     """
     if not 0.0 <= rho <= 1.0:
@@ -408,66 +422,6 @@ def collapse_clusters_by_n(y, n, X, groups, rho=DEFAULT_CLUSTER_RHO):
         inverse = (1.0 / member_n).sum(axis=0)
         cross = (1.0 / np.sqrt(member_n)).sum(axis=0) ** 2 - inverse
         collapsed_n[group] = size**2 / (inverse + rho * cross)
-
-    return collapsed_y, collapsed_n, collapsed_X
-
-
-def collapse_groups_by_n(y, n, X, groups):
-    r"""Aggregate repeated observations while preserving each group's ``n``.
-
-    This operation is appropriate when rows in a group are repeated outcomes or
-    measurements of the *same sampling unit*. Their equal-weight mean is one
-    group-level estimate, but ``n`` must only be counted once. Unlike
-    :func:`collapse_clusters_by_n`, this function therefore does not convert
-    repeated outcomes into an effective sample size.
-
-    All rows in a group must report the same ``n`` value. A disagreement is
-    ambiguous and is rejected rather than silently averaged.
-
-    Parameters
-    ----------
-    y : :obj:`numpy.ndarray` of shape (K, D)
-        Estimates.
-    n : :obj:`numpy.ndarray` of shape (K, 1) or (K, D)
-        Per-observation ``n`` values.
-    X : :obj:`numpy.ndarray` of shape (K, P)
-        Design matrix.
-    groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
-        Group labels.
-
-    Returns
-    -------
-    :obj:`tuple`
-        ``(y, n, X)`` with one row per group.
-    """
-    y = np.asarray(y)
-    n = np.asarray(n)
-    X = np.asarray(X)
-    groups = np.asarray(groups).ravel()
-    if groups.shape[0] != y.shape[0]:
-        raise ValueError(
-            f"groups must have one label per estimate: expected {y.shape[0]}, "
-            f"got {groups.shape[0]}."
-        )
-
-    # encode_groups, not np.unique: group_mean() below encodes by first
-    # occurrence, so using np.unique's sorted-label codes here would pair each
-    # collapsed effect with a different group's ``n``.
-    group_codes, group_labels = encode_groups(groups)
-    n_groups = group_labels.size
-    collapsed_y = group_mean(y, group_codes)
-    collapsed_n = np.empty((n_groups, n.shape[1]))
-    collapsed_X = group_mean(X, group_codes)
-
-    for group in range(n_groups):
-        members = np.flatnonzero(group_codes == group)
-        member_n = n[members]
-        if not np.allclose(member_n, member_n[[0]], rtol=0.0, atol=0.0):
-            raise ValueError(
-                "n values within each group must agree when observations "
-                "come from the same sampling unit."
-            )
-        collapsed_n[group] = member_n[0]
 
     return collapsed_y, collapsed_n, collapsed_X
 
@@ -687,19 +641,26 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
         tau^2 estimate to use for weights.
         Default = 0.
     return_cov : :obj:`bool`, optional
-        Whether or not to return the inverse cov matrix.
+        Whether or not to return the covariance matrix of the coefficients.
         Default = False.
     w : None or :obj:`numpy.ndarray`, optional
         Precomputed weights of the same shape as ``y``, overriding the default
-        ``1 / (v + tau2)``. Use :func:`~pymare.stats.cluster_weights` to obtain
+        ``1 / (v + tau2)``. Use :func:`~pymare.stats.group_weights` to obtain
         weights that do not reward replication within a cluster.
         Default = None.
 
     Returns
     -------
     params[, cov]
-        If return_cov is True, returns both fixed parameter estimates and the
-        inverse covariance matrix; if False, only the parameter estimates.
+        If return_cov is True, returns both the fixed parameter estimates and
+        ``(X'WX)^-1``, which is the *covariance* matrix of those estimates; if
+        False, only the parameter estimates.
+
+        Note that PyMARE stores this quantity under the key ``"inv_cov"``, which
+        is a misnomer of long standing: ``X'WX`` is the inverse covariance, so
+        its inverse is the covariance itself. Anything that takes
+        ``sqrt(diagonal(...))`` of it -- :attr:`pymare.results.MetaRegressionResults.fe_se`,
+        for instance -- is treating it as a covariance, which is correct.
     """
     w = 1.0 / (v + tau2) if w is None else w
 
@@ -709,12 +670,15 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
 
     # numpy >= 1.8 inverts stacked matrices along the first N - 2 dims, so we
     # can vectorize computation along the second dimension (parallel datasets)
-    precision = np.linalg.pinv(cov).T
+    # (X'WX)^-1, i.e. the covariance of beta. Deliberately not called
+    # "precision": in statistics a precision matrix is the *inverse* of a
+    # covariance, which is X'WX itself, not this.
+    cov_beta = np.linalg.pinv(cov).T
 
-    pwX = np.einsum("ipk,qpi->iqk", wX, precision)
+    pwX = np.einsum("ipk,qpi->iqk", wX, cov_beta)
     beta = np.einsum("ipk,ik->ip", pwX, y.T).T
 
-    return (beta, precision) if return_cov else beta
+    return (beta, cov_beta) if return_cov else beta
 
 
 def _symmetric_sqrt(matrices):
@@ -909,7 +873,7 @@ def _cr2_scores(X, w, resid, group_members, bread):
     return scores
 
 
-def satterthwaite_dof(X, w, groups, inv_cov=None):
+def satterthwaite_dof(X, w, groups, model_cov=None):
     r"""Satterthwaite degrees of freedom for CR2 cluster-robust tests.
 
     Cluster-robust standard errors are asymptotic in the number of groups, so
@@ -977,9 +941,11 @@ def satterthwaite_dof(X, w, groups, inv_cov=None):
         The weights used to fit the coefficients, matching those passed to
         :func:`~pymare.stats.cluster_robust_cov`.
     groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
-        Group (cluster) labels, one per observation.
-    inv_cov : None or :obj:`numpy.ndarray` of shape (P, P, D), optional
-        The model-based ``(X'WX)^-1``, reused when the caller already has it.
+        Group labels, one per observation.
+    model_cov : None or :obj:`numpy.ndarray` of shape (P, P, D), optional
+        The model-based covariance of the coefficients, ``(X'WX)^-1``, reused
+        when the caller already has it. Must correspond to the same weights as
+        ``w``; pass None to have it rebuilt.
         Default = None.
 
     Returns
@@ -1014,7 +980,7 @@ def satterthwaite_dof(X, w, groups, inv_cov=None):
     # common case when v is supplied as a single column.
     if n_datasets > 1 and np.all(w == w[:, [0]]):
         shared = satterthwaite_dof(
-            X, w[:, [0]], groups, None if inv_cov is None else inv_cov[:, :, [0]]
+            X, w[:, [0]], groups, None if model_cov is None else model_cov[:, :, [0]]
         )
         return np.repeat(shared, n_datasets, axis=1)
 
@@ -1029,10 +995,10 @@ def satterthwaite_dof(X, w, groups, inv_cov=None):
         sw = sqrt_w[:, start:stop]
         size = stop - start
 
-        if inv_cov is None:
+        if model_cov is None:
             bread = np.linalg.pinv(np.einsum("kp,kd,kq->dpq", X, w[:, start:stop], X))
         else:
-            bread = np.moveaxis(np.asarray(inv_cov)[:, :, start:stop], -1, 0)
+            bread = np.moveaxis(np.asarray(model_cov)[:, :, start:stop], -1, 0)
 
         # M = LL' via its symmetric square root. It factors the quadratic form
         # below (t_j'Mt_l = (L't_j).(L't_l)) and is also the factor the
@@ -1145,7 +1111,7 @@ def cluster_robust_cov(
     groups,
     tau2=0.0,
     small_sample=True,
-    inv_cov=None,
+    model_cov=None,
     w=None,
     method="CR2",
 ):
@@ -1178,7 +1144,7 @@ def cluster_robust_cov(
         Fixed effect coefficients, as returned by
         :func:`~pymare.stats.weighted_least_squares`.
     groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
-        Group (cluster) labels, one per observation. Any hashable labels are
+        Group labels, one per observation. Any hashable labels are
         accepted.
     tau2 : :obj:`float` or :obj:`numpy.ndarray`, optional
         tau^2 estimate used for the weights, matching the value used to
@@ -1199,11 +1165,13 @@ def cluster_robust_cov(
         :footcite:t:`fisher2015robumeta` report that simulations find this
         adjustment "inadequate except in very specific cases", which is why
         ``method="CR2"`` is the default.
-    inv_cov : None or :obj:`numpy.ndarray` of shape (P, P, D), optional
-        The model-based inverse covariance ``(X'WX)^-1``, as returned by
-        :func:`~pymare.stats.weighted_least_squares` with ``return_cov=True``.
-        Supplying it avoids recomputing a pseudo-inverse that the caller
-        already has. It must correspond to the same ``tau2``.
+    model_cov : None or :obj:`numpy.ndarray` of shape (P, P, D), optional
+        The model-based covariance of the coefficients, ``(X'WX)^-1``, as
+        returned by :func:`~pymare.stats.weighted_least_squares` with
+        ``return_cov=True``. Supplying it avoids recomputing a pseudo-inverse
+        the caller already has. It must correspond to the same ``tau2`` and the
+        same ``w``, since it is used as the bread of the sandwich; a mismatched
+        value produces a silently wrong result rather than an error.
         Default = None.
     w : None or :obj:`numpy.ndarray` of shape (K, D), optional
         Precomputed weights overriding the default ``1 / (v + tau2)``. Must be
@@ -1225,7 +1193,7 @@ def cluster_robust_cov(
     -------
     :obj:`numpy.ndarray` of shape (P, P, D)
         The robust covariance matrix for the fixed effects, oriented like the
-        inverse covariance returned by
+        covariance returned by
         :func:`~pymare.stats.weighted_least_squares`.
 
     Notes
@@ -1238,7 +1206,7 @@ def cluster_robust_cov(
     spread across groups. When one group carries much of the total weight, the
     sandwich is estimating that group's variance from what is effectively a
     single residual, and no residual adjustment fully rescues it. Weighting the
-    estimates with :func:`~pymare.stats.cluster_weights` levels the weight
+    estimates with :func:`~pymare.stats.group_weights` levels the weight
     across groups and is far more effective than any choice of ``method``.
 
     For the same reason, a comfortable group count is *not* evidence that the
@@ -1296,7 +1264,7 @@ def cluster_robust_cov(
             f"anti-conservative at or below about {MIN_CLUSTERS_FOR_RVE}; the "
             "residual adjustment only partly compensates, so p-values may "
             "still be too small. If weight is spread unevenly across groups, "
-            "consider pymare.stats.cluster_weights.",
+            "consider pymare.stats.group_weights.",
             UserWarning,
             stacklevel=2,
         )
@@ -1319,10 +1287,10 @@ def cluster_robust_cov(
 
     # (X'WX)^-1 is exactly the model-based covariance, so reuse it when the
     # caller already has it rather than repeating the pinv.
-    if inv_cov is None:
+    if model_cov is None:
         bread = np.linalg.pinv(wX.dot(X))  # (i, p, p)
     else:
-        bread = np.asarray(inv_cov).T  # (p, p, i) -> (i, p, p)
+        bread = np.asarray(model_cov).T  # (p, p, i) -> (i, p, p)
 
     # Residuals, (k, i), matching the orientation of y.
     resid = y - X.dot(beta)
@@ -1365,7 +1333,7 @@ def cluster_robust_cov(
     if small_sample and method == "CR0":
         robust_cov = robust_cov * (n_groups / (n_groups - n_preds))
 
-    # Match the (p, p, i) orientation used for inv_cov elsewhere.
+    # Match the (p, p, i) orientation used for the model-based covariance.
     return robust_cov.T
 
 

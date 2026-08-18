@@ -40,7 +40,7 @@ class Dataset:
         corresponding column in ``data``.
         Default = None.
     g : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
-        1d array of group (cluster) labels with length K, or the name of the
+        1d array of group labels with length K, or the name of the
         corresponding column in ``data``. Observations sharing a label are
         treated as statistically dependent.
         Estimators that support dependent estimates use this to widen their inference
@@ -268,7 +268,7 @@ def meta_regression(
         Desired alpha level (CIs will have 1 - alpha coverage). Default = 0.05.
     g : None or :obj:`numpy.ndarray` of shape (K,) or :obj:`str`, optional
         Group labels marking dependent estimates, or the name of the corresponding column in
-        ``data``. Estimates with the same label are treated as one cluster by estimators that
+        ``data``. Estimates with the same label are treated as one group by estimators that
         support cluster-robust inference.
         Default = None.
     **kwargs

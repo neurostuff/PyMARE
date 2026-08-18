@@ -113,18 +113,18 @@ def breakdown():
     for n_estimates, n_datasets in SHAPES:
         y, v, X, groups = make_data(n_estimates, n_datasets)
         n_groups = np.unique(groups).size
-        beta, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
+        beta, model_cov = weighted_least_squares(y, v, X, return_cov=True)
 
         fit = timeit(lambda: weighted_least_squares(y, v, X, return_cov=True))
         cr0 = timeit(
             lambda: cluster_robust_cov(
-                y, v, X, beta, groups, inv_cov=inv_cov, method="CR0", small_sample=False
+                y, v, X, beta, groups, model_cov=model_cov, method="CR0", small_sample=False
             )
         )
         cr2 = timeit(
-            lambda: cluster_robust_cov(y, v, X, beta, groups, inv_cov=inv_cov, method="CR2")
+            lambda: cluster_robust_cov(y, v, X, beta, groups, model_cov=model_cov, method="CR2")
         )
-        dof = timeit(lambda: satterthwaite_dof(X, 1.0 / v, groups, inv_cov=inv_cov))
+        dof = timeit(lambda: satterthwaite_dof(X, 1.0 / v, groups, model_cov=model_cov))
         print(
             f"{n_estimates:5d} {n_datasets:8d} {n_groups:5d} {fit:8.3f} "
             f"{cr0:8.3f} {cr2:8.3f} {dof:8.3f}"

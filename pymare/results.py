@@ -17,9 +17,9 @@ except ImportError:
     az = None
 
 from pymare.stats import (
-    DEFAULT_CLUSTER_RHO,
-    collapse_clusters,
-    collapse_clusters_by_n,
+    DEFAULT_RHO,
+    collapse_groups,
+    collapse_groups_by_n,
     encode_groups,
     q_gen,
     q_profile,
@@ -48,7 +48,11 @@ class MetaRegressionResults:
         where p is the number of predictors, and d is the number of parallel datasets
         (typically 1).
     fe_cov : :obj:`numpy.ndarray` of shape (p, p)
-        The p x p inverse covariance (or precision) matrix for the fixed effects.
+        The p x p *covariance* matrix of the fixed effects, ``(X'WX)^-1`` (or its
+        cluster-robust replacement). Despite the ``"inv_cov"`` key it arrives
+        under, this is a covariance, not an inverse covariance or a precision
+        matrix -- :attr:`fe_se` takes ``sqrt(diagonal(...))`` of it, which is
+        only meaningful for a covariance.
     tau2 : None or :obj:`numpy.ndarray` of shape (d,) or :obj:`float`, optional
         A 1-d array containing the estimated tau^2 value for each parallel dataset
         (or a float, for a single dataset). May be omitted by fixed-effects estimators.
@@ -71,17 +75,17 @@ class MetaRegressionResults:
         """Whether result statistics should use one aggregate per group.
 
         This has to match the condition the estimator used for tau^2, which is
-        ``_tau2_inputs``: both ``"cluster"`` and ``"group"`` estimate tau^2
+        ``_tau2_inputs``: both ``"rescale"`` and ``"collapse"`` estimate tau^2
         from one effect per group, and both fall back to the raw rows when
         there are too few groups to fit the design. Testing only for
-        ``"group"`` here left ``"cluster"`` reporting a tau^2 taken from
+        ``"collapse"`` here left ``"cluster"`` reporting a tau^2 taken from
         collapsed data alongside a confidence interval, Q, I^2 and H taken
         from the raw rows -- so the point estimate could fall outside its own
         interval.
         """
         if groups is None:
             return False
-        if getattr(self.estimator, "weight_scheme", None) not in ("cluster", "group"):
+        if getattr(self.estimator, "weight_scheme", None) not in ("rescale", "collapse"):
             return False
         return np.unique(np.asarray(groups).ravel()).size > n_preds
 
@@ -99,12 +103,12 @@ class MetaRegressionResults:
         # than collapsing a v the estimator never used; otherwise these
         # statistics describe a different aggregation from the one that
         # produced tau^2.
-        rho = getattr(self.estimator, "cluster_rho", DEFAULT_CLUSTER_RHO)
+        rho = getattr(self.estimator, "rho", DEFAULT_RHO)
         if "v" in getfullargspec(self.estimator.fit).args[1:]:
-            y, v, X = collapse_clusters(y, v, X, groups, rho=rho)
+            y, v, X = collapse_groups(y, v, X, groups, rho=rho)
         else:
             sigma2 = np.asarray(self.estimator.params_["sigma2"], dtype=float)
-            y, n, X = collapse_clusters_by_n(y, self.dataset.n, X, groups, rho=rho)
+            y, n, X = collapse_groups_by_n(y, self.dataset.n, X, groups, rho=rho)
             v = sigma2 / n
         return y, v, X
 
@@ -116,11 +120,11 @@ class MetaRegressionResults:
         has_v = "v" in getfullargspec(self.estimator.fit).args[1:]
         second = self.dataset.v if has_v else self.dataset.n
         if self._collapses_to_groups(groups, X.shape[1]):
-            rho = getattr(self.estimator, "cluster_rho", DEFAULT_CLUSTER_RHO)
+            rho = getattr(self.estimator, "rho", DEFAULT_RHO)
             if has_v:
-                y, second, X = collapse_clusters(y, second, X, groups, rho=rho)
+                y, second, X = collapse_groups(y, second, X, groups, rho=rho)
             else:
-                y, second, X = collapse_clusters_by_n(y, second, X, groups, rho=rho)
+                y, second, X = collapse_groups_by_n(y, second, X, groups, rho=rho)
             groups = np.arange(y.shape[0])
         return y, second, X, groups, has_v
 
@@ -473,8 +477,8 @@ class MetaRegressionResults:
 
         # Rows sharing a group label are dependent, so they are exchangeable
         # only as whole groups: flipping or shuffling them independently builds
-        # a null that is far too narrow. Under weight_scheme='group' (and now
-        # 'cluster') the arrays above are already one row per group, but
+        # a null that is far too narrow. Under weight_scheme='collapse' (and now
+        # 'rescale') the arrays above are already one row per group, but
         # 'individual' keeps every row while still using cluster-robust errors,
         # so the unit has to be recovered from the labels here.
         if analysis_groups is not None:

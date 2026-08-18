@@ -17,21 +17,20 @@ from pymare.estimators import (
     VarianceBasedLikelihoodEstimator,
     WeightedLeastSquares,
 )
-from pymare.estimators.estimators import _group_n_inputs
+from pymare.estimators.estimators import _collapse_n_inputs
 from pymare.stats import (
-    DEFAULT_CLUSTER_RHO,
+    DEFAULT_RHO,
     MIN_DOF_FOR_SATTERTHWAITE,
     _cr2_low_rank_apply,
     _cr2_low_rank_factors,
     _symmetric_sqrt,
     cluster_robust_cov,
-    cluster_weights,
-    collapse_clusters,
-    collapse_clusters_by_n,
+    collapse_groups,
     collapse_groups_by_n,
     encode_groups,
     estimate_null_correlation,
     group_mean,
+    group_weights,
     normalize_group_weights,
     one_sample_t_from_sufficient_statistics,
     satterthwaite_dof,
@@ -257,7 +256,7 @@ def test_stouffer_validates_its_inputs_like_fisher():
 
 
 @pytest.mark.filterwarnings("ignore:Cluster-robust")
-@pytest.mark.parametrize("weight_scheme", ["individual", "cluster", "group"])
+@pytest.mark.parametrize("weight_scheme", ["individual", "rescale", "collapse"])
 def test_permutation_flips_whole_groups_and_leaves_the_estimator_alone(weight_scheme):
     """Dependent rows are exchangeable only as complete groups.
 
@@ -353,7 +352,7 @@ def test_dataset_accepts_group_labels_alongside_a_dataframe():
 
 
 @pytest.mark.filterwarnings("ignore:Cluster-robust")
-@pytest.mark.parametrize("weight_scheme", ["individual", "cluster", "group"])
+@pytest.mark.parametrize("weight_scheme", ["individual", "rescale", "collapse"])
 def test_estimators_accept_unsortable_group_labels(weight_scheme):
     """Any hashable label, as encode_groups documents -- not just sortable ones.
 
@@ -367,7 +366,7 @@ def test_estimators_accept_unsortable_group_labels(weight_scheme):
     fitted = DerSimonianLaird(weight_scheme=weight_scheme).fit(
         y=y, v=np.full((12, 1), 0.2), X=np.ones((12, 1)), g=mixed
     )
-    assert fitted.n_clusters_ == 6
+    assert fitted.n_groups_ == 6
 
     integers = np.repeat(np.arange(6), 2)
     equivalent = DerSimonianLaird(weight_scheme=weight_scheme).fit(
@@ -418,8 +417,8 @@ def test_encode_groups_preserves_first_occurrence_order():
 @pytest.mark.parametrize(
     "collapse, second",
     [
-        (lambda y, s, X, g: collapse_clusters(y, s, X, g, rho=0.0), np.array([[1.0], [1.0]])),
-        (lambda y, s, X, g: collapse_clusters_by_n(y, s, X, g, rho=0.0), None),
+        (lambda y, s, X, g: collapse_groups(y, s, X, g, rho=0.0), np.array([[1.0], [1.0]])),
+        (lambda y, s, X, g: collapse_groups_by_n(y, s, X, g, rho=0.0), None),
         (lambda y, s, X, g: collapse_groups_by_n(y, s, X, g), None),
     ],
 )
@@ -467,9 +466,9 @@ def test_cluster_robust_cov_shared_weights_take_the_fast_path(method):
     X = np.c_[np.ones(n_estimates), rng.randn(n_estimates)]
     groups = np.repeat(np.arange(8), 2)
 
-    beta, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
+    beta, model_cov = weighted_least_squares(y, v, X, return_cov=True)
     fast = cluster_robust_cov(
-        y, v, X, beta, groups, inv_cov=inv_cov, method=method, small_sample=False
+        y, v, X, beta, groups, model_cov=model_cov, method=method, small_sample=False
     )
 
     # Same weights, but perturbed so the columns are no longer detected as
@@ -483,7 +482,7 @@ def test_cluster_robust_cov_shared_weights_take_the_fast_path(method):
                 X,
                 beta[:, [i]],
                 groups,
-                inv_cov=inv_cov[:, :, [0]],
+                model_cov=model_cov[:, :, [0]],
                 method=method,
                 small_sample=False,
             )[:, :, 0]
@@ -496,7 +495,7 @@ def test_cluster_robust_cov_shared_weights_take_the_fast_path(method):
 
     # At a fixed shape the fast path is exactly reproducible run to run.
     again = cluster_robust_cov(
-        y, v, X, beta, groups, inv_cov=inv_cov, method=method, small_sample=False
+        y, v, X, beta, groups, model_cov=model_cov, method=method, small_sample=False
     )
     assert np.array_equal(fast, again)
 
@@ -512,9 +511,9 @@ def test_cluster_robust_cov_accepts_one_shared_variance_column(method):
     X = np.ones((n_estimates, 1))
     groups = np.repeat(np.arange(6), 2)
 
-    beta, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
+    beta, model_cov = weighted_least_squares(y, v, X, return_cov=True)
     shared = cluster_robust_cov(
-        y, v, X, beta, groups, inv_cov=inv_cov, method=method, small_sample=False
+        y, v, X, beta, groups, model_cov=model_cov, method=method, small_sample=False
     )
     expanded = cluster_robust_cov(
         y,
@@ -522,7 +521,7 @@ def test_cluster_robust_cov_accepts_one_shared_variance_column(method):
         X,
         beta,
         groups,
-        inv_cov=inv_cov,
+        model_cov=model_cov,
         method=method,
         small_sample=False,
     )
@@ -579,11 +578,11 @@ def test_cr2_low_rank_handles_rank_deficient_and_degenerate_groups():
 
 
 @pytest.mark.filterwarnings("ignore:Cluster-robust")
-@pytest.mark.parametrize("weight_scheme", ["cluster", "group"])
+@pytest.mark.parametrize("weight_scheme", ["rescale", "collapse"])
 def test_tau2_interval_and_heterogeneity_use_the_same_units_as_tau2(weight_scheme):
     """A point estimate must not fall outside its own confidence interval.
 
-    Both "cluster" and "group" estimate tau^2 from one aggregate per group.
+    Both "rescale" and "collapse" estimate tau^2 from one aggregate per group.
     Results statistics have to collapse on the same condition, or the interval
     and Q describe a different set of units than the estimate they accompany.
     """
@@ -633,7 +632,7 @@ def test_group_collapse_rejects_a_saturated_collapsed_design(estimator):
     y = np.random.RandomState(0).randn(9, 1)
 
     with pytest.raises(ValueError, match="number of groups must exceed"):
-        estimator(weight_scheme="group").fit(y=y, v=np.full((9, 1), 0.1), X=X, g=groups)
+        estimator(weight_scheme="collapse").fit(y=y, v=np.full((9, 1), 0.1), X=X, g=groups)
 
 
 def test_group_design_check_tolerates_floating_point_noise():
@@ -644,18 +643,18 @@ def test_group_design_check_tolerates_floating_point_noise():
 
     X = np.c_[np.ones(9), np.repeat([1.0, 2.0, 3.0], 3)]
     X[1, 1] += 1e-15
-    Hedges(weight_scheme="group").fit(y=y, v=v, X=X, g=groups)  # must not raise
+    Hedges(weight_scheme="collapse").fit(y=y, v=v, X=X, g=groups)  # must not raise
 
     # Genuine within-group variation is still rejected.
     X[1, 1] = 99.0
     with pytest.raises(ValueError, match="constant"):
-        Hedges(weight_scheme="group").fit(y=y, v=v, X=X, g=groups)
+        Hedges(weight_scheme="collapse").fit(y=y, v=v, X=X, g=groups)
 
 
 def test_sample_size_identifiability_is_checked_on_the_fitted_values():
     """sigma^2 and tau^2 are identified by the n the likelihood actually sees.
 
-    Under weight_scheme='cluster' those are effective sample sizes, which vary
+    Under weight_scheme='rescale' those are effective sample sizes, which vary
     with group size even when every raw n is identical.
     """
     sizes = [1] * 6 + [20] * 6
@@ -665,7 +664,7 @@ def test_sample_size_identifiability_is_checked_on_the_fitted_values():
     X = np.ones((n_estimates, 1))
     y = 0.5 + np.random.RandomState(2).randn(n_estimates, 1) * 0.4
 
-    fitted = SampleSizeBasedLikelihoodEstimator(weight_scheme="cluster", cluster_rho=0.3).fit(
+    fitted = SampleSizeBasedLikelihoodEstimator(weight_scheme="rescale", rho=0.3).fit(
         y=y, n=n, X=X, g=groups
     )
     assert np.isfinite(fitted.params_["sigma2"]).all()
@@ -693,15 +692,13 @@ def test_heterogeneity_uses_the_aggregation_the_estimator_fitted():
     y = (rng.randn(12, 1) * 0.5).repeat(3, axis=0) + rng.randn(groups.size, 1) * 0.2
 
     results = (
-        SampleSizeBasedLikelihoodEstimator(weight_scheme="group")
+        SampleSizeBasedLikelihoodEstimator(weight_scheme="collapse")
         .fit_dataset(Dataset(y=y, n=n, g=groups))
         .summary()
     )
     _, analysis_v, _ = results._analysis_arrays()
 
-    _, collapsed_n, _ = collapse_clusters_by_n(
-        y, n, results.dataset.X, groups, rho=DEFAULT_CLUSTER_RHO
-    )
+    _, collapsed_n, _ = collapse_groups_by_n(y, n, results.dataset.X, groups, rho=DEFAULT_RHO)
     sigma2 = np.asarray(results.estimator.params_["sigma2"], dtype=float)
     assert np.allclose(analysis_v, sigma2 / collapsed_n)
 
@@ -1004,8 +1001,8 @@ def test_estimators_default_is_unchanged(estimator, second_arg):
 
     fitted = estimator().fit(**kwargs)
 
-    assert fitted.n_clusters_ is None
-    assert "n_clusters" not in fitted.params_
+    assert fitted.n_groups_ is None
+    assert "n_groups" not in fitted.params_
 
 
 @pytest.mark.parametrize(("estimator", "second_arg"), WLS_ESTIMATORS)
@@ -1021,7 +1018,7 @@ def test_estimators_groups_change_only_inference(estimator, second_arg):
     assert np.allclose(naive.params_["fe_params"], robust.params_["fe_params"])
     assert np.allclose(naive.params_["tau2"], robust.params_["tau2"])
     assert not np.allclose(naive.params_["inv_cov"], robust.params_["inv_cov"])
-    assert robust.n_clusters_ == np.unique(groups).size
+    assert robust.n_groups_ == np.unique(groups).size
 
 
 @pytest.mark.parametrize(("estimator", "second_arg"), WLS_ESTIMATORS)
@@ -1047,7 +1044,7 @@ def test_estimator_groups_via_dataset():
 
     fitted = WeightedLeastSquares().fit_dataset(dataset)
 
-    assert fitted.n_clusters_ == np.unique(groups).size
+    assert fitted.n_groups_ == np.unique(groups).size
 
 
 def test_dataset_groups_from_dataframe():
@@ -1091,7 +1088,7 @@ def test_meta_regression_accepts_groups():
         g=groups,
     )
 
-    assert results.estimator.n_clusters_ == np.unique(groups).size
+    assert results.estimator.n_groups_ == np.unique(groups).size
 
 
 def test_dataset_groups_wrong_length():
@@ -1232,13 +1229,13 @@ def test_group_weighted_heterogeneity_matches_collapsed_reference():
     dataset = Dataset(y=y, v=v, X=X, g=groups, add_intercept=False)
 
     observed = (
-        WeightedLeastSquares(weight_scheme="group", cluster_rho=rho)
+        WeightedLeastSquares(weight_scheme="collapse", rho=rho)
         .fit_dataset(dataset)
         .summary()
         .get_heterogeneity_stats()
     )
 
-    collapsed_y, collapsed_v, collapsed_X = collapse_clusters(y, v, X, groups, rho=rho)
+    collapsed_y, collapsed_v, collapsed_X = collapse_groups(y, v, X, groups, rho=rho)
     expected = (
         WeightedLeastSquares()
         .fit_dataset(
@@ -1512,9 +1509,9 @@ def test_cr2_reduces_to_hc2_with_singleton_groups():
     v = np.ones((n_estimates, 1))
     groups = np.arange(n_estimates)
 
-    beta, inv_cov = weighted_least_squares(y, v, X, 0.0, return_cov=True)
+    beta, model_cov = weighted_least_squares(y, v, X, 0.0, return_cov=True)
     robust = cluster_robust_cov(
-        y, v, X, beta, groups, inv_cov=inv_cov, method="CR2", small_sample=False
+        y, v, X, beta, groups, model_cov=model_cov, method="CR2", small_sample=False
     )
 
     # HC2: the sandwich with each residual inflated by 1 / sqrt(1 - h_ii).
@@ -1531,8 +1528,8 @@ def test_cr2_is_larger_than_cr0_under_leverage():
     rng = np.random.default_rng(5)
     y, v, X, groups = _dependent_data(rng, n_groups=6, n_per_group=4)[:4]
 
-    beta, inv_cov = weighted_least_squares(y, v, X, 0.0, return_cov=True)
-    kwargs = dict(inv_cov=inv_cov, small_sample=False)
+    beta, model_cov = weighted_least_squares(y, v, X, 0.0, return_cov=True)
+    kwargs = dict(model_cov=model_cov, small_sample=False)
     cr0 = cluster_robust_cov(y, v, X, beta, groups, method="CR0", **kwargs)
     cr2 = cluster_robust_cov(y, v, X, beta, groups, method="CR2", **kwargs)
 
@@ -1549,12 +1546,12 @@ def test_cluster_robust_cov_rejects_unknown_method():
         cluster_robust_cov(y, v, X, beta, groups, method="CR9")
 
 
-def test_cluster_weights_equalize_group_totals():
+def test_group_weights_equalize_group_totals():
     """Every group should end up with the mean of its members' weights."""
     v = np.array([[1.0], [1.0], [1.0], [2.0]])
     groups = np.array([0, 0, 0, 1])
 
-    w = cluster_weights(v, groups)
+    w = group_weights(v, groups)
 
     assert np.isclose(w[:3].sum(), 1.0)  # three estimates of variance 1
     assert np.isclose(w[3].sum(), 0.5)  # one estimate of variance 2
@@ -1571,7 +1568,7 @@ def test_cluster_weighting_removes_the_replication_advantage():
     dataset = Dataset(y=y, v=v, g=groups)
 
     individual = WeightedLeastSquares().fit_dataset(dataset).summary()
-    clustered = WeightedLeastSquares(weight_scheme="cluster").fit_dataset(dataset).summary()
+    clustered = WeightedLeastSquares(weight_scheme="rescale").fit_dataset(dataset).summary()
 
     # Six of fourteen estimates, but only one of nine groups.
     assert np.isclose(individual.get_fe_stats()["est"].ravel()[0], 6 / 14)
@@ -1587,7 +1584,7 @@ def test_group_weighting_matches_explicit_group_collapse():
     groups = np.array([0, 0, 1, 1, 2])
     rho = 0.4
 
-    collapsed_y, collapsed_v, collapsed_X = collapse_clusters(y, v, X, groups, rho=rho)
+    collapsed_y, collapsed_v, collapsed_X = collapse_groups(y, v, X, groups, rho=rho)
     expected = WeightedLeastSquares().fit(
         collapsed_y,
         collapsed_X,
@@ -1595,13 +1592,13 @@ def test_group_weighting_matches_explicit_group_collapse():
         g=np.arange(3),
     )
     observed = WeightedLeastSquares(
-        weight_scheme="group",
-        cluster_rho=rho,
+        weight_scheme="collapse",
+        rho=rho,
     ).fit(y, X, v=v, g=groups)
 
     assert np.allclose(observed.params_["fe_params"], expected.params_["fe_params"])
     assert np.allclose(observed.params_["inv_cov"], expected.params_["inv_cov"])
-    assert observed.n_clusters_ == 3
+    assert observed.n_groups_ == 3
 
 
 @pytest.mark.parametrize(
@@ -1616,7 +1613,7 @@ def test_variance_estimators_group_mode_matches_explicit_collapse(estimator):
     X = np.ones((6, 1))
     groups = np.array([0, 0, 1, 1, 2, 2])
     rho = 0.4
-    collapsed_y, collapsed_v, collapsed_X = collapse_clusters(y, v, X, groups, rho=rho)
+    collapsed_y, collapsed_v, collapsed_X = collapse_groups(y, v, X, groups, rho=rho)
 
     expected = estimator().fit(
         y=collapsed_y,
@@ -1624,7 +1621,7 @@ def test_variance_estimators_group_mode_matches_explicit_collapse(estimator):
         X=collapsed_X,
         g=np.arange(3),
     )
-    observed = estimator(weight_scheme="group", cluster_rho=rho).fit(
+    observed = estimator(weight_scheme="collapse", rho=rho).fit(
         y=y,
         v=v,
         X=X,
@@ -1649,9 +1646,7 @@ def test_sample_size_likelihood_group_mode_matches_explicit_collapse():
     n = np.array([[20.0], [20.0], [50.0], [50.0], [100.0], [100.0]])
     X = np.ones((6, 1))
     groups = np.array([0, 0, 1, 1, 2, 2])
-    collapsed_y, collapsed_n, collapsed_X = collapse_clusters_by_n(
-        y, n, X, groups, rho=DEFAULT_CLUSTER_RHO
-    )
+    collapsed_y, collapsed_n, collapsed_X = collapse_groups_by_n(y, n, X, groups, rho=DEFAULT_RHO)
 
     expected = SampleSizeBasedLikelihoodEstimator().fit(
         y=collapsed_y,
@@ -1659,7 +1654,7 @@ def test_sample_size_likelihood_group_mode_matches_explicit_collapse():
         X=collapsed_X,
         g=np.arange(3),
     )
-    observed = SampleSizeBasedLikelihoodEstimator(weight_scheme="group").fit(
+    observed = SampleSizeBasedLikelihoodEstimator(weight_scheme="collapse").fit(
         y=y,
         n=n,
         X=X,
@@ -1670,7 +1665,7 @@ def test_sample_size_likelihood_group_mode_matches_explicit_collapse():
         assert np.allclose(observed.params_[key], expected.params_[key])
 
 
-def test_group_mode_honours_cluster_rho_for_sample_sizes():
+def test_collapse_mode_honours_rho_for_sample_sizes():
     """rho=1 is the only value for which a group's raw n is its effective n.
 
     Rows in a group share subjects, so n must not be counted once per row --
@@ -1692,7 +1687,7 @@ def test_group_mode_honours_cluster_rho_for_sample_sizes():
 
     effective = {}
     for rho in (0.0, 0.5, 1.0):
-        _, collapsed_n, _, _ = _group_n_inputs(y, n, X, groups, "group", rho)
+        _, collapsed_n, _, _ = _collapse_n_inputs(y, n, X, groups, "collapse", rho)
         effective[rho] = collapsed_n
 
     # Less assumed correlation means more independent information per group.
@@ -1700,7 +1695,7 @@ def test_group_mode_honours_cluster_rho_for_sample_sizes():
     assert np.all(effective[0.5] > effective[1.0])
 
     # The endpoints are the two formulas being interpolated between.
-    _, raw_n, _ = collapse_groups_by_n(y, n, X, groups)
+    _, raw_n, _ = collapse_groups_by_n(y, n, X, groups, rho=1.0)
     assert np.allclose(effective[1.0], raw_n)
     assert np.allclose(effective[0.0], group_size * raw_n)
 
@@ -1756,7 +1751,7 @@ def test_estimate_null_correlation_recovers_within_group_dependence():
     assert abs(between) < 0.1
 
 
-def test_collapse_clusters_matches_hand_calculation():
+def test_collapse_groups_matches_hand_calculation():
     """The collapsed variance is that of a mean of correlated terms."""
     y = np.array([[1.0], [3.0], [10.0]])
     v = np.array([[2.0], [8.0], [5.0]])
@@ -1764,7 +1759,7 @@ def test_collapse_clusters_matches_hand_calculation():
     groups = np.array([0, 0, 1])
     rho = 0.5
 
-    c_y, c_v, c_X = collapse_clusters(y, v, X, groups, rho=rho)
+    c_y, c_v, c_X = collapse_groups(y, v, X, groups, rho=rho)
 
     assert np.allclose(c_y.ravel(), [2.0, 10.0])
     # Var((y1 + y2) / 2) = (v1 + v2 + 2*rho*sqrt(v1*v2)) / 4
@@ -1774,7 +1769,7 @@ def test_collapse_clusters_matches_hand_calculation():
     assert np.allclose(c_X, np.ones((2, 1)))
 
 
-def test_collapse_clusters_by_n_matches_hand_calculation():
+def test_collapse_groups_by_n_matches_hand_calculation():
     """The effective sample size reproduces the collapsed variance."""
     y = np.array([[1.0], [3.0], [10.0]])
     n = np.array([[20.0], [80.0], [50.0]])
@@ -1782,7 +1777,7 @@ def test_collapse_clusters_by_n_matches_hand_calculation():
     groups = np.array([0, 0, 1])
     rho, sigma2 = 0.5, 4.0
 
-    _, c_n, _ = collapse_clusters_by_n(y, n, X, groups, rho=rho)
+    _, c_n, _ = collapse_groups_by_n(y, n, X, groups, rho=rho)
 
     # sigma^2 / n_eff must equal Var of the mean of the two members.
     v = sigma2 / n[:2].ravel()
@@ -1791,35 +1786,48 @@ def test_collapse_clusters_by_n_matches_hand_calculation():
     assert np.isclose(c_n.ravel()[1], 50.0)  # singletons pass through
 
 
-def test_collapse_groups_by_n_preserves_the_group_n():
-    """Repeated observations do not multiply the group's supplied n value."""
+def test_collapse_groups_by_n_at_rho_one_returns_the_raw_n():
+    """The deleted ``collapse_groups_by_n`` special case is just rho=1.
+
+    Counting a group's ``n`` once -- the old separate function -- is what the
+    effective sample size reduces to when the rows are assumed perfectly
+    correlated, so it needs no code of its own.
+    """
     y = np.array([[1.0], [3.0], [10.0]])
     n = np.array([[20.0], [20.0], [80.0]])
     X = np.ones((3, 1))
     groups = np.array([0, 0, 1])
 
-    collapsed_y, collapsed_n, collapsed_X = collapse_groups_by_n(y, n, X, groups)
+    collapsed_y, collapsed_n, collapsed_X = collapse_groups_by_n(y, n, X, groups, rho=1.0)
 
     assert np.allclose(collapsed_y.ravel(), [2.0, 10.0])
     assert np.allclose(collapsed_n.ravel(), [20.0, 80.0])
     assert np.allclose(collapsed_X, np.ones((2, 1)))
 
 
-def test_collapse_groups_by_n_rejects_inconsistent_n():
-    """The n value must be unambiguous within a group."""
-    with pytest.raises(ValueError, match="n values within each group"):
-        collapse_groups_by_n(
-            np.ones((3, 1)),
-            np.array([[20.0], [21.0], [80.0]]),
-            np.ones((3, 1)),
-            np.array([0, 0, 1]),
-        )
+def test_collapse_groups_by_n_handles_unequal_n_within_a_group():
+    """Unequal within-group ``n`` is now well defined rather than rejected.
+
+    The removed function required one ``n`` per group and raised otherwise. The
+    effective-sample-size form has no such restriction, so a group whose rows
+    report different ``n`` collapses to a sensible value instead of failing.
+    """
+    y = np.ones((3, 1))
+    n = np.array([[20.0], [80.0], [40.0]])
+    X = np.ones((3, 1))
+    groups = np.array([0, 0, 1])
+
+    _, collapsed_n, _ = collapse_groups_by_n(y, n, X, groups, rho=1.0)
+
+    # rho=1: n_eff is the harmonic-style combination, between the two inputs.
+    assert 20.0 < collapsed_n[0, 0] < 80.0
+    assert np.isclose(collapsed_n[1, 0], 40.0)
 
 
-def test_collapse_clusters_rejects_out_of_range_rho():
+def test_collapse_groups_rejects_out_of_range_rho():
     """The assumed within-cluster correlation must lie in [0, 1]."""
     y = np.ones((2, 1))
-    for collapse, second in ((collapse_clusters, y), (collapse_clusters_by_n, y * 10)):
+    for collapse, second in ((collapse_groups, y), (collapse_groups_by_n, y * 10)):
         with pytest.raises(ValueError, match="rho must lie"):
             collapse(y, second, np.ones((2, 1)), np.array([0, 1]), rho=1.5)
 
@@ -1839,12 +1847,12 @@ def test_variance_components_are_insensitive_to_duplication(estimator):
     v = np.full((n_estimates, n_datasets), 0.5)
     groups = np.arange(n_estimates)
 
-    single = estimator(weight_scheme="cluster")
+    single = estimator(weight_scheme="rescale")
     single.fit_dataset(Dataset(y=y, v=v, g=groups))
 
     # Group 0 now contributes four identical estimates instead of one.
     dupe_idx = np.r_[np.zeros(4, dtype=int), np.arange(1, n_estimates)]
-    duped = estimator(weight_scheme="cluster")
+    duped = estimator(weight_scheme="rescale")
     duped.fit_dataset(Dataset(y=y[dupe_idx], v=v[dupe_idx], g=groups[dupe_idx]))
 
     assert np.allclose(np.mean(single.summary().tau2), np.mean(duped.summary().tau2), rtol=0.05)

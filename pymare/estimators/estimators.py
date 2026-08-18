@@ -11,18 +11,18 @@ from scipy.optimize import Bounds, minimize
 
 from ..results import BayesianMetaRegressionResults, MetaRegressionResults
 from ..stats import (
-    DEFAULT_CLUSTER_RHO,
+    DEFAULT_RHO,
     cluster_robust_cov,
-    cluster_weights,
-    collapse_clusters,
-    collapse_clusters_by_n,
+    collapse_groups,
+    collapse_groups_by_n,
     encode_groups,
     ensure_2d,
+    group_weights,
     satterthwaite_dof,
     weighted_least_squares,
 )
 
-WEIGHT_SCHEMES = ("individual", "cluster", "group")
+WEIGHT_SCHEMES = ("individual", "rescale", "collapse")
 
 
 def _check_weight_scheme(weight_scheme):
@@ -36,14 +36,14 @@ def _check_weight_scheme(weight_scheme):
 def _resolve_weights(v, groups, tau2, weight_scheme):
     """Return WLS weights, or None to fall back to ``1 / (v + tau2)``.
 
-    ``"cluster"`` divides each observation's weight by its group size, so row
+    ``"rescale"`` divides each observation's weight by its group size, so row
     multiplicity does not automatically buy group influence. It is a no-op
     when no group labels are supplied.
     """
-    if weight_scheme in ("individual", "group") or groups is None:
+    if weight_scheme in ("individual", "collapse") or groups is None:
         return None
 
-    return cluster_weights(v, groups, tau2=tau2)
+    return group_weights(v, groups, tau2=tau2)
 
 
 def _validate_group_design(X, groups):
@@ -57,8 +57,8 @@ def _validate_group_design(X, groups):
         # but can differ in the last bits across a group's rows.
         if not np.allclose(member_X, member_X[[0]], rtol=1e-10, atol=0.0):
             raise ValueError(
-                "weight_scheme='group' requires design values to be constant "
-                "within each group. Use weight_scheme='cluster' for predictors "
+                "weight_scheme='collapse' requires design values to be constant "
+                "within each group. Use weight_scheme='rescale' for predictors "
                 "that vary within a group."
             )
 
@@ -66,7 +66,7 @@ def _validate_group_design(X, groups):
 def _check_collapsed_design(collapsed_y, collapsed_X):
     """Reject a group reduction that leaves fewer rows than predictors.
 
-    ``weight_scheme='group'`` replaces K rows with m, so a dataset that was
+    ``weight_scheme='collapse'`` replaces K rows with m, so a dataset that was
     comfortably identified before collapsing can be saturated after it. Left
     unchecked the moment estimators divide by ``m - p == 0`` and report
     ``tau^2 = inf`` with zero standard errors, from input the user had no
@@ -75,25 +75,25 @@ def _check_collapsed_design(collapsed_y, collapsed_X):
     n_rows, n_preds = collapsed_X.shape
     if n_rows <= n_preds:
         raise ValueError(
-            f"weight_scheme='group' reduces the data to {n_rows} row(s) for "
+            f"weight_scheme='collapse' reduces the data to {n_rows} row(s) for "
             f"{n_preds} predictor(s); the number of groups must exceed the "
-            "number of predictors. Use weight_scheme='cluster' to keep every "
+            "number of predictors. Use weight_scheme='rescale' to keep every "
             "row while still accounting for dependence."
         )
 
 
-def _group_inputs(y, v, X, groups, weight_scheme, rho):
+def _collapse_inputs(y, v, X, groups, weight_scheme, rho):
     """Return one effect and variance per independent group when requested."""
-    if weight_scheme != "group" or groups is None:
+    if weight_scheme != "collapse" or groups is None:
         return y, v, X, groups
     _validate_group_design(X, groups)
-    collapsed_y, collapsed_v, collapsed_X = collapse_clusters(y, v, X, groups, rho=rho)
+    collapsed_y, collapsed_v, collapsed_X = collapse_groups(y, v, X, groups, rho=rho)
     _check_collapsed_design(collapsed_y, collapsed_X)
     collapsed_groups = np.arange(collapsed_y.shape[0])
     return collapsed_y, collapsed_v, collapsed_X, collapsed_groups
 
 
-def _group_n_inputs(y, n, X, groups, weight_scheme, rho):
+def _collapse_n_inputs(y, n, X, groups, weight_scheme, rho):
     r"""Return one effect and an effective ``n`` per independent group.
 
     The effective sample size, not the raw one. Rows in a group share subjects,
@@ -115,10 +115,10 @@ def _group_n_inputs(y, n, X, groups, weight_scheme, rho):
     its rows are separate contrast images, which share subjects but measure
     different things, so rho is well below one and the bias is real.
     """
-    if weight_scheme != "group" or groups is None:
+    if weight_scheme != "collapse" or groups is None:
         return y, n, X, groups
     _validate_group_design(X, groups)
-    collapsed_y, collapsed_n, collapsed_X = collapse_clusters_by_n(y, n, X, groups, rho=rho)
+    collapsed_y, collapsed_n, collapsed_X = collapse_groups_by_n(y, n, X, groups, rho=rho)
     _check_collapsed_design(collapsed_y, collapsed_X)
     collapsed_groups = np.arange(collapsed_y.shape[0])
     return collapsed_y, collapsed_n, collapsed_X, collapsed_groups
@@ -131,16 +131,16 @@ def _tau2_inputs(y, v, X, groups, weight_scheme, rho, by_n=False):
     observations from a group make the observed dispersion look smaller than
     the row count implies and bias tau^2 downward. Collapsing to one effect per
     group first removes that pseudo-replication. Falls back to
-    the raw inputs when there are too few clusters to fit the design.
+    the raw inputs when there are too few groups to fit the design.
     """
-    if weight_scheme not in ("cluster", "group") or groups is None:
+    if weight_scheme not in ("rescale", "collapse") or groups is None:
         return y, v, X
 
     n_groups = encode_groups(np.asarray(groups).ravel())[1].size
     if n_groups <= X.shape[1]:
         return y, v, X
 
-    collapse = collapse_clusters_by_n if by_n else collapse_clusters
+    collapse = collapse_groups_by_n if by_n else collapse_groups
     return collapse(y, v, X, groups, rho=rho)
 
 
@@ -149,7 +149,7 @@ def _dersimonian_laird_tau2(y, v, X):
     k, p = X.shape
 
     # Estimate initial betas with WLS, assuming tau^2=0
-    beta_wls, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
+    beta_wls, model_cov = weighted_least_squares(y, v, X, return_cov=True)
 
     # Cochran's Q
     w = 1.0 / v
@@ -159,19 +159,19 @@ def _dersimonian_laird_tau2(y, v, X):
     # Einsum indices: k = observations, p = predictors, i = parallel iterates.
     # q is a dummy for 2nd p when p x p covariance matrix is passed.
     Xw2 = np.einsum("kp,ki->ipk", X, w**2)
-    pXw2 = np.einsum("ipk,qpi->iqk", Xw2, inv_cov)
+    pXw2 = np.einsum("ipk,qpi->iqk", Xw2, model_cov)
     A = w_sum - np.trace(pXw2.dot(X), axis1=1, axis2=2)
     return np.maximum(0.0, (Q - (k - p)) / A)
 
 
-def _cluster_robust_inv_cov(y, v, X, beta, groups, tau2=0.0, inv_cov=None, w=None):
+def _robust_cov_and_dof(y, v, X, beta, groups, tau2=0.0, model_cov=None, w=None):
     """Compute the cluster-robust covariance and its degrees of freedom.
 
-    Returns ``(robust_cov, n_clusters, dof)``, or ``(None, None, None)`` when
+    Returns ``(robust_cov, n_groups, dof)``, or ``(None, None, None)`` when
     ``groups`` is None so that the model-based covariance is left untouched.
-    Pass the model-based ``inv_cov`` when available to skip a redundant
-    pseudo-inverse, and the same ``w`` that produced ``beta`` so the residuals
-    match the fit.
+    Pass the model-based covariance as ``model_cov`` when available to skip a
+    redundant pseudo-inverse, and the same ``w`` that produced ``beta`` so the
+    residuals match the fit.
 
     The Satterthwaite degrees of freedom are computed here, alongside the
     sandwich, so that they are guaranteed to reflect the same weights and the
@@ -179,7 +179,7 @@ def _cluster_robust_inv_cov(y, v, X, beta, groups, tau2=0.0, inv_cov=None, w=Non
     reconstructing both, and any drift would silently change the reference
     distribution rather than raising.
 
-    The cluster count is returned separately rather than folded into
+    The group count is returned separately rather than folded into
     ``params_`` because :func:`_loopable` stacks every entry of ``params_``
     across parallel datasets, which only works for arrays. ``dof`` is an array
     of shape ``(p, d)``, so it stacks correctly and does travel in ``params_``.
@@ -189,17 +189,17 @@ def _cluster_robust_inv_cov(y, v, X, beta, groups, tau2=0.0, inv_cov=None, w=Non
 
     groups = np.asarray(groups).ravel()
     n_groups = encode_groups(groups, n_observations=y.shape[0])[1].size
-    robust_cov = cluster_robust_cov(y, v, X, beta, groups, tau2=tau2, inv_cov=inv_cov, w=w)
+    robust_cov = cluster_robust_cov(y, v, X, beta, groups, tau2=tau2, model_cov=model_cov, w=w)
     weights = np.asarray(1.0 / (v + tau2) if w is None else w, dtype=float)
     # v may be a single shared column while y has many. cluster_robust_cov
     # broadcasts on entry; do the same here or the dof come back with v's
     # column count and no longer line up with fe_params.
     if weights.ndim == 2 and weights.shape[1] != y.shape[1]:
         weights = np.broadcast_to(weights, y.shape)
-    # inv_cov is only reusable when it is (X'WX)^-1 under these same weights.
+    # model_cov is only reusable when it is (X'WX)^-1 under these same weights.
     # Callers that cannot promise that must pass None, in which case
     # satterthwaite_dof rebuilds the bread from ``weights`` itself.
-    dof = satterthwaite_dof(X, weights, groups, inv_cov=inv_cov)
+    dof = satterthwaite_dof(X, weights, groups, model_cov=model_cov)
     return robust_cov, n_groups, dof
 
 
@@ -376,15 +376,15 @@ class WeightedLeastSquares(BaseEstimator):
         Assumed/known value of tau^2. Must be >= 0.
         If an array, must have ``d`` elements, where ``d`` refers to the number of datasets.
         Default = 0.
-    weight_scheme : {"individual", "cluster", "group"}, optional
+    weight_scheme : {"individual", "rescale", "collapse"}, optional
         ``"individual"`` uses one inverse-variance weight per row.
-        ``"cluster"`` retains all rows but divides their weights by group
-        size for correlated-effects robust estimation. ``"group"`` first
+        ``"rescale"`` retains all rows but divides their weights by group
+        size for correlated-effects robust estimation. ``"collapse"`` first
         reduces every group to one equal-weight mean and its correlated-mean
         variance. Default is ``"individual"``.
-    cluster_rho : :obj:`float`, optional
-        Working correlation used when ``weight_scheme="group"`` reduces a
-        group whose full covariance matrix is unavailable. Default is 0.8.
+    rho : :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that aggregate a
+        group. Default is 0.8.
 
     Notes
     -----
@@ -404,12 +404,12 @@ class WeightedLeastSquares(BaseEstimator):
         self,
         tau2=0.0,
         weight_scheme="individual",
-        cluster_rho=DEFAULT_CLUSTER_RHO,
+        rho=DEFAULT_RHO,
     ):
         _check_weight_scheme(weight_scheme)
         self.tau2 = tau2
         self.weight_scheme = weight_scheme
-        self.cluster_rho = cluster_rho
+        self.rho = rho
 
     def fit(self, y, X, v=None, g=None):
         """Fit the estimator to data.
@@ -423,11 +423,11 @@ class WeightedLeastSquares(BaseEstimator):
         v : :obj:`numpy.ndarray` of shape (n, d), optional
             Sampling variances. If not provided, unit weights will be used.
         g : :obj:`numpy.ndarray` of shape (n,), optional
-            Group (cluster) labels marking dependent estimates. If provided,
+            Group labels marking dependent estimates. If provided,
             standard errors are computed with the cluster-robust estimator of
             :footcite:t:`hedges2010robust` instead of the model-based one.
-            Point estimates are also grouped when ``weight_scheme='group'`` or
-            reweighted when ``weight_scheme='cluster'``.
+            Point estimates are also grouped when ``weight_scheme='collapse'`` or
+            reweighted when ``weight_scheme='rescale'``.
 
         Returns
         -------
@@ -439,18 +439,19 @@ class WeightedLeastSquares(BaseEstimator):
         if v is None:
             v = np.ones_like(y)
 
-        y, v, X, fit_groups = _group_inputs(
-            ensure_2d(y), ensure_2d(v), X, g, self.weight_scheme, self.cluster_rho
+        y, v, X, fit_groups = _collapse_inputs(
+            ensure_2d(y), ensure_2d(v), X, g, self.weight_scheme, self.rho
         )
         w = _resolve_weights(v, fit_groups, self.tau2, self.weight_scheme)
-        beta, inv_cov = weighted_least_squares(y, v, X, self.tau2, return_cov=True, w=w)
-        robust_cov, self.n_clusters_, dof = _cluster_robust_inv_cov(
-            y, v, X, beta, fit_groups, tau2=self.tau2, inv_cov=inv_cov, w=w
+        beta, model_cov = weighted_least_squares(y, v, X, self.tau2, return_cov=True, w=w)
+        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
+            y, v, X, beta, fit_groups, tau2=self.tau2, model_cov=model_cov, w=w
         )
         self.params_ = {
             "fe_params": beta,
             "tau2": self.tau2,
-            "inv_cov": inv_cov if robust_cov is None else robust_cov,
+            # NB: the key is a legacy misnomer; the value is a covariance.
+            "inv_cov": model_cov if robust_cov is None else robust_cov,
         }
         if dof is not None:
             self.params_["dof"] = dof
@@ -465,12 +466,12 @@ class DerSimonianLaird(BaseEstimator):
 
     Parameters
     ----------
-    weight_scheme : {"individual", "cluster", "group"}, optional
-        Row-level, correlated-effects, or one-aggregate-per-group weighting.
-        Default is ``"individual"``.
-    cluster_rho : :obj:`float`, optional
-        Working within-group correlation used for grouped aggregation.
-        Default is 0.8.
+    weight_scheme : {"individual", "rescale", "collapse"}, optional
+        Row-level weighting, per-row weights divided by group size, or one
+        aggregate per group. Default is ``"individual"``.
+    rho : :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that aggregate a
+        group. Default is 0.8.
 
     Notes
     -----
@@ -484,10 +485,10 @@ class DerSimonianLaird(BaseEstimator):
     .. footbibliography::
     """
 
-    def __init__(self, weight_scheme="individual", cluster_rho=DEFAULT_CLUSTER_RHO):
+    def __init__(self, weight_scheme="individual", rho=DEFAULT_RHO):
         _check_weight_scheme(weight_scheme)
         self.weight_scheme = weight_scheme
-        self.cluster_rho = cluster_rho
+        self.rho = rho
 
     def fit(self, y, v, X, g=None):
         """Fit the estimator to data.
@@ -501,11 +502,11 @@ class DerSimonianLaird(BaseEstimator):
         X : :obj:`numpy.ndarray` of shape (n, p)
             The independent variable(s) (X).
         g : :obj:`numpy.ndarray` of shape (n,), optional
-            Group (cluster) labels marking dependent estimates. If provided,
+            Group labels marking dependent estimates. If provided,
             standard errors are computed with the cluster-robust estimator of
             :footcite:t:`hedges2010robust` instead of the model-based one.
-            With ``weight_scheme`` set to ``"cluster"`` or ``"group"``,
-            tau^2 is estimated from one aggregate per group. ``"group"`` also
+            With ``weight_scheme`` set to ``"rescale"`` or ``"collapse"``,
+            tau^2 is estimated from one aggregate per group. ``"collapse"`` also
             fits the fixed effects to those aggregates.
 
         Returns
@@ -518,8 +519,8 @@ class DerSimonianLaird(BaseEstimator):
         y = ensure_2d(y)
         v = ensure_2d(v)
 
-        model_y, model_v, model_X, model_groups = _group_inputs(
-            y, v, X, g, self.weight_scheme, self.cluster_rho
+        model_y, model_v, model_X, model_groups = _collapse_inputs(
+            y, v, X, g, self.weight_scheme, self.rho
         )
 
         tau_dl = _dersimonian_laird_tau2(
@@ -529,29 +530,30 @@ class DerSimonianLaird(BaseEstimator):
                 model_X,
                 model_groups,
                 self.weight_scheme,
-                self.cluster_rho,
+                self.rho,
             )
         )
 
         # Re-estimate beta with tau^2 estimate
         w = _resolve_weights(model_v, model_groups, tau_dl, self.weight_scheme)
-        beta_dl, inv_cov = weighted_least_squares(
+        beta_dl, model_cov = weighted_least_squares(
             model_y, model_v, model_X, tau2=tau_dl, return_cov=True, w=w
         )
-        robust_cov, self.n_clusters_, dof = _cluster_robust_inv_cov(
+        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
             model_y,
             model_v,
             model_X,
             beta_dl,
             model_groups,
             tau2=tau_dl,
-            inv_cov=inv_cov,
+            model_cov=model_cov,
             w=w,
         )
         self.params_ = {
             "fe_params": beta_dl,
             "tau2": tau_dl,
-            "inv_cov": inv_cov if robust_cov is None else robust_cov,
+            # NB: the key is a legacy misnomer; the value is a covariance.
+            "inv_cov": model_cov if robust_cov is None else robust_cov,
         }
         if dof is not None:
             self.params_["dof"] = dof
@@ -566,12 +568,12 @@ class Hedges(BaseEstimator):
 
     Parameters
     ----------
-    weight_scheme : {"individual", "cluster", "group"}, optional
-        Row-level, correlated-effects, or one-aggregate-per-group weighting.
-        Default is ``"individual"``.
-    cluster_rho : :obj:`float`, optional
-        Working within-group correlation used for grouped aggregation.
-        Default is 0.8.
+    weight_scheme : {"individual", "rescale", "collapse"}, optional
+        Row-level weighting, per-row weights divided by group size, or one
+        aggregate per group. Default is ``"individual"``.
+    rho : :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that aggregate a
+        group. Default is 0.8.
 
     Notes
     -----
@@ -599,10 +601,10 @@ class Hedges(BaseEstimator):
     .. footbibliography::
     """
 
-    def __init__(self, weight_scheme="individual", cluster_rho=DEFAULT_CLUSTER_RHO):
+    def __init__(self, weight_scheme="individual", rho=DEFAULT_RHO):
         _check_weight_scheme(weight_scheme)
         self.weight_scheme = weight_scheme
-        self.cluster_rho = cluster_rho
+        self.rho = rho
 
     def fit(self, y, v, X, g=None):
         """Fit the estimator to data.
@@ -616,11 +618,11 @@ class Hedges(BaseEstimator):
         X : :obj:`numpy.ndarray` of shape (n, p)
             The independent variable(s) (X).
         g : :obj:`numpy.ndarray` of shape (n,), optional
-            Group (cluster) labels marking dependent estimates. If provided,
+            Group labels marking dependent estimates. If provided,
             standard errors are computed with the cluster-robust estimator of
             :footcite:t:`hedges2010robust` instead of the model-based one.
-            With ``weight_scheme`` set to ``"cluster"`` or ``"group"``,
-            tau^2 is estimated from one aggregate per group. ``"group"`` also
+            With ``weight_scheme`` set to ``"rescale"`` or ``"collapse"``,
+            tau^2 is estimated from one aggregate per group. ``"collapse"`` also
             fits the fixed effects to those aggregates.
 
         Returns
@@ -632,8 +634,8 @@ class Hedges(BaseEstimator):
 
         y = ensure_2d(y)
         v = ensure_2d(v)
-        model_y, model_v, model_X, model_groups = _group_inputs(
-            y, v, X, g, self.weight_scheme, self.cluster_rho
+        model_y, model_v, model_X, model_groups = _collapse_inputs(
+            y, v, X, g, self.weight_scheme, self.rho
         )
 
         tau_y, tau_v, tau_X = _tau2_inputs(
@@ -642,7 +644,7 @@ class Hedges(BaseEstimator):
             model_X,
             model_groups,
             self.weight_scheme,
-            self.cluster_rho,
+            self.rho,
         )
         tau_k, tau_p = tau_X.shape[:2]
         # tau^2 is the excess of the *unweighted* mean squared error over the
@@ -657,23 +659,24 @@ class Hedges(BaseEstimator):
         # this fit rather than the OLS one above: (X'WX)^-1 is only the
         # covariance of the coefficients computed under those same weights.
         w = _resolve_weights(model_v, model_groups, tau_ho, self.weight_scheme)
-        beta_ho, inv_cov = weighted_least_squares(
+        beta_ho, model_cov = weighted_least_squares(
             model_y, model_v, model_X, tau2=tau_ho, return_cov=True, w=w
         )
-        robust_cov, self.n_clusters_, dof = _cluster_robust_inv_cov(
+        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
             model_y,
             model_v,
             model_X,
             beta_ho,
             model_groups,
             tau2=tau_ho,
-            inv_cov=inv_cov,
+            model_cov=model_cov,
             w=w,
         )
         self.params_ = {
             "fe_params": beta_ho,
             "tau2": tau_ho,
-            "inv_cov": inv_cov if robust_cov is None else robust_cov,
+            # NB: the key is a legacy misnomer; the value is a covariance.
+            "inv_cov": model_cov if robust_cov is None else robust_cov,
         }
         if dof is not None:
             self.params_["dof"] = dof
@@ -694,12 +697,12 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         The estimation method to use.
         Either 'ML' (for maximum-likelihood) or 'REML' (restricted maximum-likelihood).
         Default = 'ML'.
-    weight_scheme : {"individual", "cluster", "group"}, optional
-        Row-level, correlated-effects, or one-aggregate-per-group weighting.
-        Default is ``"individual"``.
-    cluster_rho : :obj:`float`, optional
-        Working within-group correlation used for grouped aggregation.
-        Default is 0.8.
+    weight_scheme : {"individual", "rescale", "collapse"}, optional
+        Row-level weighting, per-row weights divided by group size, or one
+        aggregate per group. Default is ``"individual"``.
+    rho : :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that aggregate a
+        group. Default is 0.8.
     **kwargs
         Keyword arguments to pass to the SciPy minimizer.
 
@@ -714,12 +717,10 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
     .. footbibliography::
     """
 
-    def __init__(
-        self, method="ml", weight_scheme="individual", cluster_rho=DEFAULT_CLUSTER_RHO, **kwargs
-    ):
+    def __init__(self, method="ml", weight_scheme="individual", rho=DEFAULT_RHO, **kwargs):
         _check_weight_scheme(weight_scheme)
         self.weight_scheme = weight_scheme
-        self.cluster_rho = cluster_rho
+        self.rho = rho
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
             raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
@@ -740,11 +741,11 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         X : :obj:`numpy.ndarray` of shape (n, p)
             The independent variable(s) (X).
         g : :obj:`numpy.ndarray` of shape (n,), optional
-            Group (cluster) labels marking dependent estimates. If provided,
+            Group labels marking dependent estimates. If provided,
             standard errors are computed with the cluster-robust estimator of
             :footcite:t:`hedges2010robust` instead of the model-based one.
-            With ``weight_scheme`` set to ``"cluster"`` or ``"group"``, the
-            likelihood is evaluated on one aggregate per group. ``"group"``
+            With ``weight_scheme`` set to ``"rescale"`` or ``"collapse"``, the
+            likelihood is evaluated on one aggregate per group. ``"collapse"``
             also fits the fixed effects to those aggregates.
 
         Returns
@@ -756,12 +757,12 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 
         y = ensure_2d(y)
         v = ensure_2d(v)
-        model_y, model_v, model_X, model_groups = _group_inputs(
-            y, v, X, g, self.weight_scheme, self.cluster_rho
+        model_y, model_v, model_X, model_groups = _collapse_inputs(
+            y, v, X, g, self.weight_scheme, self.rho
         )
 
         # The likelihood treats every row as independent, so tau^2 is fitted
-        # on one effect per cluster to avoid counting a group's repeated
+        # on one effect per group to avoid counting a group's repeated
         # estimates as independent evidence.
         fit_y, fit_v, fit_X = _tau2_inputs(
             model_y,
@@ -769,7 +770,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
             model_X,
             model_groups,
             self.weight_scheme,
-            self.cluster_rho,
+            self.rho,
         )
 
         # use D-L estimate for initial values
@@ -792,26 +793,27 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         beta = beta[:, None]
         w = _resolve_weights(model_v, model_groups, tau, self.weight_scheme)
         if w is None:
-            _, inv_cov = weighted_least_squares(model_y, model_v, model_X, tau, True)
+            _, model_cov = weighted_least_squares(model_y, model_v, model_X, tau, True)
         else:
             # Cluster weighting changes the estimand, so beta has to be
             # recomputed under those weights rather than kept from the
             # likelihood, whose working model assumes independence.
-            beta, inv_cov = weighted_least_squares(model_y, model_v, model_X, tau, True, w=w)
-        robust_cov, self.n_clusters_, dof = _cluster_robust_inv_cov(
+            beta, model_cov = weighted_least_squares(model_y, model_v, model_X, tau, True, w=w)
+        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
             model_y,
             model_v,
             model_X,
             beta,
             model_groups,
             tau2=tau,
-            inv_cov=inv_cov,
+            model_cov=model_cov,
             w=w,
         )
         self.params_ = {
             "fe_params": beta,
             "tau2": tau,
-            "inv_cov": inv_cov if robust_cov is None else robust_cov,
+            # NB: the key is a legacy misnomer; the value is a covariance.
+            "inv_cov": model_cov if robust_cov is None else robust_cov,
         }
         if dof is not None:
             self.params_["dof"] = dof
@@ -847,13 +849,13 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         The estimation method to use.
         Either 'ML' (for maximum-likelihood) or 'REML' (restricted maximum-likelihood).
         Default = 'ML'.
-    weight_scheme : {"individual", "cluster", "group"}, optional
+    weight_scheme : {"individual", "rescale", "collapse"}, optional
         Row-level, correlated-effects, or one-aggregate-per-group weighting.
-        In ``"group"`` mode, repeated rows must supply an identical ``n``
+        In ``"collapse"`` mode, repeated rows must supply an identical ``n``
         within each group. Default is ``"individual"``.
-    cluster_rho : :obj:`float`, optional
-        Working within-group correlation used by correlated-effects variance
-        component estimation. Default is 0.8.
+    rho : :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that aggregate a
+        group. Default is 0.8.
     **kwargs
         Keyword arguments to pass to the SciPy minimizer.
 
@@ -870,12 +872,10 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     .. footbibliography::
     """
 
-    def __init__(
-        self, method="ml", weight_scheme="individual", cluster_rho=DEFAULT_CLUSTER_RHO, **kwargs
-    ):
+    def __init__(self, method="ml", weight_scheme="individual", rho=DEFAULT_RHO, **kwargs):
         _check_weight_scheme(weight_scheme)
         self.weight_scheme = weight_scheme
-        self.cluster_rho = cluster_rho
+        self.rho = rho
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
             raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
@@ -896,12 +896,12 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         X : :obj:`numpy.ndarray` of shape (n, p)
             The independent variable(s) (X).
         g : :obj:`numpy.ndarray` of shape (n,), optional
-            Group (cluster) labels marking dependent estimates. If provided,
+            Group labels marking dependent estimates. If provided,
             standard errors are computed with the cluster-robust estimator of
             :footcite:t:`hedges2010robust` instead of the model-based one.
-            With ``weight_scheme`` set to ``"cluster"`` or ``"group"``, the
+            With ``weight_scheme`` set to ``"rescale"`` or ``"collapse"``, the
             variance components are estimated from one aggregate per group.
-            ``"group"`` preserves one unchanged ``n`` value per group and
+            ``"collapse"`` preserves one unchanged ``n`` value per group and
             also fits the fixed effects to those aggregates.
 
         Returns
@@ -913,11 +913,11 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
 
         y = ensure_2d(y)
         n = ensure_2d(n)
-        model_y, model_n, model_X, model_groups = _group_n_inputs(
-            y, n, X, g, self.weight_scheme, self.cluster_rho
+        model_y, model_n, model_X, model_groups = _collapse_n_inputs(
+            y, n, X, g, self.weight_scheme, self.rho
         )
 
-        # Both variance components are fitted on one effect per cluster; a
+        # Both variance components are fitted on one effect per group; a
         # a group's repeated estimates agree with each other by construction, and
         # counting them as independent shrinks sigma^2 toward zero.
         fit_y, fit_n, fit_X = _tau2_inputs(
@@ -926,13 +926,13 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
             model_X,
             model_groups,
             self.weight_scheme,
-            self.cluster_rho,
+            self.rho,
             by_n=True,
         )
 
         # sigma^2 and tau^2 are separately identified only when the sample
         # sizes vary, so the check belongs on ``fit_n`` -- the values the
-        # likelihood actually sees. Under weight_scheme='cluster' those are
+        # likelihood actually sees. Under weight_scheme='rescale' those are
         # effective sample sizes, which can vary sharply even when every raw
         # ``n`` is identical (and, less often, the reverse).
         if fit_n.std() < np.sqrt(np.finfo(float).eps):
@@ -969,27 +969,28 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         v = sigma / model_n
         w = _resolve_weights(v, model_groups, tau, self.weight_scheme)
         if w is None:
-            _, inv_cov = weighted_least_squares(model_y, v, model_X, tau, True)
+            _, model_cov = weighted_least_squares(model_y, v, model_X, tau, True)
         else:
             # Cluster weighting changes the estimand, so beta has to be
             # recomputed under those weights rather than kept from the
             # likelihood, whose working model assumes independence.
-            beta, inv_cov = weighted_least_squares(model_y, v, model_X, tau, True, w=w)
-        robust_cov, self.n_clusters_, dof = _cluster_robust_inv_cov(
+            beta, model_cov = weighted_least_squares(model_y, v, model_X, tau, True, w=w)
+        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
             model_y,
             v,
             model_X,
             beta,
             model_groups,
             tau2=tau,
-            inv_cov=inv_cov,
+            model_cov=model_cov,
             w=w,
         )
         self.params_ = {
             "fe_params": beta,
             "sigma2": np.array(sigma),
             "tau2": tau,
-            "inv_cov": inv_cov if robust_cov is None else robust_cov,
+            # NB: the key is a legacy misnomer; the value is a covariance.
+            "inv_cov": model_cov if robust_cov is None else robust_cov,
         }
         if dof is not None:
             self.params_["dof"] = dof
@@ -1106,7 +1107,7 @@ class StanMetaRegression(BaseEstimator):
             number of observations and P is the number of predictor variables.
         groups : :obj:`list` of :obj:`int`, optional
             1d array of integers identifying
-            groups/clusters of observations in the y/v/X inputs. If
+            groups of observations in the y/v/X inputs. If
             provided, values must consist of integers in the range of 1..k
             (inclusive), where k is the number of distinct groups. When
             None (default), it is assumed that each observation in the
