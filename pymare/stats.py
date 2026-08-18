@@ -216,49 +216,6 @@ def weighted_intercept_cr2(signs, sufficient_statistics):
 def group_weights(v, groups, tau2=0.0):
     r"""Rescale inverse-variance weights so replication does not buy influence.
 
-    The ordinary weight :math:`1 / (v_i + \tau^2)` gives a group that
-    contributed :math:`n_j` estimates :math:`n_j` times the pull of a group
-    that contributed one, because the weights of its members are summed. This
-    divides each weight by its group size,
-
-    .. math::
-        w_i = \frac{1}{n_j (v_i + \tau^2)},
-
-    so a group's total weight is the *mean* of its members' weights rather
-    than their sum. Replication therefore stops buying influence in proportion
-    to row count, while genuinely more precise groups still count more.
-
-    This follows the "correlated effects" weighting of
-    :footcite:t:`hedges2010robust`, but is not identical to the version in the R
-    package `robumeta <https://cran.r-project.org/package=robumeta>`_
-    :footcite:p:`fisher2015robumeta`, which assigns every row in a group the
-    *same* weight built from the group's mean variance,
-
-    .. math::
-        w_{ij}^{\text{robumeta}} = \frac{1}{n_j(\bar{v}_j + \tau^2)},
-        \qquad \bar{v}_j = \frac{1}{n_j}\sum_i v_{ij}.
-
-    The two agree exactly for singleton groups and for groups whose ``v`` is
-    constant, and differ otherwise: this function's group total is
-    :math:`\operatorname{mean}_i(1/v_i)` while robumeta's is
-    :math:`1/\operatorname{mean}_i(v_i)`, so by the arithmetic-harmonic mean
-    inequality this function never gives a group *less* total weight than
-    robumeta does. Keeping the row-specific :math:`v_i` preserves genuine
-    precision differences between rows; robumeta equalizes them because its
-    working model assumes :math:`v_{ij} \approx v_j` within a group. Expect
-    the weights to differ when within-group variances differ.
-
-    Notes
-    -----
-    Invariance to duplication is exact only when the duplicated row's precision
-    equals its group's mean precision -- which is automatic when ``v`` is
-    constant within the group. With heterogeneous within-group variances,
-    duplicating an above-average-precision row still raises its group's total
-    weight somewhat (and duplicating a below-average one lowers it). This is a
-    property of correlated-effects weighting rather than of this implementation;
-    robumeta behaves the same way. Use ``weight_scheme="collapse"`` if one row per
-    group is what the design actually warrants.
-
     Parameters
     ----------
     v : :obj:`numpy.ndarray` of shape (K, D)
@@ -272,7 +229,60 @@ def group_weights(v, groups, tau2=0.0):
     Returns
     -------
     :obj:`numpy.ndarray` of shape (K, D)
-        The rescaled weights.
+        The rescaled weights, one per input row.
+
+    See Also
+    --------
+    collapse_groups : Reduces each group to a single row instead of reweighting
+        its rows, which is the stricter alternative when exact invariance to row
+        count is required.
+
+    Notes
+    -----
+    The ordinary weight :math:`1 / (v_i + \tau^2)` gives a group that
+    contributed :math:`n_j` estimates :math:`n_j` times the pull of a group that
+    contributed one, because the weights of its members are summed. Dividing
+    each weight by its group size,
+
+    .. math::
+        w_i = \frac{1}{n_j (v_i + \tau^2)},
+
+    makes a group's total weight the *mean* of its members' weights rather than
+    their sum, so a group's say no longer grows with its row count while
+    genuinely more precise groups still count more.
+
+    This follows the "correlated effects" weighting of
+    :footcite:t:`hedges2010robust`, but is not identical to the version in the R
+    package `robumeta <https://cran.r-project.org/package=robumeta>`_
+    :footcite:p:`fisher2015robumeta`, which assigns every row in a group the
+    *same* weight, built from the group's mean variance:
+
+    .. math::
+        w_{ij}^{\text{robumeta}} = \frac{1}{n_j(\bar{v}_j + \tau^2)},
+        \qquad \bar{v}_j = \frac{1}{n_j}\sum_i v_{ij}.
+
+    The two agree exactly for singleton groups and for groups whose ``v`` is
+    constant, and differ otherwise: this function's group total is
+    :math:`\operatorname{mean}_i(1/v_i)` while robumeta's is
+    :math:`1/\operatorname{mean}_i(v_i)`, so by the arithmetic-harmonic mean
+    inequality this function never gives a group *less* total weight than
+    robumeta does. Keeping the row-specific :math:`v_i` preserves genuine
+    precision differences between rows; robumeta equalizes them because its
+    working model assumes :math:`v_{ij} \approx v_j` within a group.
+
+    Invariance to duplication is exact only when the duplicated row's precision
+    equals its group's mean precision, which is automatic when ``v`` is constant
+    within the group. That is the common case for sample-size-driven variances,
+    where :math:`v_i = \sigma^2 / n_j` is shared by every row of a group, and
+    the group's total reduces exactly to :math:`1/(\sigma^2/n_j + \tau^2)` --
+    dependent on the group's sample size and not on how many rows it supplied.
+    With heterogeneous within-group variances the cancellation is only
+    approximate: duplicating an above-average-precision row raises its group's
+    total somewhat, and duplicating a below-average one lowers it. This is a
+    property of correlated-effects weighting rather than of this
+    implementation; robumeta behaves the same way. Use
+    :func:`~pymare.stats.collapse_groups` if one row per group is what the
+    design actually warrants.
 
     References
     ----------
@@ -284,22 +294,6 @@ def group_weights(v, groups, tau2=0.0):
 
 def collapse_groups(y, v, X, groups, rho=DEFAULT_RHO):
     r"""Aggregate each group to a single effect estimate.
-
-    Moment-based estimators of :math:`\tau^2` count every row of ``y`` as an
-    independent observation. When a group contributes several rows, that
-    pseudo-replication biases :math:`\tau^2` downward: the duplicated rows agree
-    with each other by construction, so the observed dispersion looks smaller
-    than the number of observations would imply. Estimating :math:`\tau^2` from one
-    effect per cluster removes the problem.
-
-    Each group is collapsed to the unweighted mean of its members, whose
-    sampling variance is
-
-    .. math::
-        \bar{v}_j = \frac{1}{n_j^2}
-            \left( \sum_i v_i + \rho \sum_{i \neq k} \sqrt{v_i v_k} \right),
-
-    i.e. the variance of a mean whose terms are correlated at :math:`\rho`.
 
     Parameters
     ----------
@@ -322,12 +316,40 @@ def collapse_groups(y, v, X, groups, rho=DEFAULT_RHO):
     :obj:`tuple`
         ``(y, v, X)`` collapsed to one row per group.
 
+    Raises
+    ------
+    ValueError
+        If ``rho`` lies outside [0, 1].
+
+    See Also
+    --------
+    collapse_groups_by_n : The same reduction for models parameterized by
+        sample size rather than by sampling variance.
+    group_weights : Reweights the rows in place instead of collapsing them,
+        which keeps within-group predictor variation available.
+
     Notes
     -----
+    Moment-based estimators of :math:`\tau^2` count every row of ``y`` as an
+    independent observation. When a group contributes several rows, that
+    pseudo-replication distorts :math:`\tau^2`: the duplicated rows agree with
+    each other by construction, so the observed dispersion no longer matches
+    what the row count implies. Estimating :math:`\tau^2` from one effect per
+    group removes the problem.
+
+    Each group is collapsed to the unweighted mean of its members, whose
+    sampling variance is
+
+    .. math::
+        \bar{v}_j = \frac{1}{n_j^2}
+            \left( \sum_i v_i + \rho \sum_{i \neq k} \sqrt{v_i v_k} \right),
+
+    i.e. the variance of a mean whose terms are correlated at :math:`\rho`.
+
     The resulting :math:`\tau^2` is only weakly sensitive to ``rho``: sweeping it
     across its whole range typically moves downstream error rates by well under
     a percentage point, because it enters only through the relative weighting of
-    already-aggregated clusters. Assuming a single value is therefore reasonable
+    already-aggregated groups. Assuming a single value is therefore reasonable
     even when the true within-group correlation varies between groups.
 
     """
@@ -363,20 +385,6 @@ def collapse_groups(y, v, X, groups, rho=DEFAULT_RHO):
 def collapse_groups_by_n(y, n, X, groups, rho=DEFAULT_RHO):
     r"""Aggregate each group to one effect with an effective sample size.
 
-    The counterpart to :func:`~pymare.stats.collapse_groups` for models
-    parameterized by sample size rather than sampling variance, where
-    :math:`v_i = \sigma^2 / n_i` and :math:`\sigma^2` is itself being
-    estimated. Requiring the collapsed effect to satisfy
-    :math:`\sigma^2 / n_j^{\text{eff}} = \operatorname{Var}(\bar{y}_j)` gives
-
-    .. math::
-        n_j^{\text{eff}} = \frac{m^2}{\sum_i 1/n_i
-            + \rho\left[\left(\sum_i 1/\sqrt{n_i}\right)^2
-            - \sum_i 1/n_i\right]},
-
-    which is free of :math:`\sigma^2` and so can be formed before the
-    likelihood is evaluated.
-
     Parameters
     ----------
     y : :obj:`numpy.ndarray` of shape (K, D)
@@ -395,6 +403,40 @@ def collapse_groups_by_n(y, n, X, groups, rho=DEFAULT_RHO):
     -------
     :obj:`tuple`
         ``(y, n, X)`` collapsed to one row per group.
+
+    Raises
+    ------
+    ValueError
+        If ``rho`` lies outside [0, 1].
+
+    See Also
+    --------
+    collapse_groups : The counterpart for models parameterized by sampling
+        variance, where :math:`\sigma^2` is not being estimated.
+
+    Notes
+    -----
+    The counterpart to :func:`~pymare.stats.collapse_groups` for models
+    parameterized by sample size, where :math:`v_i = \sigma^2 / n_i` and
+    :math:`\sigma^2` is itself being estimated, so :math:`\bar{v}_j` cannot be
+    formed yet. Requiring the collapsed effect to satisfy
+    :math:`\sigma^2 / n_j^{\text{eff}} = \operatorname{Var}(\bar{y}_j)` gives
+
+    .. math::
+        n_j^{\text{eff}} = \frac{m^2}{\sum_i 1/n_i
+            + \rho\left[\left(\sum_i 1/\sqrt{n_i}\right)^2
+            - \sum_i 1/n_i\right]},
+
+    which is free of :math:`\sigma^2` and so can be formed before the
+    likelihood is evaluated.
+
+    For a group of :math:`s` estimates sharing one sample of :math:`n` subjects
+    this reduces to :math:`n_j^{\text{eff}} = sn / [1 + \rho(s-1)]`, running from
+    :math:`sn` at ``rho=0`` up to :math:`n` at ``rho=1``. The ``rho=1`` endpoint
+    is exactly "count the group's sample size once", so a separate function for
+    that case is unnecessary -- and choosing it implicitly, by counting ``n``
+    once without saying so, assumes perfect within-group correlation and biases
+    :math:`\sigma^2` low by :math:`[1 + \rho(s-1)]/s` whenever that is wrong.
 
     """
     if not 0.0 <= rho <= 1.0:
@@ -627,40 +669,59 @@ def undo_centering_shrinkage(corr, groups):
 
 
 def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
-    """Perform 2-D weighted least squares.
+    r"""Perform 2-D weighted least squares.
 
     Parameters
     ----------
-    y : :obj:`numpy.ndarray`
-        2-d array of estimates (observations x parallel datasets)
-    v : :obj:`numpy.ndarray`
-        2-d array of sampling variances
-    X : :obj:`numpy.ndarray`
-        Fixed effect design matrix
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        2d array of estimates (observations x parallel datasets).
+    v : :obj:`numpy.ndarray` of shape (K, D)
+        2d array of sampling variances.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
     tau2 : :obj:`float`, optional
-        tau^2 estimate to use for weights.
+        tau^2 estimate to use for the weights.
         Default = 0.
     return_cov : :obj:`bool`, optional
-        Whether or not to return the covariance matrix of the coefficients.
-        Default = False.
+        Whether to return the covariance matrix of the coefficients alongside
+        them. Default = False.
     w : None or :obj:`numpy.ndarray`, optional
         Precomputed weights of the same shape as ``y``, overriding the default
         ``1 / (v + tau2)``. Use :func:`~pymare.stats.group_weights` to obtain
-        weights that do not reward replication within a cluster.
+        weights that do not reward replication within a group.
         Default = None.
 
     Returns
     -------
-    params[, cov]
-        If return_cov is True, returns both the fixed parameter estimates and
-        ``(X'WX)^-1``, which is the *covariance* matrix of those estimates; if
-        False, only the parameter estimates.
+    beta : :obj:`numpy.ndarray` of shape (P, D)
+        The fixed effect coefficients.
+    cov : :obj:`numpy.ndarray` of shape (P, P, D)
+        Only when ``return_cov`` is True. Equal to ``(X'WX)^-1``, which is the
+        *covariance* of ``beta``.
 
-        Note that PyMARE stores this quantity under the key ``"inv_cov"``, which
-        is a misnomer of long standing: ``X'WX`` is the inverse covariance, so
-        its inverse is the covariance itself. Anything that takes
-        ``sqrt(diagonal(...))`` of it -- :attr:`pymare.results.MetaRegressionResults.fe_se`,
-        for instance -- is treating it as a covariance, which is correct.
+    See Also
+    --------
+    cluster_robust_cov : Replaces ``cov`` with a sandwich estimator that does
+        not assume the observations are independent.
+
+    Notes
+    -----
+    All ``D`` parallel datasets are solved in one set of contractions rather
+    than in a Python loop, which is what makes the estimators usable when ``D``
+    runs to hundreds of thousands. The ``einsum`` subscripts use ``k`` for
+    observations, ``p`` and ``q`` for predictors and ``i`` for parallel
+    datasets.
+
+    ``(X'WX)^-1`` is the covariance of the coefficients, not an inverse
+    covariance: ``X'WX`` is the inverse covariance, so inverting it returns the
+    covariance. PyMARE nonetheless stores this quantity under the ``params_``
+    key ``"inv_cov"``, a misnomer of long standing that is retained because that
+    key is public. Anything taking ``sqrt(diagonal(...))`` of it -- notably
+    :attr:`pymare.results.MetaRegressionResults.fe_se` -- is treating it as a
+    covariance, which is correct. The function parameters that pass it around
+    are named ``model_cov``, which also distinguishes it from the *robust*
+    covariance that :func:`cluster_robust_cov` returns.
+
     """
     w = 1.0 / (v + tau2) if w is None else w
 
@@ -682,41 +743,32 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
 
 
 def _symmetric_sqrt(matrices):
-    """Return L with ``L @ L.T`` equal to each symmetric PSD input matrix."""
+    """Return L with ``L @ L.T`` equal to each symmetric PSD input matrix.
+
+    Parameters
+    ----------
+    matrices : :obj:`numpy.ndarray` of shape (..., P, P)
+        A stack of symmetric positive semi-definite matrices.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray` of shape (..., P, P)
+        A factor of each input, computed from its eigendecomposition.
+
+    Notes
+    -----
+    Eigenvalues are floored at zero before the square root, so a matrix that is
+    only PSD up to rounding does not produce NaNs. Used for two unrelated
+    purposes that happen to need the same factor: it factors the quadratic form in
+    :func:`satterthwaite_dof` and supplies the ``L`` that
+    :func:`_cr2_low_rank_factors` needs, so one call serves both.
+    """
     evals, evecs = np.linalg.eigh(matrices)
     return evecs * np.sqrt(np.maximum(evals, 0.0))[..., None, :]
 
 
 def _cr2_low_rank_factors(group_X, chol):
     r"""Factor the CR2 adjustment using only :math:`p \times p` work.
-
-    :math:`H_j = \tilde{X}_j M \tilde{X}_j'` is an outer product of an
-    :math:`n_j \times p` matrix with itself, so its rank is at most :math:`p`.
-    Eigendecomposing the full :math:`n_j \times n_j` block therefore spends
-    :math:`O(n_j^3)` to recover at most :math:`p` non-unit eigenvalues plus
-    :math:`n_j - p` copies of 1. Writing :math:`M = LL'` and
-    :math:`B = \tilde{X}_j L`, the non-zero eigenvalues :math:`\mu_i` of
-    :math:`H_j = BB'` are exactly the eigenvalues of the :math:`p \times p`
-    matrix :math:`B'B`, whose eigenvectors :math:`q_i` lift to
-    :math:`u_i = Bq_i / \sqrt{\mu_i}`. Since the orthogonal complement of the
-    :math:`u_i` is an eigenspace of :math:`I - H_j` with eigenvalue 1, and
-    therefore needs no adjustment at all,
-
-    .. math::
-        (I_j - H_j)^{-1/2}
-            = I + \sum_i \left[(1 - \mu_i)^{-1/2} - 1\right] u_iu_i'
-            = I + BGB', \qquad
-        G = Q \operatorname{diag}(c) Q',
-
-    with :math:`c_i = \left[(1 - \mu_i)^{-1/2} - 1\right] / \mu_i`. The
-    adjustment is never formed: callers apply ``I + B G B'`` to a right-hand
-    side, so nothing larger than :math:`(n_j, p)` is materialized.
-
-    ``c_i`` has a removable singularity at :math:`\mu_i = 0`, where the limit
-    is :math:`1/2`. Substituting it is cosmetic rather than load-bearing --
-    :math:`Bq_i` vanishes with :math:`\mu_i`, since
-    :math:`\lVert Bq_i \rVert^2 = \mu_i`, so the whole term is killed either
-    way -- but it keeps the intermediate finite.
 
     Parameters
     ----------
@@ -728,10 +780,49 @@ def _cr2_low_rank_factors(group_X, chol):
 
     Returns
     -------
-    :obj:`tuple`
-        ``(B, G, degenerate)``. ``degenerate`` flags a group whose leverage
-        reached one, where the adjustment does not exist and the eigenvalue
-        floor took over.
+    b_factor : :obj:`numpy.ndarray` of shape (..., n, p)
+        The ``B`` of the factorization below.
+    middle : :obj:`numpy.ndarray` of shape (..., p, p)
+        The ``G`` of the factorization below.
+    degenerate : :obj:`bool`
+        True when a group's leverage reached one, so the adjustment does not
+        exist and the eigenvalue floor took over. The caller is responsible for
+        warning.
+
+    See Also
+    --------
+    _cr2_low_rank_apply : Applies the factors without forming the matrix.
+
+    Notes
+    -----
+    :math:`H_j = \tilde{X}_j M \tilde{X}_j'` is an outer product of an
+    :math:`n_j \times p` matrix with itself, so its rank is at most :math:`p`.
+    Eigendecomposing the full :math:`n_j \times n_j` block therefore spends
+    :math:`O(n_j^3)` to recover at most :math:`p` non-unit eigenvalues plus
+    :math:`n_j - p` copies of 1 -- and an eigenvalue of 1 in :math:`I - H_j` is a
+    direction the adjustment leaves alone, so that work computes nothing.
+
+    Writing :math:`M = LL'` and :math:`B = \tilde{X}_j L`, the non-zero
+    eigenvalues :math:`\mu_i` of :math:`H_j = BB'` are exactly the eigenvalues of
+    the :math:`p \times p` matrix :math:`B'B`, whose eigenvectors :math:`q_i` lift
+    to :math:`u_i = Bq_i / \sqrt{\mu_i}`. Since the orthogonal complement of the
+    :math:`u_i` is an eigenspace of :math:`I - H_j` with eigenvalue 1,
+
+    .. math::
+        (I_j - H_j)^{-1/2}
+            = I + \sum_i \left[(1 - \mu_i)^{-1/2} - 1\right] u_iu_i'
+            = I + BGB', \qquad
+        G = Q \operatorname{diag}(c) Q',
+
+    with :math:`c_i = \left[(1 - \mu_i)^{-1/2} - 1\right] / \mu_i`. This turns
+    :math:`O(n_j^3)` into :math:`O(n_j p^2)`, which is why the caller only falls
+    back to the full block when the group is no larger than the design.
+
+    :math:`c_i` has a removable singularity at :math:`\mu_i = 0`, where the limit
+    is :math:`1/2`. Substituting it is cosmetic rather than load-bearing --
+    :math:`Bq_i` vanishes with :math:`\mu_i`, since
+    :math:`\lVert Bq_i \rVert^2 = \mu_i`, so the whole term is killed either way
+    -- but it keeps the intermediate finite.
     """
     b_factor = group_X @ chol
     gram = np.swapaxes(b_factor, -1, -2) @ b_factor
@@ -750,52 +841,112 @@ def _cr2_low_rank_factors(group_X, chol):
 
 
 def _cr2_low_rank_apply(b_factor, middle, rhs):
-    """Apply ``I + B G B'`` to ``rhs`` of shape ``(..., n, q)``."""
+    r"""Apply the factored CR2 adjustment ``I + B G B'`` to a right-hand side.
+
+    Parameters
+    ----------
+    b_factor : :obj:`numpy.ndarray` of shape (..., n, P)
+        The ``B`` returned by :func:`_cr2_low_rank_factors`.
+    middle : :obj:`numpy.ndarray` of shape (..., P, P)
+        The ``G`` returned by :func:`_cr2_low_rank_factors`.
+    rhs : :obj:`numpy.ndarray` of shape (..., n, q)
+        What the adjustment is applied to: whitened residuals, or the whitened
+        design times the bread.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray` of shape (..., n, q)
+        The adjusted right-hand side.
+
+    See Also
+    --------
+    _cr2_low_rank_factors : Produces ``B`` and ``G``.
+
+    Notes
+    -----
+    The adjustment matrix is never formed. Callers only ever need its *action* on
+    a specific right-hand side, and the contraction order here keeps every
+    intermediate at :math:`(n, P)` rather than materializing an
+    :math:`n \times n` matrix per group per parallel dataset.
+    """
     return rhs + b_factor @ (middle @ (np.swapaxes(b_factor, -1, -2) @ rhs))
 
 
 def _cr2_scores(X, w, resid, group_members, bread):
     r"""Compute bias-reduced (CR2) cluster scores.
 
-    The CR0 score for cluster :math:`j` is :math:`X_j' W_j e_j`. Because
-    :math:`\beta` is fitted using cluster :math:`j` itself, those residuals are
-    shrunk toward zero in proportion to the cluster's leverage, which biases
-    the sandwich downward -- severely when one cluster carries much of the
-    weight. CR2 :footcite:p:`bell2002bias` undoes that shrinkage exactly under
-    the working model by inflating the residuals with
-    :math:`A_j = (I_j - H_j)^{-1/2}` in the whitened metric, giving
+    Parameters
+    ----------
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    w : :obj:`numpy.ndarray` of shape (K, D)
+        The weights used to fit the coefficients.
+    resid : :obj:`numpy.ndarray` of shape (K, D)
+        Residuals ``y - X @ beta``, in the same orientation as ``y``.
+    group_members : :obj:`list` of :obj:`numpy.ndarray`
+        Row indices belonging to each group, one array per group.
+    bread : :obj:`numpy.ndarray` of shape (D, P, P)
+        ``(X'WX)^-1`` per parallel dataset.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray` of shape (D, P, m)
+        One adjusted score vector per group and parallel dataset.
+
+    Warns
+    -----
+    UserWarning
+        If any group's leverage reaches one, so that its adjustment does not
+        exist and the eigenvalue floor took over. That group then contributes
+        nothing to the sandwich, which therefore understates the standard
+        errors.
+
+    See Also
+    --------
+    _cr2_low_rank_factors : Supplies the factored adjustment used for groups
+        larger than the design.
+
+    Notes
+    -----
+    The CR0 score for group :math:`j` is :math:`X_j' W_j e_j`. Because
+    :math:`\beta` is fitted using group :math:`j` itself, those residuals are
+    shrunk toward zero in proportion to the group's leverage, which biases the
+    sandwich downward -- severely when one group carries much of the weight.
+    CR2 :footcite:p:`bell2002bias` undoes that shrinkage by inflating the
+    residuals with :math:`A_j = (I_j - H_j)^{-1/2}` in the whitened metric,
+    giving
 
     .. math::
         s_j = \tilde{X}_j' (I_j - \tilde{X}_j M \tilde{X}_j')^{-1/2}
               W_j^{1/2} e_j,
 
     with :math:`\tilde{X}_j = W_j^{1/2} X_j` and :math:`M = (X'WX)^{-1}`.
-    Singleton clusters reduce to the familiar scalar :math:`1/\sqrt{1 - h_j}`,
+    Singleton groups reduce to the familiar scalar :math:`1/\sqrt{1 - h_j}`,
     i.e. HC2 :footcite:p:`mackinnon1985some`.
 
     "Exactly unbiased" is always with respect to a *working model* for the error
-    covariance, which the analyst chooses. Bell and McCaffrey pick :math:`A_j` to
-    satisfy :math:`A_j (I - H)_j \Phi (I - H)_j' A_j' = \Phi_j`; the form above is
-    the solution for :math:`\Phi = I` in the whitened metric, i.e. under the
-    assumption that the weights are correct and the observations independent --
-    the same assumption the sandwich exists to avoid relying on. That is not
-    circular so much as pragmatic: simulation shows the correction helps
-    substantially even when the working model is wrong
-    :footcite:p:`tipton2015small,imbens2016robust`, and its influence fades as the
-    number of clusters grows. This form coincides with the correlated-effects
+    covariance, which the analyst chooses. Bell and McCaffrey pick :math:`A_j`
+    to satisfy :math:`A_j (I - H)_j \Phi (I - H)_j' A_j' = \Phi_j`; the form
+    above is the solution for :math:`\Phi = I` in the whitened metric, i.e.
+    under the assumption that the weights are correct and the observations
+    independent -- the same assumption the sandwich exists to avoid relying on.
+    That is pragmatic rather than circular: simulation shows the correction
+    helps substantially even when the working model is wrong
+    :footcite:p:`tipton2015small,imbens2016robust`, and its influence fades as
+    the number of groups grows. This form coincides with the correlated-effects
     adjustment :math:`A_j^C` of :footcite:t:`fisher2015robumeta`.
 
     Because CR2 targets unbiasedness rather than conservatism, it is *not*
-    guaranteed to exceed CR0. It does for singleton clusters, where the
-    adjustment is a scalar :math:`\ge 1` applied to each score; for larger
-    clusters the score is a projection of the inflated residuals, and in a small
-    fraction of designs a given coefficient's CR2 variance comes out below its
-    CR0 counterpart. :footcite:t:`pustejovsky2018small` place CR2 between CR1,
-    which under-corrects, and CR3 :footcite:p:`mancl2001covariance`, which
+    guaranteed to exceed CR0. It does for singleton groups, where the adjustment
+    is a scalar :math:`\ge 1` applied to each score; for larger groups the score
+    is a projection of the inflated residuals, and in a small fraction of
+    designs a given coefficient's CR2 variance comes out below its CR0
+    counterpart. :footcite:t:`pustejovsky2018small` place CR2 between CR1, which
+    under-corrects, and CR3 :footcite:p:`mancl2001covariance`, which
     over-corrects.
 
-    Implemented from the published formulation rather than ported; the R
-    package `clubSandwich <https://cran.r-project.org/package=clubSandwich>`_
+    Implemented from the published formulation rather than ported; the R package
+    `clubSandwich <https://cran.r-project.org/package=clubSandwich>`_
     :footcite:p:`pustejovsky2018small` is the reference implementation.
 
     References
@@ -876,63 +1027,6 @@ def _cr2_scores(X, w, resid, group_members, bread):
 def satterthwaite_dof(X, w, groups, model_cov=None):
     r"""Satterthwaite degrees of freedom for CR2 cluster-robust tests.
 
-    Cluster-robust standard errors are asymptotic in the number of groups, so
-    the reference distribution matters when that number is small. The naive
-    :math:`m - p` degrees of freedom of :footcite:t:`hedges2010robust` are
-    adequate only when weight is spread evenly across groups. When a covariate
-    is unbalanced at the group level -- a handful of groups carrying the only
-    non-zero values of a predictor, say -- the effective sample size for that
-    coefficient is far smaller than :math:`m - p` and the test becomes badly
-    anti-conservative.
-
-    The remedy is to match the first two moments of the variance estimate to a
-    scaled chi-squared, which is what this function computes and what the R
-    packages `clubSandwich <https://cran.r-project.org/package=clubSandwich>`_
-    :footcite:p:`pustejovsky2018small` and `robumeta
-    <https://cran.r-project.org/package=robumeta>`_
-    :footcite:p:`fisher2015robumeta` use by default. Credit divides three ways:
-    the moment-matching approximation is :footcite:t:`satterthwaite1946approximate`
-    (and, independently, :footcite:t:`welch1951comparison`, which is why it is
-    often called Welch-Satterthwaite); applying it to cluster-robust variance
-    estimates is :footcite:t:`bell2002bias`; and establishing that it works for
-    *meta-regression*, together with the guidance on when it does not, is
-    :footcite:t:`tipton2015small`.
-
-    For a single coefficient :math:`c'\beta`, the CR2 variance estimate is a
-    quadratic form :math:`u'\left(\sum_j g_jg_j'\right)u` in the whitened data
-    :math:`u = W^{1/2}y`, with
-
-    .. math::
-        g_j = (I - \tilde{H})b_j, \qquad
-        b_j = P_j'A_j\tilde{X}_jMc,
-
-    where :math:`M = (X'WX)^{-1}`, :math:`\tilde{X} = W^{1/2}X`,
-    :math:`\tilde{H} = \tilde{X}M\tilde{X}'`, :math:`A_j` is the CR2
-    adjustment of :func:`_cr2_scores`, and :math:`P_j` selects group
-    :math:`j`. Matching the first two moments of that form to a scaled
-    chi-squared gives
-
-    .. math::
-        \nu = \frac{\left(\operatorname{tr}S\right)^2}
-                   {\operatorname{tr}\left(S^2\right)},
-        \qquad S = G'G, \quad G = [g_1, \ldots, g_m].
-
-    Notes
-    -----
-    Forming :math:`G` explicitly would cost a :math:`K \times K` matrix per
-    parallel dataset, which is prohibitive when there are many of them. It is
-    unnecessary: the :math:`b_j` have disjoint support, so :math:`b_j'b_l`
-    vanishes off the diagonal, and :math:`M(\tilde{X}'\tilde{X})M = M`
-    collapses the cross terms. Writing :math:`t_j = \tilde{X}_j'b_j`, the
-    whole matrix reduces to
-
-    .. math::
-        S_{jl} = \delta_{jl}\lVert b_j \rVert^2 - t_j'Mt_l,
-
-    which involves only :math:`p`-vectors. Factoring :math:`M = LL'` and
-    setting :math:`R_j = L't_j` gives both traces from :math:`R` alone, so
-    nothing larger than :math:`(m, p)` per dataset is ever materialized.
-
     Parameters
     ----------
     X : :obj:`numpy.ndarray` of shape (K, P)
@@ -951,7 +1045,87 @@ def satterthwaite_dof(X, w, groups, model_cov=None):
     Returns
     -------
     :obj:`numpy.ndarray` of shape (P, D)
-        Degrees of freedom, one per predictor and parallel dataset.
+        Degrees of freedom, one per predictor and parallel dataset, floored at 1.
+
+    Warns
+    -----
+    UserWarning
+        If any group has full leverage on a coefficient, so that the CR2
+        adjustment does not exist for it and the degrees of freedom are floored.
+    UserWarning
+        If any returned value falls below ``MIN_DOF_FOR_SATTERTHWAITE``, outside
+        the range in which the approximation is known to hold its nominal level.
+
+    See Also
+    --------
+    cluster_robust_cov : Produces the variance estimate these degrees of freedom
+        describe.
+    pymare.results.MetaRegressionResults.fe_dof : Where the result is surfaced
+        to users.
+
+    Notes
+    -----
+    Cluster-robust standard errors are asymptotic in the number of groups, so the
+    reference distribution matters when that number is small. The naive
+    :math:`m - p` degrees of freedom of :footcite:t:`hedges2010robust` are
+    adequate only when weight is spread evenly across groups. When a covariate is
+    unbalanced at the group level -- a handful of groups carrying the only
+    non-zero values of a predictor, say -- the effective sample size for that
+    coefficient is far smaller than :math:`m - p` and the test becomes badly
+    anti-conservative.
+
+    The remedy is to match the first two moments of the variance estimate to a
+    scaled chi-squared. For a single coefficient :math:`c'\beta`, the CR2
+    variance estimate is a quadratic form :math:`u'\left(\sum_j g_jg_j'\right)u`
+    in the whitened data :math:`u = W^{1/2}y`, with
+
+    .. math::
+        g_j = (I - \tilde{H})b_j, \qquad
+        b_j = P_j'A_j\tilde{X}_jMc,
+
+    where :math:`M = (X'WX)^{-1}`, :math:`\tilde{X} = W^{1/2}X`,
+    :math:`\tilde{H} = \tilde{X}M\tilde{X}'`, :math:`A_j` is the CR2 adjustment
+    of :func:`_cr2_scores`, and :math:`P_j` selects group :math:`j`. Matching
+    moments gives
+
+    .. math::
+        \nu = \frac{\left(\operatorname{tr}S\right)^2}
+                   {\operatorname{tr}\left(S^2\right)},
+        \qquad S = G'G, \quad G = [g_1, \ldots, g_m].
+
+    That ratio counts how *evenly* the information is spread rather than how
+    much there is: equal eigenvalues return their count exactly, one dominant
+    eigenvalue returns nearly 1.
+
+    Credit divides three ways. The moment-matching approximation is
+    :footcite:t:`satterthwaite1946approximate` (and, independently,
+    :footcite:t:`welch1951comparison`, hence "Welch-Satterthwaite"); applying it
+    to cluster-robust variance estimates is :footcite:t:`bell2002bias`; and
+    establishing that it works for *meta-regression*, with guidance on when it
+    does not, is :footcite:t:`tipton2015small`. The R packages `clubSandwich
+    <https://cran.r-project.org/package=clubSandwich>`_
+    :footcite:p:`pustejovsky2018small` and `robumeta
+    <https://cran.r-project.org/package=robumeta>`_
+    :footcite:p:`fisher2015robumeta` use it by default.
+
+    Because the degrees of freedom are covariate-dependent, the number of groups
+    alone cannot tell you whether the correction is needed
+    :footcite:p:`pustejovsky2018small`, and they should be read before the
+    p-values rather than after.
+
+    Forming :math:`G` explicitly would cost a :math:`K \times K` matrix per
+    parallel dataset, which is prohibitive when there are many of them. It is
+    unnecessary: the :math:`b_j` have disjoint support, so :math:`b_j'b_l`
+    vanishes off the diagonal, and :math:`M(\tilde{X}'\tilde{X})M = M` collapses
+    the cross terms. Writing :math:`t_j = \tilde{X}_j'b_j`, the whole matrix
+    reduces to
+
+    .. math::
+        S_{jl} = \delta_{jl}\lVert b_j \rVert^2 - t_j'Mt_l,
+
+    which involves only :math:`p`-vectors. Factoring :math:`M = LL'` and setting
+    :math:`R_j = L't_j` gives both traces from :math:`R` alone, so nothing larger
+    than :math:`(m, p)` per dataset is ever materialized.
 
     References
     ----------
@@ -1193,32 +1367,59 @@ def cluster_robust_cov(
     -------
     :obj:`numpy.ndarray` of shape (P, P, D)
         The robust covariance matrix for the fixed effects, oriented like the
-        covariance returned by
-        :func:`~pymare.stats.weighted_least_squares`.
+        covariance returned by :func:`~pymare.stats.weighted_least_squares`.
+
+    Raises
+    ------
+    ValueError
+        If ``groups`` does not contain one label per observation.
+    ValueError
+        If ``method`` is not one of ``"CR2"`` or ``"CR0"``.
+    ValueError
+        If the number of groups does not exceed the number of predictors, where
+        every group has full leverage and the sandwich is undefined.
+
+    Warns
+    -----
+    UserWarning
+        If there are at or below ``MIN_CLUSTERS_FOR_RVE`` groups, where robust
+        variance estimation is known to be anti-conservative.
+
+    See Also
+    --------
+    satterthwaite_dof : The reference distribution these standard errors need.
+    group_weights : Levels weight across groups, which reduces the bias this
+        estimator is subject to more effectively than any choice of ``method``.
 
     Notes
     -----
-    RVE is asymptotic in the number of *groups*, not the number of estimates,
-    and is anti-conservative when there are few of them. CR2 substantially
-    reduces that bias but does not remove it.
+    RVE is asymptotic in the number of *groups*, not the number of estimates, and
+    is anti-conservative when there are few of them. CR2 substantially reduces
+    that bias but does not remove it.
 
-    The dominant driver is not the group count but how unevenly weight is
-    spread across groups. When one group carries much of the total weight, the
-    sandwich is estimating that group's variance from what is effectively a
-    single residual, and no residual adjustment fully rescues it. Weighting the
-    estimates with :func:`~pymare.stats.group_weights` levels the weight
-    across groups and is far more effective than any choice of ``method``.
+    The dominant driver is not the group count but how unevenly weight is spread
+    across groups. When one group carries much of the total weight, the sandwich
+    is estimating that group's variance from what is effectively a single
+    residual, and no residual adjustment fully rescues it. Weighting the
+    estimates with :func:`~pymare.stats.group_weights` levels the weight across
+    groups and is far more effective than any choice of ``method``.
 
     For the same reason, a comfortable group count is *not* evidence that the
     small-sample corrections are unnecessary. :footcite:t:`pustejovsky2018small`
-    put it directly: because the degrees of freedom are covariate-dependent, it
-    is not possible to decide whether a correction is needed from the number of
+    put it directly: because the degrees of freedom are covariate-dependent, it is
+    not possible to decide whether a correction is needed from the number of
     groups alone. :footcite:t:`imbens2016robust` find these corrections still
     improve coverage materially at fifty or more groups, and both they and
     :footcite:t:`tipton2015small` recommend using ``method="CR2"`` with the
     Satterthwaite degrees of freedom routinely rather than only when ``m`` looks
     small. Read :func:`~pymare.stats.satterthwaite_dof` before the p-value, not
     the group count.
+
+    Group labels are encoded with :func:`~pymare.stats.encode_groups` rather than
+    ``np.unique`` because the docstring promises *any hashable* label, while
+    ``np.unique`` additionally requires them to be sortable and so would reject a
+    mix of :obj:`str` and :obj:`int`. Every quantity here is a sum over groups, so
+    the coding order does not matter.
 
     References
     ----------

@@ -26,7 +26,23 @@ WEIGHT_SCHEMES = ("individual", "rescale", "collapse")
 
 
 def _check_weight_scheme(weight_scheme):
-    """Validate the ``weight_scheme`` argument shared by the WLS-family estimators."""
+    """Validate the ``weight_scheme`` argument shared by the WLS-family estimators.
+
+    Parameters
+    ----------
+    weight_scheme : :obj:`str`
+        The value supplied by the caller.
+
+    Raises
+    ------
+    ValueError
+        If ``weight_scheme`` is not one of ``WEIGHT_SCHEMES``.
+
+    Notes
+    -----
+    Called from ``__init__`` rather than ``fit`` so that a typo surfaces at
+    construction, before any fitting work is done.
+    """
     if weight_scheme not in WEIGHT_SCHEMES:
         raise ValueError(
             f"Invalid weight_scheme '{weight_scheme}'; must be one of {list(WEIGHT_SCHEMES)}."
@@ -36,8 +52,29 @@ def _check_weight_scheme(weight_scheme):
 def _resolve_weights(v, groups, tau2, weight_scheme):
     """Return WLS weights, or None to fall back to ``1 / (v + tau2)``.
 
+    Parameters
+    ----------
+    v : :obj:`numpy.ndarray` of shape (K, D)
+        Sampling variances.
+    groups : None or :obj:`numpy.ndarray` of shape (K,)
+        Group labels, or None when no dependence was declared.
+    tau2 : :obj:`float` or :obj:`numpy.ndarray`
+        The tau^2 estimate to fold into the weights.
+    weight_scheme : {"individual", "rescale", "collapse"}
+        The scheme requested by the caller.
+
+    Returns
+    -------
+    None or :obj:`numpy.ndarray` of shape (K, D)
+        Rescaled weights for ``"rescale"``, else None, meaning the caller should
+        use its own default.
+
+    Notes
+    -----
     ``"rescale"`` divides each observation's weight by its group size, so row
-    multiplicity does not automatically buy group influence. It is a no-op
+    multiplicity does not automatically buy group influence. ``"collapse"``
+    returns None because the aggregation has already happened upstream, leaving
+    one row per group for which the ordinary weight is correct. It is a no-op
     when no group labels are supplied.
     """
     if weight_scheme in ("individual", "collapse") or groups is None:
@@ -47,7 +84,32 @@ def _resolve_weights(v, groups, tau2, weight_scheme):
 
 
 def _validate_group_design(X, groups):
-    """Reject group aggregation when predictors vary within a group."""
+    """Reject group aggregation when predictors vary within a group.
+
+    Parameters
+    ----------
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
+        Group labels, one per observation.
+
+    Raises
+    ------
+    ValueError
+        If any predictor takes more than one value within a group.
+
+    Notes
+    -----
+    Collapsing a group to one row replaces its design values with their mean, so
+    a predictor that varied within the group would silently change meaning: the
+    coefficient would answer a between-group question instead. ``"rescale"``
+    keeps every row and so has no such restriction.
+
+    The comparison uses a relative tolerance rather than bit-equality. A
+    group-level predictor built by arithmetic -- a ratio, a centered score -- is
+    constant in intent but can differ in the last bits across a group's rows, and
+    rejecting those designs for floating-point reasons would be wrong.
+    """
     groups = np.asarray(groups).ravel()
     codes, labels = encode_groups(groups, n_observations=groups.shape[0])
     for group in range(labels.size):
@@ -66,11 +128,32 @@ def _validate_group_design(X, groups):
 def _check_collapsed_design(collapsed_y, collapsed_X):
     """Reject a group reduction that leaves fewer rows than predictors.
 
-    ``weight_scheme='collapse'`` replaces K rows with m, so a dataset that was
+    Parameters
+    ----------
+    collapsed_y : :obj:`numpy.ndarray` of shape (m, D)
+        Estimates after aggregation, one row per group.
+    collapsed_X : :obj:`numpy.ndarray` of shape (m, P)
+        Design matrix after aggregation.
+
+    Raises
+    ------
+    ValueError
+        If the number of groups does not exceed the number of predictors.
+
+    Notes
+    -----
+    ``weight_scheme="collapse"`` replaces K rows with m, so a dataset that was
     comfortably identified before collapsing can be saturated after it. Left
     unchecked the moment estimators divide by ``m - p == 0`` and report
-    ``tau^2 = inf`` with zero standard errors, from input the user had no
-    reason to think was degenerate.
+    ``tau^2 = inf`` with zero standard errors, from input the user had no reason
+    to think was degenerate.
+
+    :func:`_tau2_inputs` meets the same condition and instead falls back to the
+    raw rows. Both are correct, because they guard different schemes: under
+    ``"collapse"`` the reduction *is* the model and a saturated collapse is fatal,
+    whereas under ``"rescale"`` every row is kept for the coefficients and only
+    tau^2 uses the reduction, so degrading to a biased-but-computable estimate
+    beats refusing to run.
     """
     n_rows, n_preds = collapsed_X.shape
     if n_rows <= n_preds:
@@ -83,7 +166,39 @@ def _check_collapsed_design(collapsed_y, collapsed_X):
 
 
 def _collapse_inputs(y, v, X, groups, weight_scheme, rho):
-    """Return one effect and variance per independent group when requested."""
+    """Return one effect and variance per independent group when requested.
+
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        Estimates.
+    v : :obj:`numpy.ndarray` of shape (K, D)
+        Sampling variances.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    groups : None or :obj:`numpy.ndarray` of shape (K,)
+        Group labels, or None when no dependence was declared.
+    weight_scheme : {"individual", "rescale", "collapse"}
+        Only ``"collapse"`` triggers aggregation; the others pass through.
+    rho : :obj:`float`
+        Assumed within-group correlation used by the aggregation.
+
+    Returns
+    -------
+    :obj:`tuple`
+        ``(y, v, X, groups)``, aggregated to one row per group and relabelled
+        ``arange(m)`` when ``weight_scheme="collapse"``, else the inputs unchanged.
+
+    See Also
+    --------
+    pymare.stats.collapse_groups : Performs the aggregation.
+
+    Notes
+    -----
+    Groups are relabelled because after aggregation each row *is* one independent
+    unit, so the post-collapse invariant is one distinct label per row. Keeping
+    the original labels would leave stale group structure implied by the labels.
+    """
     if weight_scheme != "collapse" or groups is None:
         return y, v, X, groups
     _validate_group_design(X, groups)
@@ -96,10 +211,38 @@ def _collapse_inputs(y, v, X, groups, weight_scheme, rho):
 def _collapse_n_inputs(y, n, X, groups, weight_scheme, rho):
     r"""Return one effect and an effective ``n`` per independent group.
 
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        Estimates.
+    n : :obj:`numpy.ndarray` of shape (K, D)
+        Sample sizes.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    groups : None or :obj:`numpy.ndarray` of shape (K,)
+        Group labels, or None when no dependence was declared.
+    weight_scheme : {"individual", "rescale", "collapse"}
+        Only ``"collapse"`` triggers aggregation; the others pass through.
+    rho : :obj:`float`
+        Assumed within-group correlation used by the aggregation.
+
+    Returns
+    -------
+    :obj:`tuple`
+        ``(y, n, X, groups)``, aggregated to one row per group and relabelled
+        ``arange(m)`` when ``weight_scheme="collapse"``, else the inputs unchanged.
+
+    See Also
+    --------
+    pymare.stats.collapse_groups_by_n : Performs the aggregation.
+    _collapse_inputs : The counterpart for variance-parameterized models.
+
+    Notes
+    -----
     The effective sample size, not the raw one. Rows in a group share subjects,
     so ``n`` must not be counted once per row -- but they are also not perfect
-    duplicates, and treating them as such is its own error. For a group of
-    ``s`` estimates from the same ``n`` subjects correlated at ``rho``,
+    duplicates, and treating them as such is its own error. For a group of ``s``
+    estimates from the same ``n`` subjects correlated at ``rho``,
 
     .. math::
         \operatorname{Var}(\bar{y}) = \frac{\sigma^2}{n}
@@ -107,13 +250,13 @@ def _collapse_n_inputs(y, n, X, groups, weight_scheme, rho):
             = \frac{\sigma^2}{n^{\text{eff}}}, \qquad
         n^{\text{eff}} = \frac{sn}{1 + \rho(s-1)},
 
-    which runs from ``n`` at rho=1 up to ``s*n`` at rho=0. Fixing it at ``n``
-    -- as counting each group's sample size once does -- is only right for
-    perfectly correlated repeats, and biases sigma^2 low by
-    ``(1 + rho(s-1)) / s`` otherwise: a factor of 5 for four independent
-    estimates per group. In image-based meta-analysis a group is a study and
-    its rows are separate contrast images, which share subjects but measure
-    different things, so rho is well below one and the bias is real.
+    which runs from ``n`` at rho=1 up to ``s*n`` at rho=0. Fixing it at ``n`` --
+    as counting each group's sample size once does -- is only right for perfectly
+    correlated repeats, and biases sigma^2 low by ``(1 + rho(s-1)) / s``
+    otherwise: a factor of 4 for four uncorrelated estimates per group. In
+    image-based meta-analysis a group is a study and its rows are separate
+    contrast images, which share subjects but measure different things, so rho is
+    well below one and the bias is real.
     """
     if weight_scheme != "collapse" or groups is None:
         return y, n, X, groups
@@ -127,11 +270,40 @@ def _collapse_n_inputs(y, n, X, groups, weight_scheme, rho):
 def _tau2_inputs(y, v, X, groups, weight_scheme, rho, by_n=False):
     """Return the (y, v, X) that tau^2 should be estimated from.
 
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        Estimates.
+    v : :obj:`numpy.ndarray` of shape (K, D)
+        Sampling variances, or sample sizes when ``by_n`` is True.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    groups : None or :obj:`numpy.ndarray` of shape (K,)
+        Group labels, or None when no dependence was declared.
+    weight_scheme : {"individual", "rescale", "collapse"}
+        ``"individual"`` returns the inputs untouched.
+    rho : :obj:`float`
+        Assumed within-group correlation used by the aggregation.
+    by_n : :obj:`bool`, optional
+        Whether the second array holds sample sizes rather than variances.
+        Default = False.
+
+    Returns
+    -------
+    :obj:`tuple`
+        ``(y, v, X)`` aggregated to one row per group, or the inputs unchanged.
+
+    Notes
+    -----
     Moment-based tau^2 estimators treat every row as independent, so repeated
-    observations from a group make the observed dispersion look smaller than
-    the row count implies and bias tau^2 downward. Collapsing to one effect per
-    group first removes that pseudo-replication. Falls back to
-    the raw inputs when there are too few groups to fit the design.
+    observations from a group distort the observed dispersion relative to what the
+    row count implies. Collapsing to one effect per group first removes that
+    pseudo-replication.
+
+    Falls back to the raw inputs when there are too few groups to fit the
+    collapsed design, rather than raising as :func:`_check_collapsed_design` does;
+    the two conditions are the same but only one of them is load-bearing. See that
+    function's notes.
     """
     if weight_scheme not in ("rescale", "collapse") or groups is None:
         return y, v, X
@@ -145,7 +317,30 @@ def _tau2_inputs(y, v, X, groups, weight_scheme, rho, by_n=False):
 
 
 def _dersimonian_laird_tau2(y, v, X):
-    """Method-of-moments tau^2 from Cochran's Q."""
+    """Estimate tau^2 by the method of moments, from Cochran's Q.
+
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        Estimates.
+    v : :obj:`numpy.ndarray` of shape (K, D)
+        Sampling variances.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray` of shape (D,)
+        The tau^2 estimate per parallel dataset, floored at zero.
+
+    Notes
+    -----
+    ``Q`` is the observed weighted dispersion, whose expectation is ``K - P``
+    under tau^2 = 0, so ``Q - (K - P)`` is the excess and ``A`` converts it to the
+    tau^2 scale. Because ``K`` counts *rows*, dependent rows make the subtracted
+    term grow faster than ``Q`` does; see :func:`_tau2_inputs` for the reduction
+    that removes the pseudo-replication before this is called.
+    """
     k, p = X.shape
 
     # Estimate initial betas with WLS, assuming tau^2=0
@@ -165,24 +360,59 @@ def _dersimonian_laird_tau2(y, v, X):
 
 
 def _robust_cov_and_dof(y, v, X, beta, groups, tau2=0.0, model_cov=None, w=None):
-    """Compute the cluster-robust covariance and its degrees of freedom.
+    """Compute the cluster-robust covariance and its degrees of freedom together.
 
-    Returns ``(robust_cov, n_groups, dof)``, or ``(None, None, None)`` when
-    ``groups`` is None so that the model-based covariance is left untouched.
-    Pass the model-based covariance as ``model_cov`` when available to skip a
-    redundant pseudo-inverse, and the same ``w`` that produced ``beta`` so the
-    residuals match the fit.
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        Estimates.
+    v : :obj:`numpy.ndarray` of shape (K, D)
+        Sampling variances.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    beta : :obj:`numpy.ndarray` of shape (P, D)
+        The fitted coefficients whose covariance is wanted.
+    groups : None or :obj:`numpy.ndarray` of shape (K,)
+        Group labels, or None to leave the model-based covariance untouched.
+    tau2 : :obj:`float` or :obj:`numpy.ndarray`, optional
+        The tau^2 used for the weights, matching the value that produced ``beta``.
+        Default = 0.
+    model_cov : None or :obj:`numpy.ndarray` of shape (P, P, D), optional
+        The model-based covariance, passed through to avoid a redundant
+        pseudo-inverse. Default = None.
+    w : None or :obj:`numpy.ndarray` of shape (K, D), optional
+        The weights that produced ``beta``, so the residuals match the fit.
+        Default = None.
 
-    The Satterthwaite degrees of freedom are computed here, alongside the
-    sandwich, so that they are guaranteed to reflect the same weights and the
-    same group structure. Computing them in ``results`` instead would mean
-    reconstructing both, and any drift would silently change the reference
-    distribution rather than raising.
+    Returns
+    -------
+    robust_cov : None or :obj:`numpy.ndarray` of shape (P, P, D)
+        The sandwich covariance, or None when ``groups`` is None.
+    n_groups : None or :obj:`int`
+        The number of groups, or None when ``groups`` is None.
+    dof : None or :obj:`numpy.ndarray` of shape (P, D)
+        Satterthwaite degrees of freedom, or None when ``groups`` is None.
 
-    The group count is returned separately rather than folded into
-    ``params_`` because :func:`_loopable` stacks every entry of ``params_``
-    across parallel datasets, which only works for arrays. ``dof`` is an array
-    of shape ``(p, d)``, so it stacks correctly and does travel in ``params_``.
+    See Also
+    --------
+    pymare.stats.cluster_robust_cov
+    pymare.stats.satterthwaite_dof
+
+    Notes
+    -----
+    The degrees of freedom are computed here, alongside the sandwich, so that they
+    are guaranteed to reflect the same weights and the same group structure.
+    Computing them in ``results`` instead would mean reconstructing both, and any
+    drift would silently change the reference distribution rather than raising.
+
+    ``model_cov`` is only reusable when it is ``(X'WX)^-1`` under these same
+    weights; callers that cannot promise that must pass None, in which case
+    :func:`~pymare.stats.satterthwaite_dof` rebuilds it.
+
+    The group count is returned separately rather than folded into ``params_``
+    because :func:`_loopable` stacks every entry of ``params_`` across parallel
+    datasets, which only works for arrays. ``dof`` is an array of shape ``(P, D)``,
+    so it stacks correctly and does travel in ``params_``.
     """
     if groups is None:
         return None, None, None

@@ -14,13 +14,50 @@ from .estimators import BaseEstimator
 
 
 def _check_estimable_correlation(z, group_indices):
-    """Reject a group whose rows carry no variance to correlate.
+    """Reject a group whose centered rows carry no variance to correlate.
 
-    ``np.corrcoef`` divides by each row's standard deviation, so a row that is
-    constant across features yields NaN and the NaN propagates silently into
-    the p-values. The "all samples identical" guard elsewhere covers identical
-    *rows*, which still vary across features and legitimately correlate at 1;
-    this is the different case of a row that never varies.
+    Parameters
+    ----------
+    z : :obj:`numpy.ndarray` of shape (K, D)
+        The **centered** estimates, as both callers pass them: the per-feature
+        mean over rows has already been removed. Passing the raw array instead
+        tests a different and largely harmless condition; see Notes.
+    group_indices : :obj:`numpy.ndarray`
+        Row indices of the one group about to be correlated.
+
+    Raises
+    ------
+    ValueError
+        If any selected row is constant across features, which leaves its
+        correlation with the others undefined.
+
+    See Also
+    --------
+    pymare.stats.estimate_null_correlation : Estimates the same quantity for
+        the caller, and applies the corresponding bias correction.
+
+    Notes
+    -----
+    ``np.corrcoef`` divides each row by its own standard deviation, so a row
+    with no variance across features produces ``NaN`` -- with only a
+    ``RuntimeWarning`` -- and that ``NaN`` then travels through the variance
+    inflation term into the reported p-values without raising.
+
+    The condition is on the *centered* rows, which is not the same as a row
+    that is constant in the raw data. Centering subtracts each feature's mean
+    over rows, so a raw row of ``[1, 1, 1, 1]`` generally becomes non-constant
+    and needs no guard at all. What does trigger it is a row whose centered
+    values are constant, i.e. one differing from the per-feature means by a
+    fixed offset. With two rows in a group that happens exactly when the rows
+    differ by a constant; two rows differing by a varying amount centre to
+    mirror images and correlate at exactly ``-1``, which is degenerate but not
+    undefined.
+
+    This is a different failure from the "all samples identical" check in the
+    callers, which skips centering when *every* row is the same. Those rows
+    still vary across features and legitimately correlate at 1, so no ``NaN``
+    arises and no guard is needed. The two checks are therefore not redundant,
+    and collapsing them would reintroduce one of the two failures.
     """
     if np.ptp(z[group_indices], axis=1).min() == 0:
         raise ValueError(

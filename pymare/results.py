@@ -27,7 +27,30 @@ from pymare.stats import (
 
 
 def _expand_unit_order(order, group_codes, n_obs):
-    """Turn a permutation of exchangeable units into a row index array."""
+    """Turn a permutation of exchangeable units into a row index array.
+
+    Parameters
+    ----------
+    order : :obj:`numpy.ndarray` of shape (m,)
+        A permutation of the exchangeable units.
+    group_codes : None or :obj:`numpy.ndarray` of shape (K,)
+        Consecutive group codes, one per row, or None when rows are the units.
+    n_obs : :obj:`int`
+        Number of rows. Unused when ``group_codes`` is None beyond documenting
+        the expected length.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray`
+        Row indices realising ``order``, with each group's rows kept together.
+
+    Notes
+    -----
+    Dependent rows are exchangeable only as complete groups, so a shuffle has to
+    move whole groups rather than individual rows. Shuffling rows independently
+    generates datasets that could not have arisen under the null and builds a
+    reference distribution that is far too narrow.
+    """
     if group_codes is None:
         return order
     members = [np.flatnonzero(group_codes == unit) for unit in range(order.size)]
@@ -74,14 +97,30 @@ class MetaRegressionResults:
     def _collapses_to_groups(self, groups, n_preds):
         """Whether result statistics should use one aggregate per group.
 
+        Parameters
+        ----------
+        groups : None or :obj:`numpy.ndarray` of shape (K,)
+            Group labels from the Dataset, or None.
+        n_preds : :obj:`int`
+            Number of predictors, used for the same fallback the estimator uses.
+
+        Returns
+        -------
+        :obj:`bool`
+            True when the estimator estimated tau^2 from aggregated rows.
+
+        Notes
+        -----
         This has to match the condition the estimator used for tau^2, which is
         ``_tau2_inputs``: both ``"rescale"`` and ``"collapse"`` estimate tau^2
-        from one effect per group, and both fall back to the raw rows when
-        there are too few groups to fit the design. Testing only for
-        ``"collapse"`` here left ``"cluster"`` reporting a tau^2 taken from
-        collapsed data alongside a confidence interval, Q, I^2 and H taken
-        from the raw rows -- so the point estimate could fall outside its own
-        interval.
+        from one effect per group, and both fall back to the raw rows when there
+        are too few groups to fit the design.
+
+        Testing only for ``"collapse"`` here left ``"rescale"`` reporting a tau^2
+        taken from collapsed data alongside a confidence interval, Q, I^2 and H
+        taken from the raw rows -- so the point estimate could fall outside its
+        own interval. When two functions must agree about a reduction, the durable
+        fix is to make the agreement structural rather than to patch one side.
         """
         if groups is None:
             return False
