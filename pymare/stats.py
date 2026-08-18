@@ -11,6 +11,14 @@ from scipy.optimize import Bounds, minimize
 # anti-conservative; see Hedges, Tipton & Johnson (2010) and Tipton (2015).
 MIN_CLUSTERS_FOR_RVE = 10
 
+# Tipton (2015) established by simulation that the Satterthwaite approximation
+# holds its nominal level only while the degrees of freedom exceed roughly this
+# value. Below it the reference distribution itself is outside its validated
+# range, which the cluster count alone will not reveal: a dataset with a
+# comfortable number of groups can still produce a dof of 2 for an unbalanced
+# group-level predictor.
+MIN_DOF_FOR_SATTERTHWAITE = 4.0
+
 # A cluster whose leverage approaches one leaves no residual to learn from, so
 # the CR2 adjustment diverges. Floor it rather than emit infinities.
 _MIN_LEVERAGE_COMPLEMENT = 1e-10
@@ -203,11 +211,39 @@ def cluster_weights(v, groups, tau2=0.0):
         w_i = \frac{1}{n_j (v_i + \tau^2)},
 
     so a cluster's total weight is the *mean* of its members' weights rather
-    than their sum. Duplicated estimates therefore no longer buy influence,
-    while genuinely more precise clusters still count more. This is the
-    "correlated effects" weighting of :footcite:t:`hedges2010robust`, as
-    implemented in the R package `robumeta
-    <https://cran.r-project.org/package=robumeta>`_.
+    than their sum. Replication therefore stops buying influence in proportion
+    to row count, while genuinely more precise clusters still count more.
+
+    This follows the "correlated effects" weighting of
+    :footcite:t:`hedges2010robust`, but is not identical to the version in the R
+    package `robumeta <https://cran.r-project.org/package=robumeta>`_
+    :footcite:p:`fisher2015robumeta`, which assigns every row in a cluster the
+    *same* weight built from the cluster's mean variance,
+
+    .. math::
+        w_{ij}^{\text{robumeta}} = \frac{1}{n_j(\bar{v}_j + \tau^2)},
+        \qquad \bar{v}_j = \frac{1}{n_j}\sum_i v_{ij}.
+
+    The two agree exactly for singleton clusters and for clusters whose ``v`` is
+    constant, and differ otherwise: this function's cluster total is
+    :math:`\operatorname{mean}_i(1/v_i)` while robumeta's is
+    :math:`1/\operatorname{mean}_i(v_i)`, so by the arithmetic-harmonic mean
+    inequality this function never gives a cluster *less* total weight than
+    robumeta does. Keeping the row-specific :math:`v_i` preserves genuine
+    precision differences between rows; robumeta equalizes them because its
+    working model assumes :math:`v_{ij} \approx v_j` within a cluster. Expect
+    the weights to differ when within-cluster variances differ.
+
+    Notes
+    -----
+    Invariance to duplication is exact only when the duplicated row's precision
+    equals its cluster's mean precision -- which is automatic when ``v`` is
+    constant within the cluster. With heterogeneous within-cluster variances,
+    duplicating an above-average-precision row still raises its cluster's total
+    weight somewhat (and duplicating a below-average one lowers it). This is a
+    property of correlated-effects weighting rather than of this implementation;
+    robumeta behaves the same way. Use ``weight_scheme="group"`` if one row per
+    cluster is what the design actually warrants.
 
     Parameters
     ----------
@@ -771,7 +807,28 @@ def _cr2_scores(X, w, resid, group_members, bread):
 
     with :math:`\tilde{X}_j = W_j^{1/2} X_j` and :math:`M = (X'WX)^{-1}`.
     Singleton clusters reduce to the familiar scalar :math:`1/\sqrt{1 - h_j}`,
-    i.e. HC2.
+    i.e. HC2 :footcite:p:`mackinnon1985some`.
+
+    "Exactly unbiased" is always with respect to a *working model* for the error
+    covariance, which the analyst chooses. Bell and McCaffrey pick :math:`A_j` to
+    satisfy :math:`A_j (I - H)_j \Phi (I - H)_j' A_j' = \Phi_j`; the form above is
+    the solution for :math:`\Phi = I` in the whitened metric, i.e. under the
+    assumption that the weights are correct and the observations independent --
+    the same assumption the sandwich exists to avoid relying on. That is not
+    circular so much as pragmatic: simulation shows the correction helps
+    substantially even when the working model is wrong
+    :footcite:p:`tipton2015small,imbens2016robust`, and its influence fades as the
+    number of clusters grows. This form coincides with the correlated-effects
+    adjustment :math:`A_j^C` of :footcite:t:`fisher2015robumeta`.
+
+    Because CR2 targets unbiasedness rather than conservatism, it is *not*
+    guaranteed to exceed CR0. It does for singleton clusters, where the
+    adjustment is a scalar :math:`\ge 1` applied to each score; for larger
+    clusters the score is a projection of the inflated residuals, and in a small
+    fraction of designs a given coefficient's CR2 variance comes out below its
+    CR0 counterpart. :footcite:t:`pustejovsky2018small` place CR2 between CR1,
+    which under-corrects, and CR3 :footcite:p:`mancl2001covariance`, which
+    over-corrects.
 
     Implemented from the published formulation rather than ported; the R
     package `clubSandwich <https://cran.r-project.org/package=clubSandwich>`_
@@ -862,11 +919,20 @@ def satterthwaite_dof(X, w, groups, inv_cov=None):
     is unbalanced at the group level -- a handful of groups carrying the only
     non-zero values of a predictor, say -- the effective sample size for that
     coefficient is far smaller than :math:`m - p` and the test becomes badly
-    anti-conservative. :footcite:t:`tipton2015small` showed this and proposed
-    matching moments instead, which is what this function computes and what the
-    R packages `clubSandwich <https://cran.r-project.org/package=clubSandwich>`_
+    anti-conservative.
+
+    The remedy is to match the first two moments of the variance estimate to a
+    scaled chi-squared, which is what this function computes and what the R
+    packages `clubSandwich <https://cran.r-project.org/package=clubSandwich>`_
     :footcite:p:`pustejovsky2018small` and `robumeta
-    <https://cran.r-project.org/package=robumeta>`_ use by default.
+    <https://cran.r-project.org/package=robumeta>`_
+    :footcite:p:`fisher2015robumeta` use by default. Credit divides three ways:
+    the moment-matching approximation is :footcite:t:`satterthwaite1946approximate`
+    (and, independently, :footcite:t:`welch1951comparison`, which is why it is
+    often called Welch-Satterthwaite); applying it to cluster-robust variance
+    estimates is :footcite:t:`bell2002bias`; and establishing that it works for
+    *meta-regression*, together with the guidance on when it does not, is
+    :footcite:t:`tipton2015small`.
 
     For a single coefficient :math:`c'\beta`, the CR2 variance estimate is a
     quadratic form :math:`u'\left(\sum_j g_jg_j'\right)u` in the whitened data
@@ -1048,7 +1114,27 @@ def satterthwaite_dof(X, w, groups, inv_cov=None):
         )
 
     dof = np.where(np.isfinite(dof), dof, 1.0)
-    return np.maximum(dof, 1.0)
+    dof = np.maximum(dof, 1.0)
+
+    # A comfortable group count does not imply usable degrees of freedom, so
+    # this has to be checked on the dof themselves rather than on m.
+    low = dof < MIN_DOF_FOR_SATTERTHWAITE
+    if np.any(low):
+        predictors = sorted(set(np.flatnonzero(low.any(axis=1)).tolist()))
+        warnings.warn(
+            f"Satterthwaite degrees of freedom below {MIN_DOF_FOR_SATTERTHWAITE} "
+            f"for predictor(s) {predictors} (smallest {dof[low].min():.2f}). The "
+            "approximation is only known to control the Type I error rate above "
+            "about that value, so the corresponding p-values and intervals are "
+            "outside their validated range and should be read as a diagnostic "
+            "rather than a result. This usually means a group-level predictor is "
+            "carried by very few groups; more groups on the scarce side of the "
+            "predictor is the remedy, not a different estimator.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    return dof
 
 
 def cluster_robust_cov(
@@ -1100,10 +1186,19 @@ def cluster_robust_cov(
         Default = 0.
     small_sample : :obj:`bool`, optional
         Whether to apply the ``m / (m - p)`` small-sample scaling, where m is
-        the number of groups and p the number of predictors
-        :footcite:p:`tipton2015small`. Only used by ``method="CR0"``; CR2
-        corrects for leverage directly, so the two would double-count.
-        Default = True.
+        the number of groups and p the number of predictors. Only used by
+        ``method="CR0"``; CR2 corrects for leverage directly, so the two would
+        double-count. Default = True.
+
+        This is the original adjustment of :footcite:t:`hedges2010robust`,
+        :math:`A_j = [m / (m - p)]^{1/2} I_j`. Note that it is **not**
+        ``clubSandwich``'s ``CR1``, which uses :math:`m / (m - 1)`, nor Stata's
+        ``CR1S``, which uses :math:`mK / [(m - 1)(K - p)]`; enabling it will not
+        reproduce another package's ``CR1`` column. It is retained for
+        reproducing analyses that predate the leverage-based corrections --
+        :footcite:t:`fisher2015robumeta` report that simulations find this
+        adjustment "inadequate except in very specific cases", which is why
+        ``method="CR2"`` is the default.
     inv_cov : None or :obj:`numpy.ndarray` of shape (P, P, D), optional
         The model-based inverse covariance ``(X'WX)^-1``, as returned by
         :func:`~pymare.stats.weighted_least_squares` with ``return_cov=True``.
@@ -1145,6 +1240,17 @@ def cluster_robust_cov(
     single residual, and no residual adjustment fully rescues it. Weighting the
     estimates with :func:`~pymare.stats.cluster_weights` levels the weight
     across groups and is far more effective than any choice of ``method``.
+
+    For the same reason, a comfortable group count is *not* evidence that the
+    small-sample corrections are unnecessary. :footcite:t:`pustejovsky2018small`
+    put it directly: because the degrees of freedom are covariate-dependent, it
+    is not possible to decide whether a correction is needed from the number of
+    groups alone. :footcite:t:`imbens2016robust` find these corrections still
+    improve coverage materially at fifty or more groups, and both they and
+    :footcite:t:`tipton2015small` recommend using ``method="CR2"`` with the
+    Satterthwaite degrees of freedom routinely rather than only when ``m`` looks
+    small. Read :func:`~pymare.stats.satterthwaite_dof` before the p-value, not
+    the group count.
 
     References
     ----------

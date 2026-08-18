@@ -2,7 +2,7 @@
 
 import sys
 from abc import ABCMeta, abstractmethod
-from inspect import getfullargspec
+from inspect import getfullargspec, signature
 from warnings import warn
 
 import numpy as np
@@ -16,6 +16,7 @@ from ..stats import (
     cluster_weights,
     collapse_clusters,
     collapse_clusters_by_n,
+    encode_groups,
     ensure_2d,
     satterthwaite_dof,
     weighted_least_squares,
@@ -48,8 +49,9 @@ def _resolve_weights(v, groups, tau2, weight_scheme):
 def _validate_group_design(X, groups):
     """Reject group aggregation when predictors vary within a group."""
     groups = np.asarray(groups).ravel()
-    for group in np.unique(groups):
-        member_X = X[groups == group]
+    codes, labels = encode_groups(groups, n_observations=groups.shape[0])
+    for group in range(labels.size):
+        member_X = X[codes == group]
         # A relative tolerance, not bit-equality: a group-level predictor
         # built by arithmetic (a ratio, a centered score) is constant in intent
         # but can differ in the last bits across a group's rows.
@@ -134,7 +136,7 @@ def _tau2_inputs(y, v, X, groups, weight_scheme, rho, by_n=False):
     if weight_scheme not in ("cluster", "group") or groups is None:
         return y, v, X
 
-    n_groups = np.unique(np.asarray(groups).ravel()).size
+    n_groups = encode_groups(np.asarray(groups).ravel())[1].size
     if n_groups <= X.shape[1]:
         return y, v, X
 
@@ -186,6 +188,7 @@ def _cluster_robust_inv_cov(y, v, X, beta, groups, tau2=0.0, inv_cov=None, w=Non
         return None, None, None
 
     groups = np.asarray(groups).ravel()
+    n_groups = encode_groups(groups, n_observations=y.shape[0])[1].size
     robust_cov = cluster_robust_cov(y, v, X, beta, groups, tau2=tau2, inv_cov=inv_cov, w=w)
     weights = np.asarray(1.0 / (v + tau2) if w is None else w, dtype=float)
     # v may be a single shared column while y has many. cluster_robust_cov
@@ -197,7 +200,7 @@ def _cluster_robust_inv_cov(y, v, X, beta, groups, tau2=0.0, inv_cov=None, w=Non
     # Callers that cannot promise that must pass None, in which case
     # satterthwaite_dof rebuilds the bread from ``weights`` itself.
     dof = satterthwaite_dof(X, weights, groups, inv_cov=inv_cov)
-    return robust_cov, int(np.unique(groups).size), dof
+    return robust_cov, n_groups, dof
 
 
 @wrapt.decorator
@@ -207,6 +210,14 @@ def _loopable(wrapped, instance, args, kwargs):
     Designed to handle naive looping over the 2nd dimension of y/v/n inputs, and reconstruction of
     outputs.
     """
+    # fit() is routinely called positionally; binding against the wrapped
+    # signature makes both forms work rather than raising KeyError('y').
+    if args:
+        bound = signature(wrapped).bind(*args, **kwargs)
+        bound.apply_defaults()
+        kwargs = dict(bound.arguments)
+        args = ()
+
     n_iter = kwargs["y"].shape[1]
     if n_iter > 10:
         warn(
@@ -998,7 +1009,9 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     def _reml_nll(self, theta, y, n, X):
         """REML negative log-likelihood for meta-regression model."""
         ll_ = self._ml_nll(theta, y, n, X)
-        sigma2, tau2 = theta[-2:]
+        # Clamp as _ml_nll does; the Bounds keep these non-negative today, but
+        # the two halves of the objective should not disagree about that.
+        sigma2, tau2 = np.maximum(theta[-2:], 0.0)
         w = 1 / (tau2 + sigma2 / n)
         F = (X * w).T.dot(X)
         return ll_ + 0.5 * np.log(np.linalg.det(F))
@@ -1122,7 +1135,7 @@ class StanMetaRegression(BaseEstimator):
 
         N = y.shape[0]
         groups = groups or np.arange(1, N + 1, dtype=int)
-        K = len(np.unique(groups))
+        K = encode_groups(np.asarray(groups).ravel())[1].size
 
         data = {
             "K": K,

@@ -1,5 +1,7 @@
 """Tests for dependent-estimate support (cluster-robust variance, Brown's method)."""
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -18,6 +20,7 @@ from pymare.estimators import (
 from pymare.estimators.estimators import _group_n_inputs
 from pymare.stats import (
     DEFAULT_CLUSTER_RHO,
+    MIN_DOF_FOR_SATTERTHWAITE,
     _cr2_low_rank_apply,
     _cr2_low_rank_factors,
     _symmetric_sqrt,
@@ -347,6 +350,44 @@ def test_dataset_accepts_group_labels_alongside_a_dataframe():
     frame = pd.DataFrame({"y": np.arange(6.0), "v": np.ones(6)})
     dataset = Dataset(data=frame, g=np.array([0, 0, 1, 1, 2, 2]))
     assert np.array_equal(np.ravel(dataset.g), [0, 0, 1, 1, 2, 2])
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+@pytest.mark.parametrize("weight_scheme", ["individual", "cluster", "group"])
+def test_estimators_accept_unsortable_group_labels(weight_scheme):
+    """Any hashable label, as encode_groups documents -- not just sortable ones.
+
+    np.unique needs an ordering, so a mix of str and int raised TypeError from
+    inside the weight-scheme helpers even though the group primitives handle it.
+    """
+    rng = np.random.RandomState(0)
+    y = rng.randn(12, 1)
+    mixed = np.array([1, 1, "b", "b", 2, 2, "d", "d", 3, 3, "f", "f"], dtype=object)
+
+    fitted = DerSimonianLaird(weight_scheme=weight_scheme).fit(
+        y=y, v=np.full((12, 1), 0.2), X=np.ones((12, 1)), g=mixed
+    )
+    assert fitted.n_clusters_ == 6
+
+    integers = np.repeat(np.arange(6), 2)
+    equivalent = DerSimonianLaird(weight_scheme=weight_scheme).fit(
+        y=y, v=np.full((12, 1), 0.2), X=np.ones((12, 1)), g=integers
+    )
+    assert np.allclose(fitted.params_["fe_params"], equivalent.params_["fe_params"])
+
+
+def test_loopable_estimators_accept_positional_arguments():
+    """fit(y, v, X) is the documented call signature and must work."""
+    rng = np.random.RandomState(0)
+    y = rng.randn(10, 1)
+    v = np.abs(rng.randn(10, 1)) + 0.5
+    X = np.ones((10, 1))
+
+    positional = VarianceBasedLikelihoodEstimator().fit(y, v, X)
+    keyword = VarianceBasedLikelihoodEstimator().fit(y=y, v=v, X=X)
+
+    assert np.allclose(positional.params_["fe_params"], keyword.params_["fe_params"])
+    assert np.allclose(positional.params_["tau2"], keyword.params_["tau2"])
 
 
 def _dependent_data(rng, n_groups=10, n_per_group=3, n_datasets=4, rho_sd=1.0):
@@ -1115,6 +1156,41 @@ def test_satterthwaite_dof_collapses_for_unbalanced_group_level_predictors():
     assert np.isclose(slopes[0], m - 2, rtol=0.05)
     assert np.all(np.diff(slopes) < 0)
     assert slopes[-1] < 2.0
+
+
+def test_satterthwaite_dof_warns_below_the_validated_range():
+    """A usable group count can still give dof outside the validated range.
+
+    Tipton (2015) established the approximation only holds its level above a dof
+    of roughly four. The number of groups does not reveal when that floor is
+    crossed -- here 20 groups produce a dof near two for the slope -- so the
+    check has to be on the dof themselves.
+    """
+    m, size = 20, 4
+    groups = np.repeat(np.arange(m), size)
+    x = np.repeat((np.arange(m) < 2).astype(float), size)
+    X = np.c_[np.ones(m * size), x]
+
+    with pytest.warns(UserWarning, match="degrees of freedom below"):
+        dof = satterthwaite_dof(X, np.ones(m * size), groups)
+
+    assert dof[1, 0] < MIN_DOF_FOR_SATTERTHWAITE
+    # The intercept is comfortably identified, so the warning names only the slope.
+    assert dof[0, 0] > MIN_DOF_FOR_SATTERTHWAITE
+
+
+def test_satterthwaite_dof_is_quiet_when_the_design_is_balanced():
+    """The warning must not fire on a design that is genuinely well identified."""
+    m, size = 20, 4
+    groups = np.repeat(np.arange(m), size)
+    x = np.repeat((np.arange(m) < 10).astype(float), size)
+    X = np.c_[np.ones(m * size), x]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        dof = satterthwaite_dof(X, np.ones(m * size), groups)
+
+    assert np.all(dof > MIN_DOF_FOR_SATTERTHWAITE)
 
 
 def test_satterthwaite_dof_warns_when_one_group_determines_a_coefficient():

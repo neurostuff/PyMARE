@@ -229,6 +229,15 @@ class MetaRegressionResults:
         resulting test rejects far too often. See
         :func:`~pymare.stats.satterthwaite_dof`.
 
+        Read these before the p-values. :footcite:t:`tipton2015small` established
+        that the approximation holds its nominal level only while the degrees of
+        freedom exceed roughly ``pymare.stats.MIN_DOF_FOR_SATTERTHWAITE``; below
+        that the reference distribution is outside its validated range and
+        :func:`~pymare.stats.satterthwaite_dof` warns. A comfortable number of
+        groups does not guarantee comfortable degrees of freedom, because these
+        depend on how evenly each *predictor* is spread across groups
+        :footcite:p:`pustejovsky2018small,imbens2016robust`.
+
         References
         ----------
         .. footbibliography::
