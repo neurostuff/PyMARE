@@ -153,8 +153,6 @@ def main():
             naive = timeit(lambda: estimator().fit(y=y, v=v, X=X))
             robust = timeit(lambda: estimator().fit(y=y, v=v, X=X, g=groups))
 
-            # Reported as a multiple, not a percentage: the overhead is a
-            # factor of tens, and "+4000%" is harder to read than "40x".
             print(
                 f"{name:22s} {n_estimates:5d} {n_datasets:8d} {n_groups:5d} "
                 f"{naive:9.3f} {robust:10.3f} {robust / naive:8.1f}x"

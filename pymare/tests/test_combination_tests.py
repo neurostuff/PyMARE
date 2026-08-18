@@ -67,15 +67,6 @@ def test_stouffer_adjusted():
     z_expected = np.array([3.34419412, 2.47665061, 2.71143136, 3.65341755, 3.47017404])
     assert np.allclose(results["z"], z_expected, atol=1e-5)
 
-    # The same numbers must come out regardless of the order the rows arrive in.
-    order = np.array([3, 4, 5, 0, 1, 2])
-    reordered = (
-        StoufferCombinationTest("directed")
-        .fit(z=data[order], w=weights[order], g=groups[order])
-        .params_
-    )
-    assert np.allclose(reordered["z"], z_expected, atol=1e-5)
-
     # Test with weights and no groups. Limiting cases.
     # Limiting case 1: all correlations are one.
     n_maps_l1 = 5

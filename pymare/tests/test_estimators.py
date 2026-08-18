@@ -116,6 +116,9 @@ def test_hedges_estimator(dataset):
     # Check output values
     assert np.allclose(beta.ravel(), [-0.1066, 0.7704], atol=1e-4)
     assert np.allclose(tau2, 11.3881, atol=1e-4)
+    assert np.allclose(fe_stats["se"].ravel(), [3.0479, 1.1335], atol=1e-4)
+    # The unweighted fit that produces tau^2 would have given these instead.
+    assert not np.allclose(fe_stats["se"].ravel(), [0.8639, 0.3217], atol=1e-4)
 
 
 def test_2d_hedges(dataset_2d):
@@ -304,18 +307,3 @@ def test_model_based_cov_matches_the_fitted_weights(dataset, estimator):
     expected = np.linalg.pinv(dataset.X.T @ np.diag(w.ravel()) @ dataset.X)
 
     assert np.allclose(results.fe_se.ravel(), np.sqrt(np.diag(expected)))
-
-
-def test_hedges_reports_the_weighted_standard_errors(dataset):
-    """Regression test for the Hedges covariance, pinned to explicit values.
-
-    tau^2 and the coefficients are unchanged by that fix, so they are asserted here
-    too: they still match the metafor ground truth used by ``test_hedges_estimator``.
-    """
-    results = Hedges().fit_dataset(dataset).summary()
-
-    assert np.allclose(results.fe_params.ravel(), [-0.1066, 0.7704], atol=1e-4)
-    assert np.allclose(np.ravel(results.tau2), 11.3881, atol=1e-4)
-    assert np.allclose(results.fe_se.ravel(), [3.0479, 1.1335], atol=1e-4)
-    # The unweighted fit that produces tau^2 would have given these instead.
-    assert not np.allclose(results.fe_se.ravel(), [0.8639, 0.3217], atol=1e-4)
