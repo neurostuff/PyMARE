@@ -7,7 +7,9 @@ need neither, so they run in the ordinary unit job on every platform, which is
 where the defects this file now pins would have been caught years earlier.
 """
 
+import ntpath
 import os.path as op
+import posixpath
 import sys
 import warnings
 
@@ -274,7 +276,21 @@ def test_fit_is_quiet_when_there_are_no_divergences():
         est.fit(np.arange(4.0), np.ones(4), np.ones((4, 1)))
 
 
-def test_compile_falls_back_when_the_package_directory_is_read_only(monkeypatch, tmp_path):
+def test_fake_home_redirects_expanduser_on_every_platform(fake_home):
+    """The home-directory redirect must hold under Windows path rules too.
+
+    ntpath is importable everywhere, so this catches on Linux and macOS the
+    mistake that only shows up on a Windows runner: setting HOME alone leaves
+    ntpath.expanduser pointing at the real user profile, so a test asserting a
+    temporary path passes on two platforms and fails on the third -- after
+    having written into the runner's actual home directory.
+    """
+    assert posixpath.expanduser("~") == str(fake_home)
+    assert ntpath.expanduser("~") == str(fake_home)
+    assert op.expanduser("~") == str(fake_home)
+
+
+def test_compile_falls_back_when_the_package_directory_is_read_only(monkeypatch, fake_home):
     """An unwritable site-packages must not make the estimator unusable.
 
     CmdStanPy compiles beside the .stan source, which lives inside the installed
@@ -288,7 +304,6 @@ def test_compile_falls_back_when_the_package_directory_is_read_only(monkeypatch,
     cover could never fire.
     """
     cmdstanpy = pytest.importorskip("cmdstanpy")
-    monkeypatch.setenv("HOME", str(tmp_path))
     compiled_from = []
 
     def fake_model(stan_file=None, exe_file=None, force_compile=False):
@@ -297,7 +312,7 @@ def test_compile_falls_back_when_the_package_directory_is_read_only(monkeypatch,
             raise ValueError(f"Failed to compile Stan model '{stan_file}'.")
         return "compiled"
 
-    monkeypatch.setattr(cmdstanpy, "cmdstan_path", lambda: str(tmp_path))
+    monkeypatch.setattr(cmdstanpy, "cmdstan_path", lambda: str(fake_home))
     monkeypatch.setattr(cmdstanpy, "CmdStanModel", fake_model)
 
     est = StanMetaRegression()
@@ -308,26 +323,25 @@ def test_compile_falls_back_when_the_package_directory_is_read_only(monkeypatch,
     # The second attempt compiles a *copy*, not the packaged file: exe_file
     # names an executable to reuse rather than a destination to build into.
     assert compiled_from[0] == STAN_MODEL_PATH
-    assert compiled_from[1] == op.join(str(tmp_path), ".pymare", "stan", "meta_regression.stan")
+    assert compiled_from[1] == op.join(str(fake_home), ".pymare", "stan", "meta_regression.stan")
     assert op.exists(compiled_from[1]), "the fallback must copy the model somewhere writable"
     assert op.getmtime(compiled_from[1]) == op.getmtime(
         STAN_MODEL_PATH
     ), "copy2 preserves the mtime so the cached build is not invalidated every run"
 
 
-def test_compile_reports_the_original_error_when_the_fallback_also_fails(monkeypatch, tmp_path):
+def test_compile_reports_the_original_error_when_the_fallback_also_fails(monkeypatch, fake_home):
     """A broken model must not be reported as a permissions problem.
 
     Both compiles fail for a model that does not parse, and it is the first
     error that names the real cause.
     """
     cmdstanpy = pytest.importorskip("cmdstanpy")
-    monkeypatch.setenv("HOME", str(tmp_path))
 
     def always_fails(stan_file=None, exe_file=None, force_compile=False):
         raise ValueError(f"Syntax error in '{stan_file}'")
 
-    monkeypatch.setattr(cmdstanpy, "cmdstan_path", lambda: str(tmp_path))
+    monkeypatch.setattr(cmdstanpy, "cmdstan_path", lambda: str(fake_home))
     monkeypatch.setattr(cmdstanpy, "CmdStanModel", always_fails)
 
     est = StanMetaRegression()

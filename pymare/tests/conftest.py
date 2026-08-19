@@ -391,6 +391,30 @@ def two_samp_data():
 # -----------------------------------------------------------------------------
 
 
+@pytest.fixture
+def fake_home(tmp_path, monkeypatch):
+    """Point ``os.path.expanduser("~")`` at a temporary directory, on any platform.
+
+    Returns
+    -------
+    :obj:`pathlib.Path`
+        The directory ``~`` now expands to.
+
+    Notes
+    -----
+    Both variables are needed. POSIX ``expanduser`` reads ``HOME``; Windows
+    reads ``USERPROFILE`` and ignores ``HOME`` entirely, falling back to
+    ``HOMEDRIVE``/``HOMEPATH`` and then to leaving ``~`` unexpanded. Setting
+    only ``HOME`` therefore looks like it works everywhere while silently
+    leaving the real profile in place on Windows -- which is what let a test of
+    the Stan compile fallback assert against a temporary path on Linux and macOS
+    while writing into the CI runner's actual home directory on Windows.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    return tmp_path
+
+
 @pytest.fixture(scope="package")
 def planted_hierarchical_dataset():
     """Simulate a Dataset from the model ``meta_regression.stan`` encodes.
