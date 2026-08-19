@@ -51,28 +51,17 @@ jobs:
       - name: "Regenerate the reference values from robumeta"
         run: validation/robumeta/regenerate.sh
 
-      - name: "Require the reference values to be unchanged"
+      # Compared numerically rather than with git diff: the values are written at
+      # full double precision, and which BLAS kernel R's image picks depends on
+      # the runner's CPU, so two runners disagree in the last bits with the R and
+      # robumeta versions identical. See the tolerances in compare_reference.py.
+      - name: "Require the reference values to still match robumeta"
         run: |
-          if git diff --quiet -- pymare/tests/data/robumeta_reference.json; then
-              echo "The pinned robumeta reference values still match robumeta." \
-                  >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-          fi
-          {
-              echo "## robumeta reference values moved"
-              echo
-              echo "\`validation/robumeta/regenerate.sh\` produced different numbers"
-              echo "than the ones pinned in"
-              echo "\`pymare/tests/data/robumeta_reference.json\`. Either the"
-              echo "correlated-effects implementation changed and the pin needs"
-              echo "regenerating, or the two implementations no longer agree."
-              echo
-              echo '```diff'
-              git diff -- pymare/tests/data/robumeta_reference.json
-              echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "::error::The regenerated robumeta reference values differ from the pinned ones."
-          exit 1
+          git show HEAD:pymare/tests/data/robumeta_reference.json > "${RUNNER_TEMP}/pinned.json"
+          python validation/robumeta/compare_reference.py \
+              "${RUNNER_TEMP}/pinned.json" \
+              pymare/tests/data/robumeta_reference.json \
+              | tee -a "$GITHUB_STEP_SUMMARY"
 
       # Run the alignment tests against the values just regenerated, so this
       # job checks PyMARE against robumeta itself and not only against the pin.
