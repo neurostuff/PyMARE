@@ -11,12 +11,6 @@ on:
     # Run tests every Sunday at 12am, to catch breakage from new dependency
     # releases rather than from a change to PyMARE.
     - cron: "0 0 * * 0"
-  # GitHub turns off a workflow with a schedule trigger once the repository has
-  # been quiet for 60 days, and a disabled workflow stops answering push and
-  # pull_request too -- which is how this one sat switched off from 2025-06-28
-  # until it was re-enabled by hand. Being able to dispatch it means the next
-  # time that happens, re-enabling is enough to get a run without pushing a
-  # commit to prove it works.
   workflow_dispatch:
 
 permissions:
@@ -27,19 +21,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # One place to change how the suite is invoked. --cov-append lets each job
-  # write a coverage file that upload_to_codecov merges.
   PYTEST_COMMON_ARGS: --cov-append --cov-report=xml --cov=pymare
   # Everything except the tests that sample, whose Stan model has to be compiled
-  # and so costs minutes rather than seconds. They get the job below to
-  # themselves. The tests that only check how PyMARE's inputs are translated
-  # into Stan's data block are deliberately unmarked, so they run here on every
-  # platform without needing CmdStan.
+  # and so costs minutes rather than seconds.
   PYTEST_UNIT_MARKERS: not stan
   PYTEST_STAN_MARKERS: stan
-  # Pinned rather than "latest": an unpinned version makes the cache key move on
-  # its own and makes a red run ambiguous between a PyMARE change and a Stan
-  # release. Same reasoning as the pinned R image in validation/robumeta.
   CMDSTAN_VERSION: "2.36.0"
 
 jobs:
@@ -120,11 +106,6 @@ jobs:
     if: ${{ needs.check_skip.outputs.skip == 'false' }}
     runs-on: ubuntu-latest
     env:
-      # Read by the pytest_collection_modifyitems hook in
-      # pymare/tests/conftest.py, which turns a missing or broken CmdStan into a
-      # failure rather than a skip. The previous gate probed for a module name
-      # that never existed, so this job passed for years while running none of
-      # the tests it exists to run, and nothing in a green log said so.
       PYMARE_REQUIRE_CMDSTAN: "1"
     defaults:
       run:

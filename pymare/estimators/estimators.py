@@ -1573,9 +1573,8 @@ def _build_stan_data(y, v, X, groups=None, tau_prior_scale=None):
     nowhere else, so ``fit`` carries no downstream conditionals and the
     translation is testable without a CmdStan installation.
 
-    Two of those decisions are conversions, not conveniences. ``sigma`` is
-    ``sqrt(v)``, because Stan's ``normal`` takes a standard deviation and PyMARE
-    stores variances. ``id`` is 1-based consecutive codes from
+    ``sigma`` is ``sqrt(v)``, because Stan's ``normal`` takes a standard
+    deviation and PyMARE stores variances. ``id`` is 1-based consecutive codes from
     :func:`~pymare.stats.encode_groups`, because the Stan program declares it
     ``int<lower=1, upper=K>`` -- which is why arbitrary scalar labels are
     accepted here.
@@ -1585,7 +1584,7 @@ def _build_stan_data(y, v, X, groups=None, tau_prior_scale=None):
         raise ValueError(
             "The StanMetaRegression estimator currently does "
             "not support 2-dimensional inputs. Passed y has "
-            "shape {}.".format(y.shape)
+            f"shape {y.shape}."
         )
     y = np.asarray(y, dtype=float).reshape(-1)
     n_observations = y.shape[0]
@@ -1698,7 +1697,7 @@ class StanMetaRegression(BaseEstimator):
     .. [2] Stan Development Team. Prior Choice Recommendations.
            https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations
 
-    .. versionchanged:: 0.0.5
+    .. versionchanged:: 0.0.11
 
         - The backend moved from PyStan 3 to CmdStanPy. PyStan's sampler argument
           names (``num_samples``, ``num_warmup``, ``num_chains``, ``num_thin``)
