@@ -93,10 +93,18 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: "Display Python version"
         run: python -c "import sys; print(sys.version)"
+      # The stan extra, not just tests: it brings in ArviZ, and the results
+      # container is ArviZ-only code that nothing here could otherwise execute.
+      # Without it the whole of BayesianMetaRegressionResults is reachable only
+      # from the single Stan job below, so its coverage -- and the ArviZ 0.x
+      # versus 1.x handling in particular -- would rest on one job on one
+      # Python. cmdstanpy comes along too but stays idle: it is pure Python,
+      # CmdStan is not installed here, and the tests that sample are excluded by
+      # the marker filter regardless.
       - name: "Install PyMARE"
         run: |
           python -m pip install --progress-bar off --upgrade pip setuptools wheel
-          python -m pip install -e .[tests]
+          python -m pip install -e .[tests,stan]
       - name: "Run tests"
         run: python -m pytest -m "${PYTEST_UNIT_MARKERS}" ${PYTEST_COMMON_ARGS}
       - name: "Upload coverage"
