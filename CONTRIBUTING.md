@@ -141,6 +141,11 @@ To reproduce what CI does, compare two commits:
 asv continuous --factor 1.3 --split master HEAD
 ```
 
+The threshold is a tradeoff against measurement noise, so a flagged benchmark is
+worth re-running before it is believed -- a loaded machine can move the cheapest
+benchmarks by more than a real regression would. Re-running the workflow is
+enough; `workflow_dispatch` also takes a different factor if you want one.
+
 `benchmarks/bench_cluster_robust.py` is not part of the asv suite. It is a
 standalone report on where the time in a robust fit goes; run it with
 `python benchmarks/bench_cluster_robust.py`.
