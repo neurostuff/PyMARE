@@ -98,14 +98,37 @@ environment does not have:
 
 | Target | What it runs | Needs |
 | --- | --- | --- |
-| `make unittest` | everything except the Stan tests | nothing extra |
-| `make test_stan` | the Stan estimator tests | `pip install -e .[stan]` |
+| `make unittest` | everything except the Stan sampling tests | nothing extra |
+| `make test_stan` | the Stan sampling tests | `pip install -e .[stan]`, then `make install_cmdstan` |
 | `make test_robumeta` | the robumeta alignment tests | nothing extra |
 | `make check_robumeta_alignment` | regenerates the robumeta reference values | Docker |
 | `make lint` | flake8 over `pymare` and `benchmarks` | nothing extra |
 
 Each of these has a GitHub Actions job behind it, so a target that passes
 locally is the same check that runs on your pull request.
+
+`make test_stan` needs two installation steps rather than one: the `stan` extra
+brings in cmdstanpy, but CmdStan itself is a C++ build rather than a Python
+package, so `make install_cmdstan` fetches and builds it. That takes several
+minutes the first time and nothing thereafter.
+
+**Those tests skip locally when CmdStan is missing, but fail in CI.** The
+asymmetry is deliberate. A contributor without CmdStan should not see red, but a
+skip is indistinguishable from a pass in a CI log, and that is exactly how the
+Stan job passed for years while running none of the tests it existed to run --
+its gate probed for a module name that PyStan 3 never provided. The Stan job now
+sets `PYMARE_REQUIRE_CMDSTAN=1`, and the `pytest_collection_modifyitems` hook in
+`pymare/tests/conftest.py` fails the run outright, at collection, wherever that
+is set and CmdStan is missing.
+
+Only the tests that actually sample are marked `stan`. The ones that check how
+PyMARE's inputs are translated into Stan's data block need neither cmdstanpy nor
+CmdStan, so they are unmarked and run in the ordinary unit job on every
+platform.
+
+The model's accuracy is measured separately, in `validation/stan/`, which
+reports bias and credible-interval coverage across a grid of designs. That is
+not run in CI; see its README for what it measured and how to rerun it.
 
 ### Alignment with robumeta
 

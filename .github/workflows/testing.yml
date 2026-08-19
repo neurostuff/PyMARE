@@ -30,10 +30,17 @@ env:
   # One place to change how the suite is invoked. --cov-append lets each job
   # write a coverage file that upload_to_codecov merges.
   PYTEST_COMMON_ARGS: --cov-append --cov-report=xml --cov=pymare
-  # Everything except the Stan estimator, whose model has to be compiled and so
-  # costs minutes rather than seconds. It gets the job below to itself.
+  # Everything except the tests that sample, whose Stan model has to be compiled
+  # and so costs minutes rather than seconds. They get the job below to
+  # themselves. The tests that only check how PyMARE's inputs are translated
+  # into Stan's data block are deliberately unmarked, so they run here on every
+  # platform without needing CmdStan.
   PYTEST_UNIT_MARKERS: not stan
   PYTEST_STAN_MARKERS: stan
+  # Pinned rather than "latest": an unpinned version makes the cache key move on
+  # its own and makes a red run ambiguous between a PyMARE change and a Stan
+  # release. Same reasoning as the pinned R image in validation/robumeta.
+  CMDSTAN_VERSION: "2.36.0"
 
 jobs:
   # Determine if tests should be run based on commit message.
@@ -104,6 +111,13 @@ jobs:
     needs: check_skip
     if: ${{ needs.check_skip.outputs.skip == 'false' }}
     runs-on: ubuntu-latest
+    env:
+      # Read by the pytest_collection_modifyitems hook in
+      # pymare/tests/conftest.py, which turns a missing or broken CmdStan into a
+      # failure rather than a skip. The previous gate probed for a module name
+      # that never existed, so this job passed for years while running none of
+      # the tests it exists to run, and nothing in a green log said so.
+      PYMARE_REQUIRE_CMDSTAN: "1"
     defaults:
       run:
         shell: bash
@@ -117,6 +131,41 @@ jobs:
         run: |
           python -m pip install --progress-bar off --upgrade pip setuptools wheel
           python -m pip install -e .[tests,stan]
+      - name: "Cache CmdStan"
+        id: cache_cmdstan
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmdstan
+          # runner.arch is part of the key because CmdStan is a native build:
+          # restoring an x86_64 tree onto an arm64 runner fails confusingly.
+          key: cmdstan-${{ runner.os }}-${{ runner.arch }}-${{ env.CMDSTAN_VERSION }}
+      - name: "Install CmdStan"
+        if: steps.cache_cmdstan.outputs.cache-hit != 'true'
+        run: python -m cmdstanpy.install_cmdstan --version "${CMDSTAN_VERSION}" --cores 2
+      - name: "Cache the compiled model"
+        uses: actions/cache@v4
+        with:
+          # CmdStanPy compiles beside the .stan source, not under ~/.cmdstan, so
+          # this needs a cache entry of its own. The key covers all four inputs
+          # the executable depends on.
+          path: pymare/estimators/stan
+          key: >-
+            stanexe-${{ runner.os }}-${{ runner.arch }}-${{ env.CMDSTAN_VERSION }}-${{
+            hashFiles('pymare/estimators/stan/*.stan') }}
+      - name: "Check the Stan program with pedantic mode"
+        # Informational. Pedantic mode flags a parameter with no prior, which is
+        # what the old model's tau2 was, but it also flags beta's deliberately
+        # flat prior, so this reports rather than gates.
+        #
+        # Invoke stanc directly rather than cmdstanpy.compile_stan_file: that
+        # skips its work when an up-to-date executable exists, so with the model
+        # cache restored above it would silently check nothing on most runs.
+        # stanc only translates Stan to C++, which takes a fifth of a second and
+        # leaves the cached executable alone, so it always runs.
+        continue-on-error: true
+        run: |
+          STANC="$(python -c "import cmdstanpy, os; print(os.path.join(cmdstanpy.cmdstan_path(), 'bin', 'stanc'))")"
+          "${STANC}" --warn-pedantic --o=/dev/null pymare/estimators/stan/meta_regression.stan
       - name: "Run tests"
         run: python -m pytest -m "${PYTEST_STAN_MARKERS}" ${PYTEST_COMMON_ARGS}
       - name: "Upload coverage"

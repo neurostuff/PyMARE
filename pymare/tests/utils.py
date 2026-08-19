@@ -42,3 +42,40 @@ def load_robumeta_reference():
     """
     with open(op.join(get_test_data_path(), "robumeta_reference.json")) as fobj:
         return json.load(fobj)
+
+
+def cmdstan_is_available():
+    """Report whether the Stan estimator can actually be run here.
+
+    Returns
+    -------
+    :obj:`bool`
+        True when ``cmdstanpy`` imports *and* it can find a CmdStan
+        installation.
+
+    Notes
+    -----
+    Both halves matter. ``cmdstanpy`` installs cleanly from PyPI without
+    CmdStan, which is a C++ build rather than a Python package, so an import
+    check alone would report an environment as ready when it can only fail.
+
+    The failure this replaced was subtler still: the previous gate probed
+    ``find_spec("pystan")``, but PyStan 3 is distributed as ``pystan`` and
+    imported as ``stan``, so the probe was unsatisfiable and the estimator's
+    only real test skipped everywhere, including in the CI job that existed to
+    run it. A skip reads as a pass in a CI log, which is why the
+    ``pytest_collection_modifyitems`` hook in ``conftest.py`` consults this
+    function and fails the run wherever ``PYMARE_REQUIRE_CMDSTAN`` says Stan is
+    expected.
+    """
+    try:
+        import cmdstanpy
+    except ImportError:
+        return False
+
+    try:
+        cmdstanpy.cmdstan_path()
+    except Exception:
+        return False
+
+    return True

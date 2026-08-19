@@ -119,3 +119,10 @@ fmriprep.sqlite
 .vscode
 # asv benchmark environments and results
 .asv/
+
+# CmdStan build artifacts. CmdStanModel compiles the model in place, dropping
+# the executable and its intermediates next to the .stan source.
+pymare/estimators/stan/meta_regression
+pymare/estimators/stan/meta_regression.exe
+pymare/estimators/stan/*.hpp
+pymare/estimators/stan/*.o

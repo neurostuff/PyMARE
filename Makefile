@@ -1,4 +1,4 @@
-.PHONY: all_tests benchmark check_robumeta_alignment help lint test_robumeta test_stan unittest
+.PHONY: all_tests benchmark check_robumeta_alignment help install_cmdstan lint test_robumeta test_stan unittest
 
 # --cov-append matches what CI does, so a local run of two targets in a row
 # reports their combined coverage rather than only the last one's.
@@ -9,8 +9,9 @@ all_tests: lint unittest test_stan test_robumeta
 help:
 	@echo "Please use 'make <target>' where <target> is one of:"
 	@echo "  lint                       to run flake8 over pymare and the benchmarks"
-	@echo "  unittest                   to run every test except the Stan ones"
-	@echo "  test_stan                  to run the Stan estimator tests (needs the stan extra)"
+	@echo "  unittest                   to run every test except the Stan sampling ones"
+	@echo "  install_cmdstan            to install the CmdStan that test_stan needs"
+	@echo "  test_stan                  to run the Stan sampling tests (needs the stan extra and CmdStan)"
 	@echo "  test_robumeta              to run the robumeta alignment tests"
 	@echo "  check_robumeta_alignment   to regenerate the robumeta reference values (needs Docker)"
 	@echo "  benchmark                  to run the asv suite once in the current environment"
@@ -22,6 +23,13 @@ lint:
 unittest:
 	@python -m pytest -m "not stan" $(PYTEST_COV)
 
+# CmdStan is a C++ build rather than a Python package, so `pip install -e .[stan]`
+# gets cmdstanpy but not the CmdStan it drives. This is the missing second step.
+install_cmdstan:
+	@python -m cmdstanpy.install_cmdstan
+
+# Skips rather than fails when CmdStan is absent. CI sets PYMARE_REQUIRE_CMDSTAN=1
+# so that a job which is supposed to have it goes red instead of quietly empty.
 test_stan:
 	@python -m pytest -m "stan" $(PYTEST_COV)
 

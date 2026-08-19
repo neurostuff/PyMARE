@@ -1,0 +1,273 @@
+{
+  "replications": 100,
+  "seed": 20260818,
+  "elapsed_seconds": 583.2,
+  "cells": [
+    {
+      "name": "groups=5",
+      "config": {
+        "n_groups": "5",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "beta_bias": -0.0021201448821405065,
+      "beta_rmse": 0.12639884294523676,
+      "beta_coverage": 0.925,
+      "coverage_se": 0.01862458053218917,
+      "tau2_bias": 0.11401999999999997,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 63
+    },
+    {
+      "name": "groups=20",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "beta_bias": -0.002885654421913514,
+      "beta_rmse": 0.05071385238690838,
+      "beta_coverage": 0.95,
+      "coverage_se": 0.015411035007422448,
+      "tau2_bias": 0.017379999999999993,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "groups=50",
+      "config": {
+        "n_groups": "50",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "beta_bias": -0.002236553636109281,
+      "beta_rmse": 0.03725240459012178,
+      "beta_coverage": 0.955,
+      "coverage_se": 0.014658615214269054,
+      "tau2_bias": 0.010019999999999996,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "tau2=0",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.0",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "beta_bias": 0.000234083355221673,
+      "beta_rmse": 0.02752582425327561,
+      "beta_coverage": 0.965,
+      "coverage_se": 0.012995191418367032,
+      "tau2_bias": 0.004270000000000001,
+      "tau2_truth": 0.0,
+      "fits_with_divergences": 11
+    },
+    {
+      "name": "tau2=0.1",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "beta_bias": -0.00645483896524104,
+      "beta_rmse": 0.0624116445444163,
+      "beta_coverage": 0.94,
+      "coverage_se": 0.01679285562374667,
+      "tau2_bias": 0.020149999999999998,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "tau2=1",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "1.0",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "beta_bias": 0.015128182286879798,
+      "beta_rmse": 0.1552137746779895,
+      "beta_coverage": 0.935,
+      "coverage_se": 0.01743201078476031,
+      "tau2_bias": 0.08488,
+      "tau2_truth": 1.0,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "singletons",
+      "config": {
+        "n_groups": "20",
+        "group_size": "1",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "beta_bias": 0.006795324568292994,
+      "beta_rmse": 0.08982016398564083,
+      "beta_coverage": 0.96,
+      "coverage_se": 0.013856406460551024,
+      "tau2_bias": 0.015779999999999995,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 3
+    },
+    {
+      "name": "unequal groups",
+      "config": {
+        "n_groups": "20",
+        "group_size": "unequal",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "beta_bias": -8.534368402361576e-05,
+      "beta_rmse": 0.06195725104514044,
+      "beta_coverage": 0.935,
+      "coverage_se": 0.01743201078476031,
+      "tau2_bias": 0.022759999999999992,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "sigma x0.1",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "0.1",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "beta_bias": 0.0013507767768359108,
+      "beta_rmse": 0.047671429829435605,
+      "beta_coverage": 0.925,
+      "coverage_se": 0.01862458053218917,
+      "tau2_bias": 0.015859999999999996,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "sigma x10",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "10.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "beta_bias": -0.018845679375840186,
+      "beta_rmse": 0.29437805323971644,
+      "beta_coverage": 0.955,
+      "coverage_se": 0.014658615214269054,
+      "tau2_bias": 0.38577000000000006,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 9
+    },
+    {
+      "name": "1 predictor",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "1",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "beta_bias": 0.008909029793187874,
+      "beta_rmse": 0.07746874870350999,
+      "beta_coverage": 0.95,
+      "coverage_se": 0.021794494717703377,
+      "tau2_bias": 0.009759999999999993,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "3 predictors",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "3",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "beta_bias": 6.009360521037991e-06,
+      "beta_rmse": 0.052885373073410256,
+      "beta_coverage": 0.94,
+      "coverage_se": 0.013711309200802093,
+      "tau2_bias": 0.018249999999999995,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "unbalanced covariate",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "True"
+      },
+      "replications": 100,
+      "beta_bias": 0.008010131782226839,
+      "beta_rmse": 0.15405818433913557,
+      "beta_coverage": 0.965,
+      "coverage_se": 0.012995191418367032,
+      "tau2_bias": 0.02037999999999999,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "unbalanced covariate, tau2=1",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "1.0",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "True"
+      },
+      "replications": 100,
+      "beta_bias": -0.00812323831412477,
+      "beta_rmse": 0.4654110785668132,
+      "beta_coverage": 0.945,
+      "coverage_se": 0.016120638945153514,
+      "tau2_bias": 0.15338000000000002,
+      "tau2_truth": 1.0,
+      "fits_with_divergences": 0
+    }
+  ]
+}

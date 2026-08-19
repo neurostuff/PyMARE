@@ -232,8 +232,12 @@ print(sb_reml_summary.to_df().T)
 ###############################################################################
 # What about the Stan estimator?
 # `````````````````````````````````````````````````````````````````````````````
-# We're going to skip this one here because of how computationally intensive it
-# is.
+# We're going to skip this one here. It needs two things the documentation build
+# does not have: CmdStan, which is a C++ build rather than a Python package, and
+# a C++ toolchain to compile the model with. The compilation is a one-time cost
+# per installation rather than a per-fit one, so it is much less of an obstacle
+# in your own environment than it is here. Install it with
+# ``pip install pymare[stan]`` followed by ``python -m cmdstanpy.install_cmdstan``.
 
 ###############################################################################
 # Let's check out our results!
