@@ -14,10 +14,6 @@ N_OBSERVATIONS = 200
 N_DATASETS = 500
 OBSERVATIONS_PER_GROUP = 4
 
-#: Estimators that loop over datasets rather than vectorizing across them get a
-#: smaller second dimension, or they would dominate the whole suite.
-N_DATASETS_LOOPED = 10
-
 #: The combination tests cost far less per dataset than a regression fit, so at
 #: the shared size they land near a few milliseconds -- short enough that one
 #: scheduler hiccup moves the measurement more than a real regression would. They

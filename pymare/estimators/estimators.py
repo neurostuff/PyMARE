@@ -2,12 +2,10 @@
 
 import sys
 from abc import ABCMeta, abstractmethod
-from inspect import getfullargspec, signature
+from inspect import getfullargspec
 from warnings import warn
 
 import numpy as np
-import wrapt
-from scipy.optimize import Bounds, minimize
 
 from ..results import BayesianMetaRegressionResults, MetaRegressionResults
 from ..stats import (
@@ -15,6 +13,7 @@ from ..stats import (
     TAU2_AGGREGATE,
     TAU2_CORRELATED,
     TAU2_INDEPENDENT,
+    bounded_scalar_min,
     broadcast_columns,
     cluster_robust_cov,
     collapse_groups,
@@ -28,6 +27,11 @@ from ..stats import (
 )
 
 WEIGHT_SCHEMES = ("individual", "rescale", "collapse")
+
+#: Upper end of the bounded search variable that stands in for tau^2. The
+#: variable is a fraction, and one just short of 1 maps to a very large tau^2
+#: rather than to an infinite one; see :func:`_tau2_from_search`.
+_SEARCH_MAX = 1.0 - 1e-9
 
 
 class Options:
@@ -104,6 +108,58 @@ def _resolve_rho(rho, weight_scheme):
             stacklevel=3,
         )
     return rho
+
+
+def _tau2_from_search(u, scale):
+    """Map the bounded search variable back to tau^2.
+
+    Parameters
+    ----------
+    u : :obj:`numpy.ndarray` of shape (D,)
+        The search variable, in ``[0, 1)``.
+    scale : :obj:`numpy.ndarray` of shape (D,)
+        The tau^2 value that ``u = 0.5`` stands for, per parallel dataset.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray` of shape (D,)
+        ``scale * u / (1 - u)``.
+
+    Notes
+    -----
+    tau^2 has no upper bound, so searching it directly means choosing one and
+    risking an optimum outside it. This mapping is monotone and sends ``[0, 1)``
+    onto ``[0, inf)``, so a bounded search over ``u`` cannot truncate the
+    parameter space; ``scale`` only decides where in it the scan looks hardest.
+    Monotonicity is what keeps the objective as unimodal in ``u`` as it is in
+    tau^2, which is what the refinement in
+    :func:`~pymare.stats.bounded_scalar_min` needs.
+    """
+    return scale * u / (1.0 - u)
+
+
+def _search_scale(scale):
+    """Return a positive search scale, falling back to 1 where the estimate is not.
+
+    Parameters
+    ----------
+    scale : :obj:`numpy.ndarray` of shape (D,)
+        Candidate scale per parallel dataset, from the data.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray` of shape (D,)
+        The candidate where it is positive and finite, else 1.
+
+    Notes
+    -----
+    A degenerate dataset -- every variance zero, say -- can produce a scale of
+    zero or a non-finite one, which would collapse the search to a single point.
+    Falling back to 1 still spans all of ``[0, inf)``, so the substitution costs
+    resolution where the scan looks first and nothing else.
+    """
+    scale = np.asarray(scale, dtype=float)
+    return np.where(np.isfinite(scale) & (scale > 0), scale, 1.0)
 
 
 def _resolve_weights(v, groups, tau2, weight_scheme):
@@ -536,10 +592,9 @@ def _robust_cov_and_dof(y, v, X, beta, groups, tau2=0.0, model_cov=None, w=None)
     weights; callers that cannot promise that must pass None, in which case
     :func:`~pymare.stats.satterthwaite_dof` rebuilds it.
 
-    The group count is returned separately rather than folded into ``params_``
-    because :func:`_loopable` stacks every entry of ``params_`` across parallel
-    datasets, which only works for arrays. ``dof`` is an array of shape ``(P, D)``,
-    so it stacks correctly and does travel in ``params_``.
+    The group count is returned separately rather than folded into ``params_``,
+    which holds only per-dataset arrays. ``dof`` is an array of shape ``(P, D)``,
+    so it does travel in ``params_``.
     """
     if groups is None:
         return None, None, None
@@ -556,64 +611,6 @@ def _robust_cov_and_dof(y, v, X, beta, groups, tau2=0.0, model_cov=None, w=None)
     # satterthwaite_dof rebuilds the bread from ``weights`` itself.
     dof = satterthwaite_dof(X, weights, groups, model_cov=model_cov)
     return robust_cov, n_groups, dof
-
-
-@wrapt.decorator
-def _loopable(wrapped, instance, args, kwargs):
-    """Decorate fit() method of Estimator classes.
-
-    Designed to handle naive looping over the 2nd dimension of y/v/n inputs, and reconstruction of
-    outputs.
-    """
-    # fit() is routinely called positionally; binding against the wrapped
-    # signature makes both forms work rather than raising KeyError('y').
-    if args:
-        bound = signature(wrapped).bind(*args, **kwargs)
-        bound.apply_defaults()
-        kwargs = dict(bound.arguments)
-        args = ()
-
-    n_iter = kwargs["y"].shape[1]
-    # A single column of v or n applies to every parallel dataset. Expand it
-    # once here so the loop below has one shape to slice, rather than each
-    # argument carrying its own convention.
-    for name in ("v", "n"):
-        if kwargs.get(name) is not None:
-            kwargs[name] = broadcast_columns(kwargs[name], n_iter)
-    if n_iter > 10:
-        warn(
-            "Input contains {} parallel datasets (in 2nd dim of y and"
-            " v). The selected estimator will loop over datasets"
-            " naively, and this may be slow for large numbers of "
-            "datasets. Consider using the DL, HE, or WLS estimators, "
-            "which handle parallel datasets more efficiently.".format(n_iter)
-        )
-
-    param_dicts = []
-    for i in range(n_iter):
-        iter_kwargs = {"X": kwargs["X"]}
-        iter_kwargs["y"] = kwargs["y"][:, i, None]
-        if "v" in kwargs:
-            iter_kwargs["v"] = kwargs["v"][:, i, None]
-
-        if "n" in kwargs:
-            iter_kwargs["n"] = kwargs["n"][:, i, None]
-
-        # Group labels are per-observation, not per-dataset, so they are shared
-        # across iterates rather than sliced.
-        if kwargs.get("g") is not None:
-            iter_kwargs["g"] = kwargs["g"]
-
-        wrapped(**iter_kwargs)
-        param_dicts.append(instance.params_.copy())
-
-    params = {}
-    for k in param_dicts[0]:
-        concat = np.stack([pd[k].squeeze() for pd in param_dicts], axis=-1)
-        params[k] = np.atleast_2d(concat)
-
-    instance.params_ = params
-    return instance
 
 
 class BaseEstimator(metaclass=ABCMeta):
@@ -1111,13 +1108,16 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         group. Must lie in [0, 1]. Setting it under ``"individual"``, which
         models no correlation, warns. Default is None, meaning 0.8.
     **kwargs
-        Keyword arguments to pass to the SciPy minimizer.
+        Keyword arguments to pass to :func:`~pymare.stats.bounded_scalar_min`,
+        which searches for the variance components (e.g., ``xtol``).
 
     Notes
     -----
-    The ML and REML solutions are obtained via SciPy's scalar function minimizer
-    (:func:`scipy.optimize.minimize`).
-    Parameters to ``minimize()`` can be passed in as keyword arguments.
+    The coefficients are profiled out of the likelihood, leaving tau^2 as the
+    only free parameter, and that one-dimensional search is run for every
+    parallel dataset at once by :func:`~pymare.stats.bounded_scalar_min`. The
+    coefficients reported are the weighted least-squares solution at the fitted
+    tau^2, which is what profiling them out makes them.
 
     References
     ----------
@@ -1127,17 +1127,17 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
     _parameter_constraints = WEIGHTING_CONSTRAINTS
 
     def __init__(self, method="ml", weight_scheme="individual", rho=None, **kwargs):
+        self.method = method
         self.weight_scheme = weight_scheme
         self.rho = _resolve_rho(rho, weight_scheme)
         self._validate_params()
-        nll_func = getattr(self, "_{}_nll".format(method.lower()))
+        nll_func = getattr(self, "_{}_profile_nll".format(method.lower()), None)
         if nll_func is None:
             raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
 
         self._nll_func = nll_func
         self.kwargs = kwargs
 
-    @_loopable
     def fit(self, y, v, X, g=None):
         """Fit the estimator to data.
 
@@ -1165,7 +1165,9 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         self.dataset_ = None
 
         y = ensure_2d(y)
-        v = ensure_2d(v)
+        # A single column of v applies to every parallel dataset; expand it once
+        # here so everything downstream sees one shape.
+        v = broadcast_columns(ensure_2d(v), y.shape[1])
         model_y, model_v, model_X, model_groups = _collapse_inputs(
             y, v, X, g, self.weight_scheme, self.rho
         )
@@ -1184,45 +1186,40 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
             model=self.tau2_model_,
         )
 
-        # use D-L estimate for initial values
-        est_DL = DerSimonianLaird().fit(fit_y, fit_v, fit_X).params_
-        beta = est_DL["fe_params"]
-        tau2 = est_DL["tau2"]
-
-        theta_init = np.r_[beta.ravel(), tau2]
-
-        lb = np.ones(len(theta_init)) * -np.inf
-        ub = -lb
-        lb[-1] = 0.0  # bound only the variance
-        bds = Bounds(lb, ub, keep_feasible=True)
-
-        res = minimize(
-            self._nll_func, theta_init, (fit_y, fit_v, fit_X), bounds=bds, **self.kwargs
+        # The D-L moment estimate sets the scale of the search rather than a
+        # starting value: it places the scan where tau^2 plausibly lies, which is
+        # the vectorized counterpart of warm-starting a per-dataset optimizer.
+        scale = _search_scale(_dersimonian_laird_tau2(fit_y, fit_v, fit_X) + fit_v.mean(axis=0))
+        u, _ = bounded_scalar_min(
+            lambda t: self._nll_func(_tau2_from_search(t, scale), fit_y, fit_v, fit_X),
+            np.zeros(fit_y.shape[1]),
+            np.full(fit_y.shape[1], _SEARCH_MAX),
+            **self.kwargs,
         )
-        beta, tau = res.x[:-1], float(res.x[-1])
-        tau = np.max([tau, 0])
-        beta = beta[:, None]
-        w = _resolve_weights(model_v, model_groups, tau, self.weight_scheme)
-        if w is None:
-            _, model_cov = weighted_least_squares(model_y, model_v, model_X, tau, True)
-        else:
-            # Cluster weighting changes the estimand, so beta has to be
-            # recomputed under those weights rather than kept from the
-            # likelihood, whose working model assumes independence.
-            beta, model_cov = weighted_least_squares(model_y, model_v, model_X, tau, True, w=w)
+        tau2 = _tau2_from_search(u, scale)
+
+        w = _resolve_weights(model_v, model_groups, tau2, self.weight_scheme)
+        # The coefficients are the weighted least-squares solution at the fitted
+        # tau^2 -- profiling them out of the likelihood is what makes them that --
+        # computed here on the row-level model rather than on the inputs tau^2 was
+        # fitted to, which may have been aggregated. Under cluster weighting they
+        # have to come from these weights in any case, because that weighting
+        # changes the estimand.
+        beta, model_cov = weighted_least_squares(model_y, model_v, model_X, tau2, True, w=w)
         robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
             model_y,
             model_v,
             model_X,
             beta,
             model_groups,
-            tau2=tau,
+            tau2=tau2,
             model_cov=model_cov,
             w=w,
         )
         self.params_ = {
             "fe_params": beta,
-            "tau2": tau,
+            # Kept 2d, as the per-dataset loop this replaced used to leave it.
+            "tau2": np.atleast_2d(tau2),
             # NB: the key is a legacy misnomer; the value is a covariance.
             "inv_cov": model_cov if robust_cov is None else robust_cov,
         }
@@ -1230,22 +1227,68 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
             self.params_["dof"] = dof
         return self
 
-    def _ml_nll(self, theta, y, v, X):
-        """ML negative log-likelihood for meta-regression model."""
-        beta, tau2 = theta[:-1, None], theta[-1]
-        if tau2 < 0:
-            tau2 = 0
-        w = 1.0 / (v + tau2)
-        R = y - X.dot(beta)
-        return -0.5 * (np.log(w).sum() - (R * w * R).sum())
+    def _ml_profile_nll(self, tau2, y, v, X):
+        """Compute the ML negative log-likelihood, profiled over the coefficients.
 
-    def _reml_nll(self, theta, y, v, X):
-        """REML negative log-likelihood for meta-regression model."""
-        ll_ = self._ml_nll(theta, y, v, X)
-        tau2 = theta[-1]
+        Parameters
+        ----------
+        tau2 : :obj:`numpy.ndarray` of shape (D,)
+            One candidate tau^2 per parallel dataset.
+        y : :obj:`numpy.ndarray` of shape (K, D)
+            Estimates.
+        v : :obj:`numpy.ndarray` of shape (K, D)
+            Sampling variances.
+        X : :obj:`numpy.ndarray` of shape (K, P)
+            Fixed effect design matrix.
+
+        Returns
+        -------
+        :obj:`numpy.ndarray` of shape (D,)
+            The negative log-likelihood per dataset, up to an additive constant.
+
+        Notes
+        -----
+        For a fixed tau^2 the likelihood is maximized over the coefficients by
+        their weighted least-squares solution, so substituting it leaves a
+        function of tau^2 alone. Minimizing that is equivalent to minimizing the
+        joint likelihood over the coefficients and tau^2 together, and it turns
+        the fit into a one-dimensional search that can be run for every parallel
+        dataset at once.
+        """
         w = 1.0 / (v + tau2)
-        F = (X * w).T.dot(X)
-        return ll_ + 0.5 * np.log(np.linalg.det(F))
+        resid = y - X.dot(weighted_least_squares(y, v, X, tau2=tau2))
+        return -0.5 * (np.log(w).sum(axis=0) - (resid * w * resid).sum(axis=0))
+
+    def _reml_profile_nll(self, tau2, y, v, X):
+        """Compute the REML negative log-likelihood, profiled over the coefficients.
+
+        Parameters
+        ----------
+        tau2 : :obj:`numpy.ndarray` of shape (D,)
+            One candidate tau^2 per parallel dataset.
+        y : :obj:`numpy.ndarray` of shape (K, D)
+            Estimates.
+        v : :obj:`numpy.ndarray` of shape (K, D)
+            Sampling variances.
+        X : :obj:`numpy.ndarray` of shape (K, P)
+            Fixed effect design matrix.
+
+        Returns
+        -------
+        :obj:`numpy.ndarray` of shape (D,)
+            The negative restricted log-likelihood per dataset, up to an additive
+            constant.
+
+        Notes
+        -----
+        The restriction term ``0.5 * log|X'WX|`` does not involve the
+        coefficients, so profiling them out of the ML part is unaffected by it.
+        ``slogdet`` is the stable form of ``log(det(...))``.
+        """
+        w = 1.0 / (v + tau2)
+        # Einsum indices: k = observations, p = predictors, i = parallel iterates.
+        bread = np.einsum("kp,ki->ipk", X, w).dot(X)
+        return self._ml_profile_nll(tau2, y, v, X) + 0.5 * np.linalg.slogdet(bread)[1]
 
 
 class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
@@ -1270,15 +1313,18 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         group. Must lie in [0, 1]. Setting it under ``"individual"``, which
         models no correlation, warns. Default is None, meaning 0.8.
     **kwargs
-        Keyword arguments to pass to the SciPy minimizer.
+        Keyword arguments to pass to :func:`~pymare.stats.bounded_scalar_min`,
+        which searches for the variance components (e.g., ``xtol``).
 
     Notes
     -----
     Homogeneity of sigma^2 across input units is assumed.
 
-    The ML and REML solutions are obtained via SciPy's scalar function minimizer
-    (:func:`scipy.optimize.minimize`).
-    Parameters to ``minimize()`` can be passed in as keyword arguments.
+    The coefficients and the overall scale of the two variance components are
+    profiled out of the likelihood, leaving their ratio
+    ``tau^2 / (tau^2 + sigma^2)`` as the only free parameter, and that
+    one-dimensional search is run for every parallel dataset at once by
+    :func:`~pymare.stats.bounded_scalar_min`.
 
     References
     ----------
@@ -1288,17 +1334,17 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     _parameter_constraints = WEIGHTING_CONSTRAINTS
 
     def __init__(self, method="ml", weight_scheme="individual", rho=None, **kwargs):
+        self.method = method
         self.weight_scheme = weight_scheme
         self.rho = _resolve_rho(rho, weight_scheme)
         self._validate_params()
-        nll_func = getattr(self, "_{}_nll".format(method.lower()))
+        nll_func = getattr(self, "_{}_profile_nll".format(method.lower()), None)
         if nll_func is None:
             raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
 
         self._nll_func = nll_func
         self.kwargs = kwargs
 
-    @_loopable
     def fit(self, y, n, X, g=None):
         """Fit the estimator to data.
 
@@ -1327,7 +1373,9 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         self.dataset_ = None
 
         y = ensure_2d(y)
-        n = ensure_2d(n)
+        # A single column of n applies to every parallel dataset; expand it once
+        # here so everything downstream sees one shape.
+        n = broadcast_columns(ensure_2d(n), y.shape[1])
         model_y, model_n, model_X, model_groups = _collapse_n_inputs(
             y, n, X, g, self.weight_scheme, self.rho
         )
@@ -1365,47 +1413,43 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
                 UserWarning,
             )
 
-        # set tau^2 to 0 and compute starting values
-        tau2 = 0.0
-        k, p = fit_X.shape
-        beta = weighted_least_squares(fit_y, fit_n, fit_X, tau2)
-        sigma = ((fit_y - fit_X.dot(beta)) ** 2 * fit_n).sum() / (k - p)
-        theta_init = np.r_[beta.ravel(), sigma, tau2]
-
-        lb = np.ones(len(theta_init)) * -np.inf
-        ub = -lb
-        lb[-2:] = 0.0  # bound only the variances
-        bds = Bounds(lb, ub, keep_feasible=True)
-
-        res = minimize(
-            self._nll_func, theta_init, (fit_y, fit_n, fit_X), bounds=bds, **self.kwargs
+        # Only the ratio of the two variance components is searched for; the
+        # scale they share and the coefficients both have closed forms at a fixed
+        # ratio, so there is one bounded parameter left rather than three.
+        ratio, _ = bounded_scalar_min(
+            lambda r: self._nll_func(r, fit_y, fit_n, fit_X),
+            np.zeros(fit_y.shape[1]),
+            np.ones(fit_y.shape[1]),
+            **self.kwargs,
         )
-        beta, sigma, tau = res.x[:-2], float(res.x[-2]), float(res.x[-1])
-        tau = np.max([tau, 0])
-        beta = beta[:, None]
-        v = sigma / model_n
-        w = _resolve_weights(v, model_groups, tau, self.weight_scheme)
-        if w is None:
-            _, model_cov = weighted_least_squares(model_y, v, model_X, tau, True)
-        else:
-            # Cluster weighting changes the estimand, so beta has to be
-            # recomputed under those weights rather than kept from the
-            # likelihood, whose working model assumes independence.
-            beta, model_cov = weighted_least_squares(model_y, v, model_X, tau, True, w=w)
+        scale = self._profile_scale(ratio, fit_y, fit_n, fit_X, ddof=self._profile_ddof(fit_X))
+        sigma2 = scale * (1.0 - ratio)
+        tau2 = scale * ratio
+
+        v = sigma2 / model_n
+        w = _resolve_weights(v, model_groups, tau2, self.weight_scheme)
+        # The coefficients are the weighted least-squares solution at the fitted
+        # variance components -- profiling them out of the likelihood is what makes
+        # them that -- computed here on the row-level model rather than on the
+        # inputs the components were fitted to, which may have been aggregated.
+        # Under cluster weighting they have to come from these weights in any
+        # case, because that weighting changes the estimand.
+        beta, model_cov = weighted_least_squares(model_y, v, model_X, tau2, True, w=w)
         robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
             model_y,
             v,
             model_X,
             beta,
             model_groups,
-            tau2=tau,
+            tau2=tau2,
             model_cov=model_cov,
             w=w,
         )
         self.params_ = {
             "fe_params": beta,
-            "sigma2": np.array(sigma),
-            "tau2": tau,
+            # Kept 2d, as the per-dataset loop these replaced used to leave them.
+            "sigma2": np.atleast_2d(sigma2),
+            "tau2": np.atleast_2d(tau2),
             # NB: the key is a legacy misnomer; the value is a covariance.
             "inv_cov": model_cov if robust_cov is None else robust_cov,
         }
@@ -1413,26 +1457,157 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
             self.params_["dof"] = dof
         return self
 
-    def _ml_nll(self, theta, y, n, X):
-        """ML negative log-likelihood for meta-regression model."""
-        beta, sigma2, tau2 = theta[:-2, None], theta[-2], theta[-1]
-        if tau2 < 0:
-            tau2 = 0
-        if sigma2 < 0:
-            sigma2 = 0
-        w = 1 / (tau2 + sigma2 / n)
-        R = y - X.dot(beta)
-        return -0.5 * (np.log(w).sum() - (R * w * R).sum())
+    def _profile_ddof(self, X):
+        """Return the degrees of freedom the profiled scale loses under this method.
 
-    def _reml_nll(self, theta, y, n, X):
-        """REML negative log-likelihood for meta-regression model."""
-        ll_ = self._ml_nll(theta, y, n, X)
-        # Clamp as _ml_nll does; the Bounds keep these non-negative today, but
-        # the two halves of the objective should not disagree about that.
-        sigma2, tau2 = np.maximum(theta[-2:], 0.0)
-        w = 1 / (tau2 + sigma2 / n)
-        F = (X * w).T.dot(X)
-        return ll_ + 0.5 * np.log(np.linalg.det(F))
+        Parameters
+        ----------
+        X : :obj:`numpy.ndarray` of shape (K, P)
+            Fixed effect design matrix.
+
+        Returns
+        -------
+        :obj:`int`
+            ``P`` under REML, whose restriction term contributes
+            ``-P log(scale)``, and 0 under ML.
+        """
+        return X.shape[1] if self.method.lower() == "reml" else 0
+
+    @staticmethod
+    def _unit_variance(ratio, n):
+        """Return the observation variances at a fixed variance ratio, up to their scale.
+
+        Parameters
+        ----------
+        ratio : :obj:`numpy.ndarray` of shape (D,)
+            ``tau^2 / (tau^2 + sigma^2)`` per parallel dataset.
+        n : :obj:`numpy.ndarray` of shape (K, D)
+            Sample sizes.
+
+        Returns
+        -------
+        :obj:`numpy.ndarray` of shape (K, D)
+            ``(tau^2 + sigma^2 / n) / (tau^2 + sigma^2)``.
+
+        Notes
+        -----
+        Writing the variances this way separates the shape of the weights, which
+        the ratio fixes, from their overall scale, which drops out of the
+        weighted least-squares fit and has a closed form in the likelihood. See
+        :meth:`_profile_scale`.
+        """
+        return ratio + (1.0 - ratio) / n
+
+    def _profile_scale(self, ratio, y, n, X, ddof=0):
+        """Return the total variance ``tau^2 + sigma^2`` that maximizes the likelihood.
+
+        Parameters
+        ----------
+        ratio : :obj:`numpy.ndarray` of shape (D,)
+            ``tau^2 / (tau^2 + sigma^2)`` per parallel dataset.
+        y : :obj:`numpy.ndarray` of shape (K, D)
+            Estimates.
+        n : :obj:`numpy.ndarray` of shape (K, D)
+            Sample sizes.
+        X : :obj:`numpy.ndarray` of shape (K, P)
+            Fixed effect design matrix.
+        ddof : :obj:`int`, optional
+            Degrees of freedom to subtract from ``K``: 0 for ML, ``P`` for REML.
+            Default = 0.
+
+        Returns
+        -------
+        :obj:`numpy.ndarray` of shape (D,)
+            The scale per dataset.
+
+        Notes
+        -----
+        Scaling both variance components by the same factor divides every weight
+        by that factor, so the weighted dispersion the likelihood penalizes and
+        the log-determinant term both depend on the scale in closed form. Solving
+        for it gives the weighted residual sum of squares over ``K - ddof``, the
+        familiar variance estimate, and leaves the ratio as the only parameter
+        that has to be searched for. The ``ddof`` term is what distinguishes REML
+        from ML here: the restriction term contributes ``-P log(scale)``.
+
+        Floored at the smallest positive double, so that a saturated design whose
+        residuals vanish gives a degenerate fit rather than ``log(0)``.
+        """
+        v_unit = self._unit_variance(ratio, n)
+        resid = y - X.dot(weighted_least_squares(y, v_unit, X))
+        k = X.shape[0]
+        return np.maximum((resid**2 / v_unit).sum(axis=0), np.finfo(float).tiny) / (k - ddof)
+
+    def _ml_profile_nll(self, ratio, y, n, X):
+        """Compute the ML negative log-likelihood, profiled over everything but the ratio.
+
+        Parameters
+        ----------
+        ratio : :obj:`numpy.ndarray` of shape (D,)
+            One candidate ``tau^2 / (tau^2 + sigma^2)`` per parallel dataset.
+        y : :obj:`numpy.ndarray` of shape (K, D)
+            Estimates.
+        n : :obj:`numpy.ndarray` of shape (K, D)
+            Sample sizes.
+        X : :obj:`numpy.ndarray` of shape (K, P)
+            Fixed effect design matrix.
+
+        Returns
+        -------
+        :obj:`numpy.ndarray` of shape (D,)
+            The negative log-likelihood per dataset, up to an additive constant.
+
+        Notes
+        -----
+        The coefficients and the scale of the variance components are both
+        replaced by their maximizing values at this ratio, which is equivalent to
+        minimizing the joint likelihood over all three and leaves a bounded
+        one-dimensional search. See :meth:`_profile_scale`.
+        """
+        v_unit = self._unit_variance(ratio, n)
+        k = X.shape[0]
+        scale = self._profile_scale(ratio, y, n, X)
+        return 0.5 * (np.log(v_unit).sum(axis=0) + k * np.log(scale) + k)
+
+    def _reml_profile_nll(self, ratio, y, n, X):
+        """Compute the REML negative log-likelihood, profiled over everything but the ratio.
+
+        Parameters
+        ----------
+        ratio : :obj:`numpy.ndarray` of shape (D,)
+            One candidate ``tau^2 / (tau^2 + sigma^2)`` per parallel dataset.
+        y : :obj:`numpy.ndarray` of shape (K, D)
+            Estimates.
+        n : :obj:`numpy.ndarray` of shape (K, D)
+            Sample sizes.
+        X : :obj:`numpy.ndarray` of shape (K, P)
+            Fixed effect design matrix.
+
+        Returns
+        -------
+        :obj:`numpy.ndarray` of shape (D,)
+            The negative restricted log-likelihood per dataset, up to an additive
+            constant.
+
+        Notes
+        -----
+        The restriction term ``0.5 * log|X'WX|`` contributes ``-P log(scale)``,
+        which is why the scale is the residual sum of squares over ``K - P`` here
+        and over ``K`` for ML. It does not involve the coefficients, so profiling
+        those out is unaffected by it. ``slogdet`` is the stable form of
+        ``log(det(...))``.
+        """
+        v_unit = self._unit_variance(ratio, n)
+        k, p = X.shape
+        scale = self._profile_scale(ratio, y, n, X, ddof=p)
+        # Einsum indices: k = observations, p = predictors, i = parallel iterates.
+        bread = np.einsum("kp,ki->ipk", X, 1.0 / v_unit).dot(X)
+        return 0.5 * (
+            np.log(v_unit).sum(axis=0)
+            + (k - p) * np.log(scale)
+            + (k - p)
+            + np.linalg.slogdet(bread)[1]
+        )
 
 
 class StanMetaRegression(BaseEstimator):

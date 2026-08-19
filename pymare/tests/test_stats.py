@@ -13,6 +13,7 @@ from pymare.stats import (
     _cr2_low_rank_apply,
     _cr2_low_rank_factors,
     _symmetric_sqrt,
+    bounded_scalar_min,
     cluster_robust_cov,
     collapse_groups,
     collapse_groups_by_n,
@@ -29,6 +30,54 @@ from pymare.stats import (
     weighted_intercept_cr2_sufficient_statistics,
     weighted_least_squares,
 )
+
+
+def test_bounded_scalar_min_finds_each_datasets_own_minimum():
+    """Every parallel dataset gets its own optimum out of the one shared search."""
+    targets = np.array([0.0, 0.25, 0.5, 1.0, 1e-7, 0.999])
+    x, fval = bounded_scalar_min(
+        lambda x: (x - targets) ** 2, np.zeros(targets.size), np.ones(targets.size)
+    )
+
+    assert np.allclose(x, targets, atol=1e-8)
+    assert np.allclose(fval, 0.0, atol=1e-14)
+
+
+def test_bounded_scalar_min_returns_optima_on_the_bounds_exactly():
+    """A monotone objective is minimized at an end of the interval, not just near it.
+
+    The refinement narrows a bracket from the inside, so the end itself is only
+    ever reached in the limit. It comes back exactly because the coarse scan
+    evaluated it and the better of the two is returned.
+    """
+    x, _ = bounded_scalar_min(lambda x: np.array([x[0], -x[1]]), np.zeros(2), np.array([1.0, 4.0]))
+
+    assert np.array_equal(x, [0.0, 4.0])
+
+
+def test_bounded_scalar_min_finds_a_minimum_off_the_linear_scan():
+    """A dip between two scan points is found by refining the bracket around it."""
+    x, _ = bounded_scalar_min(lambda x: np.abs(x - 0.3141592) ** 0.5, np.zeros(1), np.ones(1))
+
+    assert np.allclose(x, 0.3141592, atol=1e-6)
+
+
+def test_bounded_scalar_min_isolates_a_degenerate_dataset():
+    """A dataset whose objective is nan must not disturb the others."""
+    targets = np.array([0.25, np.nan, 0.75])
+    x, _ = bounded_scalar_min(lambda x: (x - targets) ** 2, np.zeros(3), np.ones(3))
+
+    assert np.allclose(x[[0, 2]], [0.25, 0.75], atol=1e-8)
+    assert np.isfinite(x[1])
+
+
+def test_bounded_scalar_min_requires_matching_1d_bounds():
+    """Bounds carry the dataset count, so their shape is not inferred."""
+    with pytest.raises(ValueError, match="1d arrays of the same shape"):
+        bounded_scalar_min(lambda x: x, 0.0, 1.0)
+
+    with pytest.raises(ValueError, match="1d arrays of the same shape"):
+        bounded_scalar_min(lambda x: x, np.zeros(3), np.ones(2))
 
 
 def test_q_gen(vars_with_intercept):

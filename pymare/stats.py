@@ -887,6 +887,139 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
     return (beta, cov_beta) if return_cov else beta
 
 
+#: Fractions of the search interval evaluated in the coarse scan that precedes
+#: the local refinement. The linear part locates the bracket the minimum lives
+#: in; the points crowded against each end catch an optimum sitting in the first
+#: or last percent of the interval, which is where a variance component pinned
+#: near zero ends up.
+_SCAN_FRACTIONS = np.unique(
+    np.concatenate(
+        [
+            np.linspace(0.0, 1.0, 25),
+            [1e-6, 1e-4, 1e-2],
+            1.0 - np.array([1e-2, 1e-4, 1e-6]),
+        ]
+    )
+)
+
+#: 1 / golden ratio. Splitting an interval at this fraction from each end makes
+#: one of the two interior points of the surviving sub-interval coincide with an
+#: interior point of the current one, so each iteration costs a single
+#: evaluation instead of two.
+_GOLDEN_SECTION = (np.sqrt(5.0) - 1.0) / 2.0
+
+
+def bounded_scalar_min(f, lower, upper, xtol=1e-10, maxiter=100):
+    """Minimize a scalar function over a bounded interval for many datasets at once.
+
+    Parameters
+    ----------
+    f : :obj:`callable`
+        Objective. Takes an :obj:`numpy.ndarray` of shape (D,) holding one
+        candidate value per parallel dataset and returns an array of shape (D,)
+        holding that dataset's objective at its own candidate. It is called with
+        every dataset's current candidate at once, which is what makes this
+        cheaper than one minimization per dataset.
+    lower, upper : :obj:`numpy.ndarray` of shape (D,)
+        Per-dataset search bounds, ``lower <= upper``.
+    xtol : :obj:`float`, optional
+        Stop once every dataset's bracket is narrower than
+        ``xtol * (1 + abs(x))``. Default = 1e-10.
+    maxiter : :obj:`int`, optional
+        Cap on refinement iterations. Default = 100.
+
+    Returns
+    -------
+    x : :obj:`numpy.ndarray` of shape (D,)
+        The minimizing value per dataset.
+    fval : :obj:`numpy.ndarray` of shape (D,)
+        The objective there.
+
+    Notes
+    -----
+    A coarse scan over :data:`_SCAN_FRACTIONS` brackets each dataset's minimum,
+    then golden-section search refines every bracket in step. The whole search
+    costs ``len(_SCAN_FRACTIONS) + 2 + iterations`` vectorized evaluations of
+    ``f`` no matter how many datasets there are, where a per-dataset
+    :func:`scipy.optimize.minimize` costs a Python-level optimization each.
+
+    Golden-section search needs the objective to be unimodal on the bracket, not
+    globally, which is what the scan buys: a minimum in a narrow dip elsewhere in
+    the interval is found by the scan and refined from there. The scan is also
+    what makes this less prone to a local minimum than a quasi-Newton run from a
+    single starting value.
+
+    The point returned is the better of the refined one and the best scan point,
+    so it is never worse than the scan alone.
+
+    ``f`` may return ``nan`` for a degenerate dataset. Those values are treated
+    as ``inf`` in the scan so that a ``nan`` never wins the bracket, and the
+    comparisons in the refinement are false for them, which leaves that dataset
+    parked at its scan bracket rather than propagating into the others.
+    """
+    lower = np.asarray(lower, dtype=float)
+    upper = np.asarray(upper, dtype=float)
+    if lower.shape != upper.shape or lower.ndim != 1:
+        raise ValueError(
+            "lower and upper must be 1d arrays of the same shape, got "
+            f"{lower.shape} and {upper.shape}."
+        )
+
+    scan = lower + np.multiply.outer(_SCAN_FRACTIONS, upper - lower)
+    scan_vals = np.stack([f(candidate) for candidate in scan])
+    best = np.argmin(np.where(np.isnan(scan_vals), np.inf, scan_vals), axis=0)
+
+    # The bracket is the pair of scan points either side of the best one. Both
+    # neighbours are clipped into range, so a minimum at an end of the interval
+    # brackets as [end, next] rather than reaching outside it.
+    left = np.take_along_axis(scan, np.maximum(best - 1, 0)[None], axis=0)[0]
+    right = np.take_along_axis(scan, np.minimum(best + 1, scan.shape[0] - 1)[None], axis=0)[0]
+
+    low = left
+    high = right
+    interior_low = high - _GOLDEN_SECTION * (high - low)
+    interior_high = low + _GOLDEN_SECTION * (high - low)
+    f_low = f(interior_low)
+    f_high = f(interior_high)
+
+    for _ in range(maxiter):
+        if np.all(high - low <= xtol * (1.0 + np.abs(low))):
+            break
+
+        # Drop the end beyond whichever interior point is worse.
+        keep_left = f_low <= f_high
+        new_low = np.where(keep_left, low, interior_low)
+        new_high = np.where(keep_left, interior_high, high)
+
+        # One interior point of the new interval is an interior point of the old
+        # one, so only the other has to be evaluated. Which of the two it is
+        # differs per dataset, so both roles are assembled with where() and the
+        # fresh points are evaluated in a single call.
+        kept = np.where(keep_left, interior_low, interior_high)
+        f_kept = np.where(keep_left, f_low, f_high)
+        span = _GOLDEN_SECTION * (new_high - new_low)
+        fresh = np.where(keep_left, new_high - span, new_low + span)
+        f_fresh = f(fresh)
+
+        interior_low = np.where(keep_left, fresh, kept)
+        f_low = np.where(keep_left, f_fresh, f_kept)
+        interior_high = np.where(keep_left, kept, fresh)
+        f_high = np.where(keep_left, f_kept, f_fresh)
+        low, high = new_low, new_high
+
+    # Fall back on the best scan point where refinement did not beat it, so the
+    # result is never worse than the scan and an optimum sitting exactly on an
+    # end of the interval -- tau^2 = 0, say -- is returned exactly rather than
+    # approached from inside the bracket.
+    take_low = f_low <= f_high
+    x = np.where(take_low, interior_low, interior_high)
+    fval = np.where(take_low, f_low, f_high)
+    scan_x = np.take_along_axis(scan, best[None], axis=0)[0]
+    scan_f = np.take_along_axis(scan_vals, best[None], axis=0)[0]
+    keep_scan = ~(fval <= scan_f)
+    return np.where(keep_scan, scan_x, x), np.where(keep_scan, scan_f, fval)
+
+
 def _symmetric_sqrt(matrices):
     """Return L with ``L @ L.T`` equal to each symmetric PSD input matrix.
 
