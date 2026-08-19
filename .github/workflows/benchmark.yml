@@ -44,7 +44,12 @@ jobs:
         run: python -m pip install --progress-bar off asv virtualenv
 
       - name: "Name the two commits asv will compare"
-        run: git fetch origin "${GITHUB_BASE_REF}:base" "${GITHUB_REF}:pr"
+        run: |
+          # A manual run has no base branch of its own, so it compares against
+          # master, which is what a pull request from this branch would use.
+          base_ref="${GITHUB_BASE_REF:-master}"
+          echo "BASE_REF=${base_ref}" >> "$GITHUB_ENV"
+          git fetch origin "${base_ref}:base" "${GITHUB_REF}:pr"
       - name: "Register the runner"
         run: asv machine --yes
 
@@ -62,7 +67,7 @@ jobs:
         id: report
         run: |
           {
-              echo "## Benchmark: pull request vs \`${GITHUB_BASE_REF}\`"
+              echo "## Benchmark: this branch vs \`${BASE_REF}\`"
               echo
               echo "A benchmark is flagged once it is at least \`${FACTOR}x\` slower"
               echo "and the difference is statistically significant."
@@ -76,6 +81,7 @@ jobs:
       - name: "Comment on the pull request"
         # A pull request from a fork gets a read-only token, so the comment can
         # fail while the check itself still reports the regression.
+        if: ${{ github.event_name == 'pull_request' }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
