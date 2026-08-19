@@ -827,25 +827,19 @@ def _invert_stack(matrices):
 
     Notes
     -----
-    ``np.linalg.pinv`` takes a singular value decomposition of every matrix in
-    the stack, which for the one- to three-predictor designs meta-regression
-    actually uses is several times the cost of an ordinary inverse and hundreds
-    of times the cost of a reciprocal. Measured on a stack of 20000 matrices:
-    74.7 ms for ``pinv``, 7.1 ms for ``inv``, 0.03 ms for ``1 / x`` at ``P = 1``.
-    Since the likelihood estimators invert one stack per objective evaluation and
-    evaluate the objective dozens of times, that choice sets the cost of a fit.
+    ``pinv`` takes a singular value decomposition of every matrix in the stack,
+    which for the one- to three-predictor designs meta-regression actually uses
+    costs far more than an ordinary inverse. Measured on a stack of 20000
+    matrices: 74.7 ms for ``pinv``, 7.1 ms for ``inv``, 0.03 ms for ``1 / x`` at
+    ``P = 1``. The likelihood estimators invert one stack per objective
+    evaluation, so this sets the cost of a fit -- hence the 1x1 branch for the
+    intercept-only design.
 
-    A one-predictor design -- the intercept-only meta-analysis -- makes every
-    matrix 1x1, so its own branch is worth having. Otherwise an LU inverse is
-    used, which is defined whenever ``X'WX`` is nonsingular, and that holds
-    whenever ``X`` has full column rank and the weights are positive.
-
-    The pseudo-inverse remains the fallback for the cases where it is the only
-    defined answer: an exactly singular matrix makes ``inv`` raise or return
-    non-finite entries, and both are checked for. An ill-conditioned but
-    nonsingular design now gets the ordinary inverse rather than one with its
-    smallest singular values truncated, so a nearly collinear design reports a
-    large covariance instead of a quietly regularized one.
+    ``inv`` is defined whenever ``X'WX`` is nonsingular, which holds for a
+    full-rank ``X`` and positive weights. ``pinv`` stays the fallback for the
+    singular case, where ``inv`` raises or returns non-finite entries. An
+    ill-conditioned but nonsingular design now reports a large covariance rather
+    than one with its smallest singular values quietly truncated.
     """
     if matrices.shape[-1] == 1:
         with np.errstate(divide="ignore"):
@@ -905,8 +899,7 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
     runs to hundreds of thousands. The ``einsum`` subscripts use ``k`` for
     observations, ``p`` and ``q`` for predictors and ``i`` for parallel
     datasets. Inverting the ``D`` copies of ``X'WX`` is the expensive step; see
-    :func:`_invert_stack` for what that costs and why it is not a pseudo-inverse
-    by default.
+    :func:`_invert_stack`.
 
     ``(X'WX)^-1`` is the covariance of the coefficients, not an inverse
     covariance: ``X'WX`` is the inverse covariance, so inverting it returns the
@@ -925,10 +918,9 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
     wX = np.einsum("kp,ki->ipk", X, w)
     cov = wX.dot(X)
 
-    # (X'WX)^-1, i.e. the covariance of beta, inverted along the first N - 2
-    # dimensions so that all D datasets are done in one call. Deliberately not
-    # called "precision": in statistics a precision matrix is the *inverse* of a
-    # covariance, which is X'WX itself, not this.
+    # (X'WX)^-1, i.e. the covariance of beta, for all D datasets in one call.
+    # Deliberately not called "precision": in statistics a precision matrix is the
+    # *inverse* of a covariance, which is X'WX itself, not this.
     cov_beta = _invert_stack(cov).T
 
     pwX = np.einsum("ipk,qpi->iqk", wX, cov_beta)
@@ -937,11 +929,9 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
     return (beta, cov_beta) if return_cov else beta
 
 
-#: Fractions of the search interval evaluated in the coarse scan that precedes
-#: the local refinement. The linear part locates the bracket the minimum lives
-#: in; the points crowded against each end catch an optimum sitting in the first
-#: or last percent of the interval, which is where a variance component pinned
-#: near zero ends up.
+#: Fractions of the search interval evaluated in the coarse scan. The linear part
+#: brackets the minimum; the points crowded against each end catch an optimum in
+#: the first or last percent, where a variance component pinned near zero ends up.
 _SCAN_FRACTIONS = np.unique(
     np.concatenate(
         [
@@ -952,10 +942,9 @@ _SCAN_FRACTIONS = np.unique(
     )
 )
 
-#: Fraction of the larger half of the bracket that the safeguard step moves
-#: into, when the parabola through the three current points is unusable. This is
-#: the golden-section fraction, which shrinks the bracket by the largest factor
-#: guaranteed for a step that cannot use curvature.
+#: Fraction of the larger half of the bracket that the safeguard step moves into
+#: when the parabola through the three current points is unusable. It shrinks the
+#: bracket by the largest factor guaranteed for a step that cannot use curvature.
 _GOLDEN_SECTION = (3.0 - np.sqrt(5.0)) / 2.0
 
 
@@ -993,46 +982,39 @@ def bounded_scalar_min(f, lower, upper, xtol=1e-6, ftol=1e-12, maxiter=50):
     Notes
     -----
     A coarse scan over :data:`_SCAN_FRACTIONS` brackets each dataset's minimum in
-    three points, and successive parabolic interpolation then refines every
-    bracket in step, one evaluation per iteration. The whole search costs
+    three points, and successive parabolic interpolation then refines every bracket
+    in step, one evaluation per iteration. The whole search costs
     ``len(_SCAN_FRACTIONS)`` plus a few dozen vectorized evaluations of ``f`` no
     matter how many datasets there are, where a per-dataset
     :func:`scipy.optimize.minimize` costs a Python-level optimization each.
 
-    The parabola through the three points is only used when it opens upwards,
-    its vertex falls strictly inside the bracket, and the step is under half the
-    one taken two iterations ago; otherwise the step is a golden-section one into
-    the larger half. Those are Brent's safeguards, and the last of them is the
-    load-bearing one: without it a nearly flat objective lets the interpolation
-    creep by ever-smaller steps that never shrink the bracket, and the search
-    stops converging rather than converging slowly. Either way the bracket
-    shrinks and continues to contain the minimum, so the only property required of
-    ``f`` is that it is unimodal within the bracket the scan found. Global
-    unimodality is not needed: a minimum in a narrow dip elsewhere in the interval
-    is found by the scan and refined from there.
+    The parabola is used only when it opens upwards, its vertex falls strictly
+    inside the bracket, and the step is under half the one taken two iterations
+    ago; otherwise the step is a golden-section one into the larger half. Those are
+    Brent's safeguards, and the last is the load-bearing one: without it a nearly
+    flat objective lets the interpolation creep by ever-smaller steps that never
+    shrink the bracket, and the search stops converging rather than converging
+    slowly. Either way the bracket shrinks and still contains the minimum, so ``f``
+    need only be unimodal within the bracket the scan found -- a minimum in a
+    narrow dip elsewhere is found by the scan and refined from there.
 
-    Refinement also stops where the objective has gone flat -- the three bracket
-    values agreeing to ``ftol`` relative -- because past that point the location
-    of the minimum is not resolvable in double precision and narrowing the bracket
-    buys nothing. A profile likelihood that is flat in its variance component is
-    saying that component is barely identified, which is a fact about the data
-    rather than something a tighter search would settle.
+    Refinement also stops where the objective has gone flat to ``ftol``, since past
+    that point the minimum's location is not resolvable in double precision. A
+    profile likelihood flat in its variance component is saying that component is
+    barely identified, which a tighter search would not settle.
 
-    A dataset whose scan minimum is an *end* of the interval is left alone. The
+    A dataset whose scan minimum is an *end* of the interval is left alone: the
     scan's innermost fraction is 1e-6 of the width, so unimodality already places
-    that minimum between the end and a point 1e-6 away, and refining it further
-    would be spurious precision. Excluding those from the stopping rule is what
-    keeps the very common case of a variance component pinned at zero from
-    holding the refinement open for every other dataset.
+    the minimum that close to the end. Excluding those from the stopping rule keeps
+    the common case of a variance component pinned at zero from holding refinement
+    open for every other dataset.
 
-    The point returned is the better of the refined one and the best scan point,
-    so it is never worse than the scan alone and an optimum sitting exactly on an
-    end of the interval -- tau^2 = 0, say -- is returned exactly rather than
-    approached from inside the bracket.
+    The point returned is the better of the refined one and the best scan point, so
+    it is never worse than the scan alone and an optimum sitting exactly on an end
+    -- tau^2 = 0, say -- is returned exactly.
 
-    ``f`` may return ``nan`` for a degenerate dataset. Those values are treated
-    as ``inf`` throughout, so a ``nan`` never wins the bracket and never displaces
-    a real value.
+    ``f`` may return ``nan`` for a degenerate dataset. Those are treated as ``inf``
+    throughout, so a ``nan`` never wins the bracket.
     """
     lower = np.asarray(lower, dtype=float)
     upper = np.asarray(upper, dtype=float)
@@ -1042,9 +1024,9 @@ def bounded_scalar_min(f, lower, upper, xtol=1e-6, ftol=1e-12, maxiter=50):
             f"{lower.shape} and {upper.shape}."
         )
 
-    # Checked rather than assumed: a reversed interval descends, which flips the
-    # sign of the tolerance and of every ordering the refinement relies on, and
-    # the search would quietly return a scan point instead of raising.
+    # Checked rather than assumed: a reversed interval flips the sign of the
+    # tolerance and of every ordering the refinement relies on, and the search
+    # would quietly return a scan point instead of raising.
     reversed_bounds = lower > upper
     if reversed_bounds.any():
         raise ValueError(
@@ -1063,9 +1045,9 @@ def bounded_scalar_min(f, lower, upper, xtol=1e-6, ftol=1e-12, maxiter=50):
     best = np.argmin(scan_vals, axis=0)
     settled = (best == 0) | (best == scan.shape[0] - 1)
 
-    # Bracket the minimum with the scan point either side of the best one,
-    # clipped inwards so that the middle point is interior. All three values are
-    # already known, so the refinement starts without spending an evaluation.
+    # Bracket the minimum with the scan point either side of the best one, clipped
+    # inwards so that the middle point is interior. All three values are already
+    # known, so refinement starts without spending an evaluation.
     middle = np.clip(best, 1, scan.shape[0] - 2)
 
     def at(index):
@@ -1097,8 +1079,8 @@ def bounded_scalar_min(f, lower, upper, xtol=1e-6, ftol=1e-12, maxiter=50):
 
         # Vertex of the parabola through the three points, and its curvature. A
         # degenerate dataset carries inf values, whose differences are nan; the
-        # test below rejects those, so the arithmetic getting there is silenced
-        # rather than guarded.
+        # usability test below rejects those, so the arithmetic is silenced rather
+        # than guarded.
         with np.errstate(divide="ignore", invalid="ignore"):
             left, right = mid - low, mid - high
             slope = left * (f_mid - f_high) - right * (f_mid - f_low)
@@ -1129,9 +1111,9 @@ def bounded_scalar_min(f, lower, upper, xtol=1e-6, ftol=1e-12, maxiter=50):
         last_step = np.where(usable, proposed, _GOLDEN_SECTION * larger_half)
 
         # Keep the half the minimum has to lie in. Whichever side the candidate
-        # fell on, an improvement there moves the middle point onto it and drops
-        # the far end; no improvement drops the end beyond the candidate. Both
-        # keep the middle point interior and the minimum inside the bracket.
+        # fell on, an improvement there moves the middle point onto it and drops the
+        # far end; no improvement drops the end beyond the candidate. Both keep the
+        # middle point interior and the minimum inside the bracket.
         after = candidate > mid
         better = f_candidate < f_mid
         new_low = np.where(after, np.where(better, mid, low), np.where(better, low, candidate))
@@ -1147,9 +1129,9 @@ def bounded_scalar_min(f, lower, upper, xtol=1e-6, ftol=1e-12, maxiter=50):
         mid = np.where(better, candidate, mid)
         f_mid = np.where(better, f_candidate, f_mid)
 
-    # Fall back on the best scan point wherever refinement did not beat it. That
-    # is what returns an optimum on an end of the interval exactly, and it is why
-    # the settled datasets above can be left where the scan put them.
+    # Fall back on the best scan point wherever refinement did not beat it, which
+    # returns an optimum on an end of the interval exactly and is why the settled
+    # datasets above can be left where the scan put them.
     scan_x, scan_f = at(best)
     keep_scan = ~(f_mid <= scan_f)
     return np.where(keep_scan, scan_x, mid), np.where(keep_scan, scan_f, f_mid)

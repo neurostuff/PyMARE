@@ -28,9 +28,8 @@ from ..stats import (
 
 WEIGHT_SCHEMES = ("individual", "rescale", "collapse")
 
-#: Upper end of the bounded search variable that stands in for tau^2. The
-#: variable is a fraction, and one just short of 1 maps to a very large tau^2
-#: rather than to an infinite one; see :func:`_tau2_from_search`.
+#: Upper end of the bounded search variable that stands in for tau^2: a fraction
+#: just short of 1, which maps to a very large tau^2 rather than an infinite one.
 _SEARCH_MAX = 1.0 - 1e-9
 
 
@@ -127,13 +126,10 @@ def _tau2_from_search(u, scale):
 
     Notes
     -----
-    tau^2 has no upper bound, so searching it directly means choosing one and
-    risking an optimum outside it. This mapping is monotone and sends ``[0, 1)``
-    onto ``[0, inf)``, so a bounded search over ``u`` cannot truncate the
-    parameter space; ``scale`` only decides where in it the scan looks hardest.
-    Monotonicity is what keeps the objective as unimodal in ``u`` as it is in
-    tau^2, which is what the refinement in
-    :func:`~pymare.stats.bounded_scalar_min` needs.
+    The map is monotone from ``[0, 1)`` onto ``[0, inf)``, so a bounded search
+    over ``u`` cannot truncate the parameter space and preserves the unimodality
+    :func:`~pymare.stats.bounded_scalar_min` needs. ``scale`` only decides where
+    in that space the scan looks hardest.
     """
     return scale * u / (1.0 - u)
 
@@ -153,10 +149,9 @@ def _search_scale(scale):
 
     Notes
     -----
-    A degenerate dataset -- every variance zero, say -- can produce a scale of
-    zero or a non-finite one, which would collapse the search to a single point.
-    Falling back to 1 still spans all of ``[0, inf)``, so the substitution costs
-    resolution where the scan looks first and nothing else.
+    A degenerate dataset -- every variance zero, say -- can give a scale of zero
+    or a non-finite one, collapsing the search to a point. Falling back to 1 still
+    spans all of ``[0, inf)``, so the substitution costs only resolution.
     """
     scale = np.asarray(scale, dtype=float)
     return np.where(np.isfinite(scale) & (scale > 0), scale, 1.0)
@@ -1113,11 +1108,10 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 
     Notes
     -----
-    The coefficients are profiled out of the likelihood, leaving tau^2 as the
-    only free parameter, and that one-dimensional search is run for every
-    parallel dataset at once by :func:`~pymare.stats.bounded_scalar_min`. The
-    coefficients reported are the weighted least-squares solution at the fitted
-    tau^2, which is what profiling them out makes them.
+    The coefficients are profiled out of the likelihood, leaving tau^2 as the only
+    free parameter; :func:`~pymare.stats.bounded_scalar_min` searches for it across
+    all parallel datasets at once. The coefficients reported are the weighted
+    least-squares solution at the fitted tau^2.
 
     References
     ----------
@@ -1165,8 +1159,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         self.dataset_ = None
 
         y = ensure_2d(y)
-        # A single column of v applies to every parallel dataset; expand it once
-        # here so everything downstream sees one shape.
+        # A single column of v is shared by every parallel dataset.
         v = broadcast_columns(ensure_2d(v), y.shape[1])
         model_y, model_v, model_X, model_groups = _collapse_inputs(
             y, v, X, g, self.weight_scheme, self.rho
@@ -1187,8 +1180,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         )
 
         # The D-L moment estimate sets the scale of the search rather than a
-        # starting value: it places the scan where tau^2 plausibly lies, which is
-        # the vectorized counterpart of warm-starting a per-dataset optimizer.
+        # starting value, placing the scan where tau^2 plausibly lies.
         scale = _search_scale(_dersimonian_laird_tau2(fit_y, fit_v, fit_X) + fit_v.mean(axis=0))
         u, _ = bounded_scalar_min(
             lambda t: self._nll_func(_tau2_from_search(t, scale), fit_y, fit_v, fit_X),
@@ -1200,11 +1192,9 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 
         w = _resolve_weights(model_v, model_groups, tau2, self.weight_scheme)
         # The coefficients are the weighted least-squares solution at the fitted
-        # tau^2 -- profiling them out of the likelihood is what makes them that --
-        # computed here on the row-level model rather than on the inputs tau^2 was
-        # fitted to, which may have been aggregated. Under cluster weighting they
-        # have to come from these weights in any case, because that weighting
-        # changes the estimand.
+        # tau^2, computed on the row-level model rather than on the inputs tau^2 was
+        # fitted to, which may have been aggregated. Cluster weighting changes the
+        # estimand, so they have to come from these weights in any case.
         beta, model_cov = weighted_least_squares(model_y, model_v, model_X, tau2, True, w=w)
         robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
             model_y,
@@ -1267,14 +1257,6 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
             Residuals from the weighted least-squares fit.
         cov_beta : :obj:`numpy.ndarray` of shape (P, P, D)
             ``(X'WX)^-1``, which REML needs and ML ignores.
-
-        Notes
-        -----
-        The weights are computed once here and handed to
-        :func:`~pymare.stats.weighted_least_squares` rather than recomputed
-        inside it. This runs once per evaluation of the objective and the
-        objective is evaluated dozens of times per fit, so the arrays it touches
-        are worth touching once.
         """
         w = 1.0 / (v + tau2)
         beta, cov_beta = weighted_least_squares(y, v, X, return_cov=True, w=w)
@@ -1301,12 +1283,10 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 
         Notes
         -----
-        For a fixed tau^2 the likelihood is maximized over the coefficients by
-        their weighted least-squares solution, so substituting it leaves a
-        function of tau^2 alone. Minimizing that is equivalent to minimizing the
-        joint likelihood over the coefficients and tau^2 together, and it turns
-        the fit into a one-dimensional search that can be run for every parallel
-        dataset at once.
+        At a fixed tau^2 the weighted least-squares solution maximizes the
+        likelihood over the coefficients, so substituting it leaves a function of
+        tau^2 alone. Minimizing that is equivalent to minimizing the joint
+        likelihood over both, and it can be done for every dataset at once.
         """
         w, resid, _ = self._profile_fit(tau2, y, v, X)
         return self._profile_nll(w, resid)
@@ -1333,11 +1313,9 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 
         Notes
         -----
-        The restriction term ``0.5 * log|X'WX|`` does not involve the
-        coefficients, so profiling them out of the ML part is unaffected by it.
-        It is read off the covariance the fit already produced --
-        ``log|X'WX| = -log|(X'WX)^-1|`` -- rather than by forming ``X'WX`` a
-        second time. ``slogdet`` is the stable form of ``log(det(...))``.
+        The restriction term ``0.5 * log|X'WX|`` does not involve the coefficients,
+        so profiling them out is unaffected by it. It is read off the covariance the
+        fit already produced, since ``log|X'WX| = -log|(X'WX)^-1|``.
         """
         w, resid, cov_beta = self._profile_fit(tau2, y, v, X)
         return self._profile_nll(w, resid) - 0.5 * np.linalg.slogdet(cov_beta.T)[1]
@@ -1374,9 +1352,9 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
 
     The coefficients and the overall scale of the two variance components are
     profiled out of the likelihood, leaving their ratio
-    ``tau^2 / (tau^2 + sigma^2)`` as the only free parameter, and that
-    one-dimensional search is run for every parallel dataset at once by
-    :func:`~pymare.stats.bounded_scalar_min`.
+    ``tau^2 / (tau^2 + sigma^2)`` as the only free parameter;
+    :func:`~pymare.stats.bounded_scalar_min` searches for it across all parallel
+    datasets at once.
 
     References
     ----------
@@ -1425,8 +1403,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         self.dataset_ = None
 
         y = ensure_2d(y)
-        # A single column of n applies to every parallel dataset; expand it once
-        # here so everything downstream sees one shape.
+        # A single column of n is shared by every parallel dataset.
         n = broadcast_columns(ensure_2d(n), y.shape[1])
         model_y, model_n, model_X, model_groups = _collapse_n_inputs(
             y, n, X, g, self.weight_scheme, self.rho
@@ -1454,10 +1431,8 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         # ``n`` is identical (and, less often, the reverse).
         #
         # Reduced over observations, not over the whole array: each column is a
-        # separate likelihood, and one that holds a single constant sample size
-        # is unidentifiable however much the other columns differ from it. A
-        # whole-array spread hides exactly that, because columns that are each
-        # constant still differ from each other.
+        # separate likelihood, and a column of constant sample sizes is
+        # unidentifiable however much the other columns differ from it.
         spread = fit_n.std(axis=0)
         unidentified = spread < np.sqrt(np.finfo(float).eps)
         if unidentified.any():
@@ -1494,11 +1469,10 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         v = sigma2 / model_n
         w = _resolve_weights(v, model_groups, tau2, self.weight_scheme)
         # The coefficients are the weighted least-squares solution at the fitted
-        # variance components -- profiling them out of the likelihood is what makes
-        # them that -- computed here on the row-level model rather than on the
-        # inputs the components were fitted to, which may have been aggregated.
-        # Under cluster weighting they have to come from these weights in any
-        # case, because that weighting changes the estimand.
+        # variance components, computed on the row-level model rather than on the
+        # inputs those were fitted to, which may have been aggregated. Cluster
+        # weighting changes the estimand, so they have to come from these weights
+        # in any case.
         beta, model_cov = weighted_least_squares(model_y, v, model_X, tau2, True, w=w)
         robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
             model_y,
@@ -1556,10 +1530,9 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
 
         Notes
         -----
-        Writing the variances this way separates the shape of the weights, which
-        the ratio fixes, from their overall scale, which drops out of the
-        weighted least-squares fit and has a closed form in the likelihood. See
-        :meth:`_profile_at_ratio`.
+        This separates the shape of the weights, which the ratio fixes, from their
+        overall scale, which drops out of the weighted least-squares fit and has a
+        closed form in the likelihood. See :meth:`_profile_at_ratio`.
         """
         return ratio + (1.0 - ratio) / n
 
@@ -1584,22 +1557,19 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
             ``tau^2 + sigma^2`` per dataset.
         cov_beta : :obj:`numpy.ndarray` of shape (P, P, D)
             ``(X'WX)^-1`` under these weights, which REML needs and ML ignores.
-            Returned alongside the scale because both come out of the one
-            weighted least-squares fit, and the objective is evaluated dozens of
-            times per fit.
+            Returned alongside the scale because both come out of the one weighted
+            least-squares fit.
 
         Notes
         -----
-        Scaling both variance components by the same factor divides every weight
-        by that factor, so the weighted dispersion the likelihood penalizes and
-        the log-determinant term both depend on the scale in closed form. Solving
-        for it gives the weighted residual sum of squares over ``K - ddof``, the
-        familiar variance estimate, and leaves the ratio as the only parameter
-        that has to be searched for. The ``ddof`` term is what distinguishes REML
-        from ML here: the restriction term contributes ``-P log(scale)``.
+        Scaling both variance components by the same factor divides every weight by
+        it, so the likelihood depends on the scale in closed form. Solving for it
+        gives the weighted residual sum of squares over ``K - ddof`` and leaves the
+        ratio as the only parameter to search for. REML differs from ML only through
+        ``ddof``, its restriction term contributing ``-P log(scale)``.
 
-        Floored at the smallest positive double, so that a saturated design whose
-        residuals vanish gives a degenerate fit rather than ``log(0)``.
+        The dispersion is floored at the smallest positive double, so a saturated
+        design whose residuals vanish gives a degenerate fit rather than ``log(0)``.
         """
         beta, cov_beta = weighted_least_squares(y, v_unit, X, return_cov=True)
         resid = y - X.dot(beta)
@@ -1627,10 +1597,10 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
 
         Notes
         -----
-        The coefficients and the scale of the variance components are both
-        replaced by their maximizing values at this ratio, which is equivalent to
-        minimizing the joint likelihood over all three and leaves a bounded
-        one-dimensional search. See :meth:`_profile_at_ratio`.
+        The coefficients and the scale are replaced by their maximizing values at
+        this ratio, which is equivalent to minimizing the joint likelihood over all
+        three and leaves a bounded one-dimensional search. See
+        :meth:`_profile_at_ratio`.
         """
         v_unit = self._unit_variance(ratio, n)
         k = X.shape[0]
@@ -1662,10 +1632,8 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         The restriction term ``0.5 * log|X'WX|`` contributes ``-P log(scale)``,
         which is why the scale is the residual sum of squares over ``K - P`` here
         and over ``K`` for ML. It does not involve the coefficients, so profiling
-        those out is unaffected by it. It is read off the covariance the fit
-        already produced -- ``log|X'WX| = -log|(X'WX)^-1|`` -- rather than by
-        forming ``X'WX`` a second time. ``slogdet`` is the stable form of
-        ``log(det(...))``.
+        those out is unaffected by it, and it is read off the covariance the fit
+        already produced, since ``log|X'WX| = -log|(X'WX)^-1|``.
         """
         v_unit = self._unit_variance(ratio, n)
         k, p = X.shape
