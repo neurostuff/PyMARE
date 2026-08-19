@@ -8,26 +8,35 @@ on:
     branches:
       - "*"
   schedule:
-    # Run tests every Sunday at 12am
+    # Run tests every Sunday at 12am, to catch breakage from new dependency
+    # releases rather than from a change to PyMARE.
     - cron: "0 0 * * 0"
 
 permissions:
   contents: read
-  checks: write
-  pull-requests: write
 
 concurrency:
-  group: environment-${{ github.ref }}
+  group: testing-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # One place to change how the suite is invoked. --cov-append lets each job
+  # write a coverage file that upload_to_codecov merges.
+  PYTEST_COMMON_ARGS: --cov-append --cov-report=xml --cov=pymare
+  # Everything except the Stan estimator, whose model has to be compiled and so
+  # costs minutes rather than seconds. It gets the job below to itself.
+  PYTEST_UNIT_MARKERS: not stan
+  PYTEST_STAN_MARKERS: stan
 
 jobs:
   # Determine if tests should be run based on commit message.
   check_skip:
+    name: Determine if CI should be skipped
     runs-on: ubuntu-latest
     outputs:
       skip: ${{ steps.result_step.outputs.ci-skip }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - id: result_step
@@ -36,58 +45,94 @@ jobs:
           commit-filter: "[skip ci];[ci skip];[skip github]"
           commit-filter-separator: ";"
 
-  run_tests:
+  run_unit_tests:
+    name: Unit tests
     needs: check_skip
     if: ${{ needs.check_skip.outputs.skip == 'false' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest", "macos-13"]
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        # Every supported Python on Linux, and the ends of the range on the
+        # other two platforms: a break that only one middle version sees is
+        # far rarer than one only a platform sees.
+        os: ["ubuntu-latest"]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: "macos-latest"
+            python-version: "3.11"
+          - os: "macos-latest"
+            python-version: "3.13"
+          - os: "windows-latest"
+            python-version: "3.9"
+          - os: "windows-latest"
+            python-version: "3.13"
 
-    name: ${{ matrix.os }} with Python ${{ matrix.python-version }}
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: "Set up python"
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: "Display Python version"
-        shell: bash {0}
         run: python -c "import sys; print(sys.version)"
       - name: "Install PyMARE"
-        shell: bash {0}
-        run: pip install -e .[tests,stan]
-      - name: "Run tests"
-        shell: bash {0}
-        run: python -m pytest --pyargs pymare --cov=pymare
-      - name: "Upload coverage to CodeCov"
-        uses: codecov/codecov-action@v4
-        if: success()
-
-  flake8-lint:
-    runs-on: ubuntu-latest
-    name: Lint with flake8
-    steps:
-      - name: Check out source repository
-        uses: actions/checkout@v3
-
-      - name: Set up Python environment
-        uses: actions/setup-python@v2
-        with:
-          python-version: "3.8"
-
-      - name: "Install the package"
-        shell: bash {0}
         run: |
           python -m pip install --progress-bar off --upgrade pip setuptools wheel
           python -m pip install -e .[tests]
+      - name: "Run tests"
+        run: python -m pytest -m "${PYTEST_UNIT_MARKERS}" ${PYTEST_COMMON_ARGS}
+      - name: "Upload coverage"
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit_${{ matrix.os }}_${{ matrix.python-version }}
+          path: coverage.xml
+        if: success()
 
-      - name: "Run flake8"
-        shell: bash {0}
+  run_stan_tests:
+    name: Stan estimator tests
+    needs: check_skip
+    if: ${{ needs.check_skip.outputs.skip == 'false' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Set up python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: "Install PyMARE with the stan extra"
         run: |
-          flake8 pymare
+          python -m pip install --progress-bar off --upgrade pip setuptools wheel
+          python -m pip install -e .[tests,stan]
+      - name: "Run tests"
+        run: python -m pytest -m "${PYTEST_STAN_MARKERS}" ${PYTEST_COMMON_ARGS}
+      - name: "Upload coverage"
+        uses: actions/upload-artifact@v4
+        with:
+          name: stan
+          path: coverage.xml
+        if: success()
+
+  upload_to_codecov:
+    name: Upload coverage
+    needs: [run_unit_tests, run_stan_tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download coverage from every test job
+        uses: actions/download-artifact@v4
+      - name: Upload to CodeCov
+        uses: codecov/codecov-action@v5
+        with:
+          # The token is optional for public repositories, so a fork without it
+          # should not turn a passing test run into a failing check.
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

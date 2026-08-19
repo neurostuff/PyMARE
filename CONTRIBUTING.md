@@ -78,6 +78,73 @@ Submit a [pull request][link_pullrequest].
 
 A member of the development team will review your changes to confirm that they can be merged into the main codebase.
 
+## Running the tests
+
+Install the test dependencies and run the suite:
+
+```bash
+pip install -e .[tests]
+make unittest
+```
+
+The suite is organized one test file per source module -- `test_stats.py` covers
+`pymare/stats.py`, `test_estimators.py` covers `pymare/estimators/estimators.py`,
+and so on. Fixtures live in `pymare/tests/conftest.py` and helpers that are
+neither fixtures nor tests live in `pymare/tests/utils.py`, so a test file holds
+only tests.
+
+Two groups of tests are marked, because they need something the default
+environment does not have:
+
+| Target | What it runs | Needs |
+| --- | --- | --- |
+| `make unittest` | everything except the Stan tests | nothing extra |
+| `make test_stan` | the Stan estimator tests | `pip install -e .[stan]` |
+| `make test_robumeta` | the robumeta alignment tests | nothing extra |
+| `make check_robumeta_alignment` | regenerates the robumeta reference values | Docker |
+| `make lint` | flake8 over `pymare` and `benchmarks` | nothing extra |
+
+Each of these has a GitHub Actions job behind it, so a target that passes
+locally is the same check that runs on your pull request.
+
+### Alignment with robumeta
+
+`pymare/tests/test_robumeta_alignment.py` pins PyMARE's correlated-effects model
+against the R package [robumeta][link_robumeta], over every combination of model,
+rho and variance column that both implementations can express. robumeta cannot be
+a test dependency, so its output is pinned in
+`pymare/tests/data/robumeta_reference.json`.
+
+`make check_robumeta_alignment` regenerates that file inside a Docker image with
+pinned R and robumeta versions, and fails if any number moved. The
+`Check robumeta alignment` workflow runs the same script on every pull request,
+so a change to the estimator that breaks agreement shows up as a failing check
+rather than as a stale pin. If you changed the estimator on purpose, rerun the
+script and commit the regenerated file.
+
+### Benchmarks
+
+Performance is guarded by [asv][link_asv]. The suite lives in `benchmarks/`, and
+the `Benchmark` workflow times a pull request against its base branch and fails
+if a benchmark is at least 1.3x slower with a statistically significant
+difference. To run it once locally:
+
+```bash
+pip install asv virtualenv
+asv machine --yes
+make benchmark
+```
+
+To reproduce what CI does, compare two commits:
+
+```bash
+asv continuous --factor 1.3 --split master HEAD
+```
+
+`benchmarks/bench_cluster_robust.py` is not part of the asv suite. It is a
+standalone report on where the time in a robust fit goes; run it with
+`python benchmarks/bench_cluster_robust.py`.
+
 ## Recognizing contributions
 
 We welcome and recognize all contributions from documentation to testing to code development. You can see a list of current contributors in our [zenodo][link_zenodo] file. If you are new to the project, don't forget to add your name and affiliation there!
@@ -103,3 +170,5 @@ You're awesome.
 [link_updateupstreamwiki]: https://help.github.com/articles/syncing-a-fork/
 [link_stemmrolemodels]: https://github.com/KirstieJane/STEMMRoleModels
 [link_zenodo]: https://github.com/neurostuff/PyMARE/blob/master/.zenodo.json
+[link_robumeta]: https://cran.r-project.org/package=robumeta
+[link_asv]: https://asv.readthedocs.io/en/stable/
