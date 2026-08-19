@@ -812,6 +812,55 @@ def undo_centering_shrinkage(corr, groups):
     return np.clip(corrected, -1.0, 1.0)
 
 
+def _invert_stack(matrices):
+    """Invert stacked square matrices, falling back to the pseudo-inverse.
+
+    Parameters
+    ----------
+    matrices : :obj:`numpy.ndarray` of shape (D, P, P)
+        One square matrix per parallel dataset.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray` of shape (D, P, P)
+        The inverses.
+
+    Notes
+    -----
+    ``np.linalg.pinv`` takes a singular value decomposition of every matrix in
+    the stack, which for the one- to three-predictor designs meta-regression
+    actually uses is several times the cost of an ordinary inverse and hundreds
+    of times the cost of a reciprocal. Measured on a stack of 20000 matrices:
+    74.7 ms for ``pinv``, 7.1 ms for ``inv``, 0.03 ms for ``1 / x`` at ``P = 1``.
+    Since the likelihood estimators invert one stack per objective evaluation and
+    evaluate the objective dozens of times, that choice sets the cost of a fit.
+
+    A one-predictor design -- the intercept-only meta-analysis -- makes every
+    matrix 1x1, so its own branch is worth having. Otherwise an LU inverse is
+    used, which is defined whenever ``X'WX`` is nonsingular, and that holds
+    whenever ``X`` has full column rank and the weights are positive.
+
+    The pseudo-inverse remains the fallback for the cases where it is the only
+    defined answer: an exactly singular matrix makes ``inv`` raise or return
+    non-finite entries, and both are checked for. An ill-conditioned but
+    nonsingular design now gets the ordinary inverse rather than one with its
+    smallest singular values truncated, so a nearly collinear design reports a
+    large covariance instead of a quietly regularized one.
+    """
+    if matrices.shape[-1] == 1:
+        with np.errstate(divide="ignore"):
+            inverse = 1.0 / matrices
+    else:
+        try:
+            inverse = np.linalg.inv(matrices)
+        except np.linalg.LinAlgError:
+            return np.linalg.pinv(matrices)
+
+    if not np.isfinite(inverse).all():
+        return np.linalg.pinv(matrices)
+    return inverse
+
+
 def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
     r"""Perform 2-D weighted least squares.
 
@@ -855,7 +904,9 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
     than in a Python loop, which is what makes the estimators usable when ``D``
     runs to hundreds of thousands. The ``einsum`` subscripts use ``k`` for
     observations, ``p`` and ``q`` for predictors and ``i`` for parallel
-    datasets.
+    datasets. Inverting the ``D`` copies of ``X'WX`` is the expensive step; see
+    :func:`_invert_stack` for what that costs and why it is not a pseudo-inverse
+    by default.
 
     ``(X'WX)^-1`` is the covariance of the coefficients, not an inverse
     covariance: ``X'WX`` is the inverse covariance, so inverting it returns the
@@ -874,12 +925,11 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
     wX = np.einsum("kp,ki->ipk", X, w)
     cov = wX.dot(X)
 
-    # numpy >= 1.8 inverts stacked matrices along the first N - 2 dims, so we
-    # can vectorize computation along the second dimension (parallel datasets)
-    # (X'WX)^-1, i.e. the covariance of beta. Deliberately not called
-    # "precision": in statistics a precision matrix is the *inverse* of a
+    # (X'WX)^-1, i.e. the covariance of beta, inverted along the first N - 2
+    # dimensions so that all D datasets are done in one call. Deliberately not
+    # called "precision": in statistics a precision matrix is the *inverse* of a
     # covariance, which is X'WX itself, not this.
-    cov_beta = np.linalg.pinv(cov).T
+    cov_beta = _invert_stack(cov).T
 
     pwX = np.einsum("ipk,qpi->iqk", wX, cov_beta)
     beta = np.einsum("ipk,ik->ip", pwX, y.T).T
@@ -902,14 +952,14 @@ _SCAN_FRACTIONS = np.unique(
     )
 )
 
-#: 1 / golden ratio. Splitting an interval at this fraction from each end makes
-#: one of the two interior points of the surviving sub-interval coincide with an
-#: interior point of the current one, so each iteration costs a single
-#: evaluation instead of two.
-_GOLDEN_SECTION = (np.sqrt(5.0) - 1.0) / 2.0
+#: Fraction of the larger half of the bracket that the safeguard step moves
+#: into, when the parabola through the three current points is unusable. This is
+#: the golden-section fraction, which shrinks the bracket by the largest factor
+#: guaranteed for a step that cannot use curvature.
+_GOLDEN_SECTION = (3.0 - np.sqrt(5.0)) / 2.0
 
 
-def bounded_scalar_min(f, lower, upper, xtol=1e-10, maxiter=100):
+def bounded_scalar_min(f, lower, upper, xtol=1e-6, ftol=1e-12, maxiter=50):
     """Minimize a scalar function over a bounded interval for many datasets at once.
 
     Parameters
@@ -923,10 +973,15 @@ def bounded_scalar_min(f, lower, upper, xtol=1e-10, maxiter=100):
     lower, upper : :obj:`numpy.ndarray` of shape (D,)
         Per-dataset search bounds, ``lower <= upper``.
     xtol : :obj:`float`, optional
-        Stop once every dataset's bracket is narrower than
-        ``xtol * (1 + abs(x))``. Default = 1e-10.
+        Stop once every dataset's bracket has been narrowed to this fraction of
+        the bracket the scan started it at. Relative to the starting bracket
+        rather than absolute, so it means the same thing whatever the parameter's
+        scale. Default = 1e-6.
+    ftol : :obj:`float`, optional
+        Also stop where the objective is this flat across the bracket, relative to
+        its own size. Default = 1e-12.
     maxiter : :obj:`int`, optional
-        Cap on refinement iterations. Default = 100.
+        Cap on refinement iterations. Default = 50.
 
     Returns
     -------
@@ -937,25 +992,47 @@ def bounded_scalar_min(f, lower, upper, xtol=1e-10, maxiter=100):
 
     Notes
     -----
-    A coarse scan over :data:`_SCAN_FRACTIONS` brackets each dataset's minimum,
-    then golden-section search refines every bracket in step. The whole search
-    costs ``len(_SCAN_FRACTIONS) + 2 + iterations`` vectorized evaluations of
-    ``f`` no matter how many datasets there are, where a per-dataset
+    A coarse scan over :data:`_SCAN_FRACTIONS` brackets each dataset's minimum in
+    three points, and successive parabolic interpolation then refines every
+    bracket in step, one evaluation per iteration. The whole search costs
+    ``len(_SCAN_FRACTIONS)`` plus a few dozen vectorized evaluations of ``f`` no
+    matter how many datasets there are, where a per-dataset
     :func:`scipy.optimize.minimize` costs a Python-level optimization each.
 
-    Golden-section search needs the objective to be unimodal on the bracket, not
-    globally, which is what the scan buys: a minimum in a narrow dip elsewhere in
-    the interval is found by the scan and refined from there. The scan is also
-    what makes this less prone to a local minimum than a quasi-Newton run from a
-    single starting value.
+    The parabola through the three points is only used when it opens upwards,
+    its vertex falls strictly inside the bracket, and the step is under half the
+    one taken two iterations ago; otherwise the step is a golden-section one into
+    the larger half. Those are Brent's safeguards, and the last of them is the
+    load-bearing one: without it a nearly flat objective lets the interpolation
+    creep by ever-smaller steps that never shrink the bracket, and the search
+    stops converging rather than converging slowly. Either way the bracket
+    shrinks and continues to contain the minimum, so the only property required of
+    ``f`` is that it is unimodal within the bracket the scan found. Global
+    unimodality is not needed: a minimum in a narrow dip elsewhere in the interval
+    is found by the scan and refined from there.
+
+    Refinement also stops where the objective has gone flat -- the three bracket
+    values agreeing to ``ftol`` relative -- because past that point the location
+    of the minimum is not resolvable in double precision and narrowing the bracket
+    buys nothing. A profile likelihood that is flat in its variance component is
+    saying that component is barely identified, which is a fact about the data
+    rather than something a tighter search would settle.
+
+    A dataset whose scan minimum is an *end* of the interval is left alone. The
+    scan's innermost fraction is 1e-6 of the width, so unimodality already places
+    that minimum between the end and a point 1e-6 away, and refining it further
+    would be spurious precision. Excluding those from the stopping rule is what
+    keeps the very common case of a variance component pinned at zero from
+    holding the refinement open for every other dataset.
 
     The point returned is the better of the refined one and the best scan point,
-    so it is never worse than the scan alone.
+    so it is never worse than the scan alone and an optimum sitting exactly on an
+    end of the interval -- tau^2 = 0, say -- is returned exactly rather than
+    approached from inside the bracket.
 
     ``f`` may return ``nan`` for a degenerate dataset. Those values are treated
-    as ``inf`` in the scan so that a ``nan`` never wins the bracket, and the
-    comparisons in the refinement are false for them, which leaves that dataset
-    parked at its scan bracket rather than propagating into the others.
+    as ``inf`` throughout, so a ``nan`` never wins the bracket and never displaces
+    a real value.
     """
     lower = np.asarray(lower, dtype=float)
     upper = np.asarray(upper, dtype=float)
@@ -965,59 +1042,101 @@ def bounded_scalar_min(f, lower, upper, xtol=1e-10, maxiter=100):
             f"{lower.shape} and {upper.shape}."
         )
 
+    def evaluate(candidate):
+        """Score a candidate, reading nan as inf."""
+        value = np.asarray(f(candidate), dtype=float)
+        return np.where(np.isnan(value), np.inf, value)
+
     scan = lower + np.multiply.outer(_SCAN_FRACTIONS, upper - lower)
-    scan_vals = np.stack([f(candidate) for candidate in scan])
-    best = np.argmin(np.where(np.isnan(scan_vals), np.inf, scan_vals), axis=0)
+    scan_vals = np.stack([evaluate(candidate) for candidate in scan])
+    best = np.argmin(scan_vals, axis=0)
+    settled = (best == 0) | (best == scan.shape[0] - 1)
 
-    # The bracket is the pair of scan points either side of the best one. Both
-    # neighbours are clipped into range, so a minimum at an end of the interval
-    # brackets as [end, next] rather than reaching outside it.
-    left = np.take_along_axis(scan, np.maximum(best - 1, 0)[None], axis=0)[0]
-    right = np.take_along_axis(scan, np.minimum(best + 1, scan.shape[0] - 1)[None], axis=0)[0]
+    # Bracket the minimum with the scan point either side of the best one,
+    # clipped inwards so that the middle point is interior. All three values are
+    # already known, so the refinement starts without spending an evaluation.
+    middle = np.clip(best, 1, scan.shape[0] - 2)
 
-    low = left
-    high = right
-    interior_low = high - _GOLDEN_SECTION * (high - low)
-    interior_high = low + _GOLDEN_SECTION * (high - low)
-    f_low = f(interior_low)
-    f_high = f(interior_high)
+    def at(index):
+        """Read the scan point and value at a per-dataset index."""
+        return (
+            np.take_along_axis(scan, index[None], axis=0)[0],
+            np.take_along_axis(scan_vals, index[None], axis=0)[0],
+        )
+
+    low, f_low = at(middle - 1)
+    mid, f_mid = at(middle)
+    high, f_high = at(middle + 1)
+    tol = xtol * (high - low)
+
+    # Brent's step bookkeeping: the length of the last step and of the one before
+    # it. Started at the bracket width, which lets the first step be a parabolic
+    # one as long as it is not wilder than half the bracket.
+    last_step = previous_step = high - low
 
     for _ in range(maxiter):
-        if np.all(high - low <= xtol * (1.0 + np.abs(low))):
+        flat = np.abs(f_low - f_high) <= ftol * (1.0 + np.abs(f_mid))
+        if np.all(settled | flat | (high - low <= tol)):
             break
 
-        # Drop the end beyond whichever interior point is worse.
-        keep_left = f_low <= f_high
-        new_low = np.where(keep_left, low, interior_low)
-        new_high = np.where(keep_left, interior_high, high)
+        # Vertex of the parabola through the three points, and its curvature. A
+        # degenerate dataset carries inf values, whose differences are nan; the
+        # test below rejects those, so the arithmetic getting there is silenced
+        # rather than guarded.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            left, right = mid - low, mid - high
+            slope = left * (f_mid - f_high) - right * (f_mid - f_low)
+            curve = (f_high - f_mid) / (high - mid) - (f_mid - f_low) / (mid - low)
+            vertex = mid - 0.5 * (left**2 * (f_mid - f_high) - right**2 * (f_mid - f_low)) / slope
 
-        # One interior point of the new interval is an interior point of the old
-        # one, so only the other has to be evaluated. Which of the two it is
-        # differs per dataset, so both roles are assembled with where() and the
-        # fresh points are evaluated in a single call.
-        kept = np.where(keep_left, interior_low, interior_high)
-        f_kept = np.where(keep_left, f_low, f_high)
-        span = _GOLDEN_SECTION * (new_high - new_low)
-        fresh = np.where(keep_left, new_high - span, new_low + span)
-        f_fresh = f(fresh)
+        # Take the vertex only where it is a minimum, lies inside the bracket and
+        # is far enough from the middle point to be worth evaluating.
+        floor = np.maximum(tol, np.finfo(float).eps * (1.0 + np.abs(mid)))
+        proposed = np.abs(vertex - mid)
+        usable = (
+            (curve > 0)
+            & np.isfinite(vertex)
+            & (vertex > low + floor)
+            & (vertex < high - floor)
+            & (proposed > floor)
+            & (proposed < 0.5 * previous_step)
+        )
+        larger_half = np.maximum(mid - low, high - mid)
+        safeguard = np.where(
+            (mid - low) > (high - mid),
+            mid - _GOLDEN_SECTION * (mid - low),
+            mid + _GOLDEN_SECTION * (high - mid),
+        )
+        candidate = np.where(usable, vertex, safeguard)
+        f_candidate = evaluate(candidate)
+        previous_step = np.where(usable, last_step, larger_half)
+        last_step = np.where(usable, proposed, _GOLDEN_SECTION * larger_half)
 
-        interior_low = np.where(keep_left, fresh, kept)
-        f_low = np.where(keep_left, f_fresh, f_kept)
-        interior_high = np.where(keep_left, kept, fresh)
-        f_high = np.where(keep_left, f_kept, f_fresh)
+        # Keep the half the minimum has to lie in. Whichever side the candidate
+        # fell on, an improvement there moves the middle point onto it and drops
+        # the far end; no improvement drops the end beyond the candidate. Both
+        # keep the middle point interior and the minimum inside the bracket.
+        after = candidate > mid
+        better = f_candidate < f_mid
+        new_low = np.where(after, np.where(better, mid, low), np.where(better, low, candidate))
+        new_high = np.where(after, np.where(better, high, candidate), np.where(better, mid, high))
+        new_f_low = np.where(
+            after, np.where(better, f_mid, f_low), np.where(better, f_low, f_candidate)
+        )
+        new_f_high = np.where(
+            after, np.where(better, f_high, f_candidate), np.where(better, f_mid, f_high)
+        )
         low, high = new_low, new_high
+        f_low, f_high = new_f_low, new_f_high
+        mid = np.where(better, candidate, mid)
+        f_mid = np.where(better, f_candidate, f_mid)
 
-    # Fall back on the best scan point where refinement did not beat it, so the
-    # result is never worse than the scan and an optimum sitting exactly on an
-    # end of the interval -- tau^2 = 0, say -- is returned exactly rather than
-    # approached from inside the bracket.
-    take_low = f_low <= f_high
-    x = np.where(take_low, interior_low, interior_high)
-    fval = np.where(take_low, f_low, f_high)
-    scan_x = np.take_along_axis(scan, best[None], axis=0)[0]
-    scan_f = np.take_along_axis(scan_vals, best[None], axis=0)[0]
-    keep_scan = ~(fval <= scan_f)
-    return np.where(keep_scan, scan_x, x), np.where(keep_scan, scan_f, fval)
+    # Fall back on the best scan point wherever refinement did not beat it. That
+    # is what returns an optimum on an end of the interval exactly, and it is why
+    # the settled datasets above can be left where the scan put them.
+    scan_x, scan_f = at(best)
+    keep_scan = ~(f_mid <= scan_f)
+    return np.where(keep_scan, scan_x, mid), np.where(keep_scan, scan_f, f_mid)
 
 
 def _symmetric_sqrt(matrices):

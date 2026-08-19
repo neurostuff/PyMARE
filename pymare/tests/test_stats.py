@@ -9,6 +9,7 @@ from pymare import stats
 from pymare.estimators import DerSimonianLaird
 from pymare.estimators.estimators import _dersimonian_laird_tau2
 from pymare.stats import (
+    _SCAN_FRACTIONS,
     MIN_DOF_FOR_SATTERTHWAITE,
     _cr2_low_rank_apply,
     _cr2_low_rank_factors,
@@ -62,6 +63,35 @@ def test_bounded_scalar_min_finds_a_minimum_off_the_linear_scan():
     assert np.allclose(x, 0.3141592, atol=1e-6)
 
 
+def test_bounded_scalar_min_does_not_refine_a_constant_objective():
+    """There is nothing to locate, so the refinement stops before its first step."""
+    calls = []
+
+    def objective(x):
+        """Score a candidate, and record that it was scored."""
+        calls.append(1)
+        return np.zeros_like(x)
+
+    x, fval = bounded_scalar_min(objective, np.zeros(1), np.ones(1))
+
+    assert np.allclose(fval, 0.0)
+    assert np.isfinite(x).all()
+    assert len(calls) == _SCAN_FRACTIONS.size
+
+
+def test_bounded_scalar_min_converges_on_a_very_flat_minimum():
+    """A minimum with almost no curvature must not stall the refinement.
+
+    Parabolic interpolation fits such a minimum badly and can creep towards it by
+    ever-smaller steps that never shrink the bracket. The step-size safeguard is
+    what bounds the iteration count, so this is asserted under a low ``maxiter``:
+    without the safeguard the search is still far away when it runs out.
+    """
+    x, _ = bounded_scalar_min(lambda x: np.abs(x - 0.4) ** 6, np.zeros(1), np.ones(1), maxiter=25)
+
+    assert np.allclose(x, 0.4, atol=1e-3)
+
+
 def test_bounded_scalar_min_isolates_a_degenerate_dataset():
     """A dataset whose objective is nan must not disturb the others."""
     targets = np.array([0.25, np.nan, 0.75])
@@ -78,6 +108,28 @@ def test_bounded_scalar_min_requires_matching_1d_bounds():
 
     with pytest.raises(ValueError, match="1d arrays of the same shape"):
         bounded_scalar_min(lambda x: x, np.zeros(3), np.ones(2))
+
+
+def test_weighted_least_squares_handles_a_collinear_design():
+    """A rank-deficient design still gets the pseudo-inverse answer.
+
+    The ordinary inverse the fast path uses is undefined there, and the fallback
+    is what keeps a duplicated predictor from turning the covariance into
+    infinities.
+    """
+    rng = np.random.RandomState(0)
+    y = rng.standard_normal((8, 3))
+    v = np.abs(rng.standard_normal((8, 3))) + 0.5
+    repeated = rng.standard_normal((8, 1))
+    X = np.c_[np.ones(8), repeated, repeated]
+
+    beta, cov = weighted_least_squares(y, v, X, return_cov=True)
+
+    assert np.isfinite(beta).all()
+    assert np.isfinite(cov).all()
+    # The minimum-norm solution splits a duplicated predictor's coefficient
+    # evenly between its two copies, which an ordinary inverse cannot do.
+    assert np.allclose(beta[1], beta[2])
 
 
 def test_q_gen(vars_with_intercept):

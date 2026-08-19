@@ -1227,6 +1227,59 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
             self.params_["dof"] = dof
         return self
 
+    @staticmethod
+    def _profile_nll(w, resid):
+        """Compute the ML negative log-likelihood from the weights and residuals.
+
+        Parameters
+        ----------
+        w : :obj:`numpy.ndarray` of shape (K, D)
+            The weights ``1 / (v + tau^2)``.
+        resid : :obj:`numpy.ndarray` of shape (K, D)
+            Residuals from the weighted least-squares fit under those weights.
+
+        Returns
+        -------
+        :obj:`numpy.ndarray` of shape (D,)
+            The negative log-likelihood per dataset, up to an additive constant.
+        """
+        return -0.5 * (np.log(w).sum(axis=0) - (resid * w * resid).sum(axis=0))
+
+    def _profile_fit(self, tau2, y, v, X):
+        """Fit the coefficients at a fixed tau^2 and report what the likelihood needs.
+
+        Parameters
+        ----------
+        tau2 : :obj:`numpy.ndarray` of shape (D,)
+            One candidate tau^2 per parallel dataset.
+        y : :obj:`numpy.ndarray` of shape (K, D)
+            Estimates.
+        v : :obj:`numpy.ndarray` of shape (K, D)
+            Sampling variances.
+        X : :obj:`numpy.ndarray` of shape (K, P)
+            Fixed effect design matrix.
+
+        Returns
+        -------
+        w : :obj:`numpy.ndarray` of shape (K, D)
+            The weights.
+        resid : :obj:`numpy.ndarray` of shape (K, D)
+            Residuals from the weighted least-squares fit.
+        cov_beta : :obj:`numpy.ndarray` of shape (P, P, D)
+            ``(X'WX)^-1``, which REML needs and ML ignores.
+
+        Notes
+        -----
+        The weights are computed once here and handed to
+        :func:`~pymare.stats.weighted_least_squares` rather than recomputed
+        inside it. This runs once per evaluation of the objective and the
+        objective is evaluated dozens of times per fit, so the arrays it touches
+        are worth touching once.
+        """
+        w = 1.0 / (v + tau2)
+        beta, cov_beta = weighted_least_squares(y, v, X, return_cov=True, w=w)
+        return w, y - X.dot(beta), cov_beta
+
     def _ml_profile_nll(self, tau2, y, v, X):
         """Compute the ML negative log-likelihood, profiled over the coefficients.
 
@@ -1255,9 +1308,8 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         the fit into a one-dimensional search that can be run for every parallel
         dataset at once.
         """
-        w = 1.0 / (v + tau2)
-        resid = y - X.dot(weighted_least_squares(y, v, X, tau2=tau2))
-        return -0.5 * (np.log(w).sum(axis=0) - (resid * w * resid).sum(axis=0))
+        w, resid, _ = self._profile_fit(tau2, y, v, X)
+        return self._profile_nll(w, resid)
 
     def _reml_profile_nll(self, tau2, y, v, X):
         """Compute the REML negative log-likelihood, profiled over the coefficients.
@@ -1283,12 +1335,12 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         -----
         The restriction term ``0.5 * log|X'WX|`` does not involve the
         coefficients, so profiling them out of the ML part is unaffected by it.
-        ``slogdet`` is the stable form of ``log(det(...))``.
+        It is read off the covariance the fit already produced --
+        ``log|X'WX| = -log|(X'WX)^-1|`` -- rather than by forming ``X'WX`` a
+        second time. ``slogdet`` is the stable form of ``log(det(...))``.
         """
-        w = 1.0 / (v + tau2)
-        # Einsum indices: k = observations, p = predictors, i = parallel iterates.
-        bread = np.einsum("kp,ki->ipk", X, w).dot(X)
-        return self._ml_profile_nll(tau2, y, v, X) + 0.5 * np.linalg.slogdet(bread)[1]
+        w, resid, cov_beta = self._profile_fit(tau2, y, v, X)
+        return self._profile_nll(w, resid) - 0.5 * np.linalg.slogdet(cov_beta.T)[1]
 
 
 class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
@@ -1422,7 +1474,8 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
             np.ones(fit_y.shape[1]),
             **self.kwargs,
         )
-        scale = self._profile_scale(ratio, fit_y, fit_n, fit_X, ddof=self._profile_ddof(fit_X))
+        v_unit = self._unit_variance(ratio, fit_n)
+        scale, _ = self._profile_at_ratio(v_unit, fit_y, fit_X, ddof=self._profile_ddof(fit_X))
         sigma2 = scale * (1.0 - ratio)
         tau2 = scale * ratio
 
@@ -1494,21 +1547,19 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         Writing the variances this way separates the shape of the weights, which
         the ratio fixes, from their overall scale, which drops out of the
         weighted least-squares fit and has a closed form in the likelihood. See
-        :meth:`_profile_scale`.
+        :meth:`_profile_at_ratio`.
         """
         return ratio + (1.0 - ratio) / n
 
-    def _profile_scale(self, ratio, y, n, X, ddof=0):
-        """Return the total variance ``tau^2 + sigma^2`` that maximizes the likelihood.
+    def _profile_at_ratio(self, v_unit, y, X, ddof=0):
+        """Return the total variance that maximizes the likelihood, and the covariance.
 
         Parameters
         ----------
-        ratio : :obj:`numpy.ndarray` of shape (D,)
-            ``tau^2 / (tau^2 + sigma^2)`` per parallel dataset.
+        v_unit : :obj:`numpy.ndarray` of shape (K, D)
+            Observation variances up to their scale, from :meth:`_unit_variance`.
         y : :obj:`numpy.ndarray` of shape (K, D)
             Estimates.
-        n : :obj:`numpy.ndarray` of shape (K, D)
-            Sample sizes.
         X : :obj:`numpy.ndarray` of shape (K, P)
             Fixed effect design matrix.
         ddof : :obj:`int`, optional
@@ -1517,8 +1568,13 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
 
         Returns
         -------
-        :obj:`numpy.ndarray` of shape (D,)
-            The scale per dataset.
+        scale : :obj:`numpy.ndarray` of shape (D,)
+            ``tau^2 + sigma^2`` per dataset.
+        cov_beta : :obj:`numpy.ndarray` of shape (P, P, D)
+            ``(X'WX)^-1`` under these weights, which REML needs and ML ignores.
+            Returned alongside the scale because both come out of the one
+            weighted least-squares fit, and the objective is evaluated dozens of
+            times per fit.
 
         Notes
         -----
@@ -1533,10 +1589,10 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         Floored at the smallest positive double, so that a saturated design whose
         residuals vanish gives a degenerate fit rather than ``log(0)``.
         """
-        v_unit = self._unit_variance(ratio, n)
-        resid = y - X.dot(weighted_least_squares(y, v_unit, X))
-        k = X.shape[0]
-        return np.maximum((resid**2 / v_unit).sum(axis=0), np.finfo(float).tiny) / (k - ddof)
+        beta, cov_beta = weighted_least_squares(y, v_unit, X, return_cov=True)
+        resid = y - X.dot(beta)
+        dispersion = np.maximum((resid**2 / v_unit).sum(axis=0), np.finfo(float).tiny)
+        return dispersion / (X.shape[0] - ddof), cov_beta
 
     def _ml_profile_nll(self, ratio, y, n, X):
         """Compute the ML negative log-likelihood, profiled over everything but the ratio.
@@ -1562,11 +1618,11 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         The coefficients and the scale of the variance components are both
         replaced by their maximizing values at this ratio, which is equivalent to
         minimizing the joint likelihood over all three and leaves a bounded
-        one-dimensional search. See :meth:`_profile_scale`.
+        one-dimensional search. See :meth:`_profile_at_ratio`.
         """
         v_unit = self._unit_variance(ratio, n)
         k = X.shape[0]
-        scale = self._profile_scale(ratio, y, n, X)
+        scale, _ = self._profile_at_ratio(v_unit, y, X)
         return 0.5 * (np.log(v_unit).sum(axis=0) + k * np.log(scale) + k)
 
     def _reml_profile_nll(self, ratio, y, n, X):
@@ -1594,19 +1650,19 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         The restriction term ``0.5 * log|X'WX|`` contributes ``-P log(scale)``,
         which is why the scale is the residual sum of squares over ``K - P`` here
         and over ``K`` for ML. It does not involve the coefficients, so profiling
-        those out is unaffected by it. ``slogdet`` is the stable form of
+        those out is unaffected by it. It is read off the covariance the fit
+        already produced -- ``log|X'WX| = -log|(X'WX)^-1|`` -- rather than by
+        forming ``X'WX`` a second time. ``slogdet`` is the stable form of
         ``log(det(...))``.
         """
         v_unit = self._unit_variance(ratio, n)
         k, p = X.shape
-        scale = self._profile_scale(ratio, y, n, X, ddof=p)
-        # Einsum indices: k = observations, p = predictors, i = parallel iterates.
-        bread = np.einsum("kp,ki->ipk", X, 1.0 / v_unit).dot(X)
+        scale, cov_beta = self._profile_at_ratio(v_unit, y, X, ddof=p)
         return 0.5 * (
             np.log(v_unit).sum(axis=0)
             + (k - p) * np.log(scale)
             + (k - p)
-            + np.linalg.slogdet(bread)[1]
+            - np.linalg.slogdet(cov_beta.T)[1]
         )
 
 
