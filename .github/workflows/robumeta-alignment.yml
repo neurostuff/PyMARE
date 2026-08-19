@@ -1,0 +1,88 @@
+name: "Check robumeta alignment"
+
+on:
+  push:
+    branches:
+      - "master"
+  pull_request:
+    branches:
+      - "*"
+  schedule:
+    # Monthly, to catch the harness rotting rather than PyMARE moving: the R
+    # version and the robumeta version are pinned, so a failure here on an
+    # unchanged tree means the pinned image can no longer be built.
+    - cron: "0 0 1 * *"
+  # GitHub turns off a workflow with a schedule trigger once the repository has
+  # been quiet for 60 days, and a disabled workflow stops answering push and
+  # pull_request too -- which is how this one sat switched off from 2025-06-28
+  # until it was re-enabled by hand. Being able to dispatch it means the next
+  # time that happens, re-enabling is enough to get a run without pushing a
+  # commit to prove it works.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: robumeta-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  alignment:
+    name: PyMARE vs robumeta
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Set up python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: "Install PyMARE"
+        run: |
+          python -m pip install --progress-bar off --upgrade pip setuptools wheel
+          python -m pip install -e .[tests]
+
+      # The pinned reference values are only worth anything if they still match
+      # what robumeta prints, so regenerate them from the pinned R image and
+      # require the file not to move.
+      - name: "Regenerate the reference values from robumeta"
+        run: validation/robumeta/regenerate.sh
+
+      - name: "Require the reference values to be unchanged"
+        run: |
+          if git diff --quiet -- pymare/tests/data/robumeta_reference.json; then
+              echo "The pinned robumeta reference values still match robumeta." \
+                  >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+          fi
+          {
+              echo "## robumeta reference values moved"
+              echo
+              echo "\`validation/robumeta/regenerate.sh\` produced different numbers"
+              echo "than the ones pinned in"
+              echo "\`pymare/tests/data/robumeta_reference.json\`. Either the"
+              echo "correlated-effects implementation changed and the pin needs"
+              echo "regenerating, or the two implementations no longer agree."
+              echo
+              echo '```diff'
+              git diff -- pymare/tests/data/robumeta_reference.json
+              echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::The regenerated robumeta reference values differ from the pinned ones."
+          exit 1
+
+      # Run the alignment tests against the values just regenerated, so this
+      # job checks PyMARE against robumeta itself and not only against the pin.
+      - name: "Check PyMARE against the regenerated values"
+        if: always()
+        run: python -m pytest -m robumeta -v
+
+      - name: "Upload the regenerated reference values"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: robumeta-reference
+          path: pymare/tests/data/robumeta_reference.json

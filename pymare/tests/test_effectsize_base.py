@@ -12,30 +12,6 @@ from pymare.effectsize import (
 )
 
 
-@pytest.fixture(scope="module")
-def one_samp_data():
-    """Create one-sample data for tests."""
-    return {
-        "m": np.array([7, 5, 4]),
-        "sd": np.sqrt(np.array([4.2, 1.2, 1.9])),
-        "n": np.array([24, 31, 40]),
-        "r": np.array([0.2, 0.18, 0.3]),
-    }
-
-
-@pytest.fixture(scope="module")
-def two_samp_data():
-    """Create two-sample data for tests."""
-    return {
-        "m1": np.array([4, 2]),
-        "sd1": np.sqrt(np.array([1, 9])),
-        "n1": np.array([12, 15]),
-        "m2": np.array([5, 2.5]),
-        "sd2": np.sqrt(np.array([4, 16])),
-        "n2": np.array([12, 16]),
-    }
-
-
 def test_EffectSizeConverter_smoke_test(two_samp_data):
     """Perform a smoke test on the effect size converters."""
     data = two_samp_data

@@ -1,13 +1,23 @@
-"""Tests for estimators that use stan."""
+"""Tests for estimators that use stan.
 
-import sys
+pystan is an optional dependency, so these tests skip rather than fail when it
+is missing. Marked ``stan`` so CI can run them in a job that installs it.
+"""
+
+from importlib.util import find_spec
 
 import pytest
 
 from pymare.estimators import StanMetaRegression
 
+pytestmark = pytest.mark.stan
 
-@pytest.mark.skipif(sys.version_info < (3, 7), reason="requires python 3.7 or higher")
+requires_pystan = pytest.mark.skipif(
+    find_spec("pystan") is None, reason="requires the optional pystan dependency"
+)
+
+
+@requires_pystan
 def test_stan_estimator(dataset):
     """Run smoke test for StanMetaRegression."""
     # no ground truth here, so we use sanity checks and rough bounds
@@ -21,17 +31,11 @@ def test_stan_estimator(dataset):
     assert 3 < tau2 < 5
 
 
-@pytest.mark.skipif(sys.version_info < (3, 7), reason="requires python 3.7 or higher")
 def test_stan_2d_input_failure(dataset_2d):
-    """Run smoke test for StanMetaRegression on 2D data."""
+    """Run smoke test for StanMetaRegression on 2D data.
+
+    No pystan needed: the shape is rejected before the model is compiled.
+    """
     with pytest.raises(ValueError) as exc:
         StanMetaRegression(num_samples=500).fit_dataset(dataset_2d)
     assert str(exc.value).startswith("The StanMetaRegression")
-
-
-def test_stan_python_36_failure(dataset):
-    """Run smoke test for StanMetaRegression with Python 3.6."""
-    if sys.version_info < (3, 7):
-        # Raise error if StanMetaRegression is initialize with python 3.6 or lower
-        with pytest.raises(RuntimeError):
-            StanMetaRegression(num_samples=3000).fit_dataset(dataset)

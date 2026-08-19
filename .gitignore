@@ -117,3 +117,5 @@ bidsdb.sqlite
 fmriprep.sqlite
 
 .vscode
+# asv benchmark environments and results
+.asv/

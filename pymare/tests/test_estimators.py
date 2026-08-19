@@ -11,6 +11,8 @@ from pymare.estimators import (
     VarianceBasedLikelihoodEstimator,
     WeightedLeastSquares,
 )
+from pymare.estimators.estimators import _collapse_n_inputs
+from pymare.stats import DEFAULT_RHO, collapse_groups, collapse_groups_by_n
 
 
 def test_weighted_least_squares_estimator(dataset):
@@ -307,3 +309,444 @@ def test_model_based_cov_matches_the_fitted_weights(dataset, estimator):
     expected = np.linalg.pinv(dataset.X.T @ np.diag(w.ravel()) @ dataset.X)
 
     assert np.allclose(results.fe_se.ravel(), np.sqrt(np.diag(expected)))
+
+
+# -----------------------------------------------------------------------------
+# Dependent estimates: group labels and weighting schemes
+# -----------------------------------------------------------------------------
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+@pytest.mark.parametrize(
+    "estimator, scheme",
+    [
+        (DerSimonianLaird, "collapse"),
+        (Hedges, "rescale"),
+        (Hedges, "collapse"),
+        (VarianceBasedLikelihoodEstimator, "rescale"),
+        (VarianceBasedLikelihoodEstimator, "collapse"),
+    ],
+    ids=["DL-collapse", "HE-rescale", "HE-collapse", "ML-rescale", "ML-collapse"],
+)
+def test_aggregating_estimators_reject_a_within_group_varying_design(estimator, scheme):
+    """The guard belongs to the reduction, not to one scheme's name.
+
+    Every estimator except DerSimonian-Laird reaches tau^2 through the same
+    one-row-per-group aggregate under both schemes, so the design restriction
+    applies to both. It used to be checked only for "collapse", whose error
+    message then recommended "rescale" -- routing users into the unguarded path.
+    """
+    rng = np.random.default_rng(0)
+    groups = np.repeat(np.arange(6), 2)
+    n_estimates = groups.size
+    y = rng.standard_normal((n_estimates, 1))
+    v = np.full((n_estimates, 1), 0.2)
+    varying = np.c_[np.ones(n_estimates), np.tile([-1.0, 1.0], 6)]
+
+    with pytest.raises(ValueError, match="constant within each group"):
+        estimator(weight_scheme=scheme).fit(y=y, v=v, X=varying, g=groups)
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+def test_dersimonian_laird_accepts_a_within_group_varying_design_under_rescale():
+    """The remedy the other estimators' error message points at has to work."""
+    rng = np.random.default_rng(0)
+    groups = np.repeat(np.arange(6), 2)
+    n_estimates = groups.size
+    varying = np.c_[np.ones(n_estimates), np.tile([-1.0, 1.0], 6)]
+
+    fitted = DerSimonianLaird(weight_scheme="rescale").fit(
+        y=rng.standard_normal((n_estimates, 1)),
+        v=np.full((n_estimates, 1), 0.2),
+        X=varying,
+        g=groups,
+    )
+
+    assert fitted.tau2_model_ == "correlated-effects"
+    assert np.isfinite(fitted.params_["tau2"]).all()
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+@pytest.mark.parametrize(
+    "scheme, expected",
+    [("individual", "independent"), ("rescale", "correlated-effects"), ("collapse", "aggregate")],
+)
+def test_results_statistics_follow_the_model_the_estimator_recorded(scheme, expected):
+    """The reduction is declared once and read, not re-derived and hoped to match.
+
+    Whichever way the dependence was modelled, Q has to count independent groups
+    and the interval has to describe the same quantity as the estimate it
+    accompanies.
+    """
+    rng = np.random.default_rng(2)
+    groups = np.repeat(np.arange(12), 4)
+    n_estimates = groups.size
+    y = rng.normal(size=n_estimates) + np.repeat(rng.normal(scale=0.3, size=12), 4)
+    dataset = Dataset(y=y, v=np.full(n_estimates, 0.2), g=groups)
+
+    results = DerSimonianLaird(weight_scheme=scheme).fit_dataset(dataset).summary()
+    assert results.estimator.tau2_model_ == expected
+    assert results._tau2_model() == expected
+
+    _, _, _, analysis_groups = results._analysis_arrays()
+    assert (analysis_groups is not None) is (expected == "correlated-effects")
+
+    re_stats = results.get_re_stats()
+    tau2 = float(np.ravel(re_stats["tau^2"])[0])
+    assert float(np.ravel(re_stats["ci_l"])[0]) <= tau2 <= float(np.ravel(re_stats["ci_u"])[0])
+
+    if scheme != "individual":
+        # Q counts the 12 groups, not the 48 rows, however it got there.
+        raw = DerSimonianLaird().fit_dataset(dataset).summary().get_heterogeneity_stats()
+        assert float(np.ravel(results.get_heterogeneity_stats()["Q"])[0]) < float(
+            np.ravel(raw["Q"])[0]
+        )
+
+
+def test_estimators_groups_change_only_inference(grouped_estimator):
+    """Group labels must move the covariance but not the point estimates.
+
+    Omitting them must reproduce the previous behaviour exactly.
+    """
+    estimator, _, build_inputs = grouped_estimator
+    kwargs, groups = build_inputs()
+
+    naive = estimator().fit(**kwargs)
+    robust = estimator().fit(**kwargs, g=groups)
+
+    assert naive.n_groups_ is None
+    assert "n_groups" not in naive.params_
+    assert robust.n_groups_ == np.unique(groups).size
+    assert np.allclose(naive.params_["fe_params"], robust.params_["fe_params"])
+    assert np.allclose(naive.params_["tau2"], robust.params_["tau2"])
+    assert not np.allclose(naive.params_["inv_cov"], robust.params_["inv_cov"])
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+def test_permutation_test_handles_parallel_datasets(grouped_estimator):
+    """tau^2 is reported as (D,) by some estimators and (1, D) by others.
+
+    permutation_test read ``tau2[i]`` as dataset i's value, which is a whole row
+    of a two-dimensional array: with one parallel dataset it broadcast by luck,
+    and with more it raised before producing any p-value.
+    """
+    estimator, second_arg, build_inputs = grouped_estimator
+    kwargs, groups = build_inputs(n_groups=6, n_per_group=2, n_datasets=3)
+    dataset = Dataset(
+        y=kwargs["y"],
+        X=kwargs["X"],
+        g=groups,
+        add_intercept=False,
+        **{second_arg: kwargs[second_arg]},
+    )
+
+    perm = estimator().fit_dataset(dataset).summary().permutation_test(n_perm=16)
+
+    assert perm.perm_p["fe_p"].shape[-1] == 3
+    assert np.all(perm.perm_p["fe_p"] > 0)
+    assert perm.perm_p["tau2_p"].shape == (3,)
+
+
+def test_estimators_groups_widen_standard_errors(grouped_estimator):
+    """With dependent estimates, robust SEs should exceed model-based ones."""
+    estimator, _, build_inputs = grouped_estimator
+    kwargs, groups = build_inputs(n_groups=12, n_per_group=4)
+
+    naive = estimator().fit(**kwargs).summary()
+    robust = estimator().fit(**kwargs, g=groups).summary()
+
+    assert np.all(robust.fe_se > naive.fe_se)
+
+
+def test_estimator_rejects_unknown_weight_scheme(grouped_estimator):
+    """An unrecognised weighting scheme should fail at construction."""
+    with pytest.raises(ValueError, match="Invalid weight_scheme"):
+        grouped_estimator[0](weight_scheme="nonsense")
+
+
+@pytest.mark.parametrize("rho", [-0.5, 1.5])
+def test_rho_is_checked_by_the_same_mechanism_as_weight_scheme(grouped_estimator, rho):
+    """Both constructor arguments are declared, so both are checked together.
+
+    weight_scheme was validated at construction and rho was not, so an
+    out-of-range correlation survived until some later call happened to read it.
+    """
+    with pytest.raises(ValueError, match="Invalid rho"):
+        grouped_estimator[0](weight_scheme="rescale", rho=rho)
+
+
+def test_rho_warns_when_the_weight_scheme_cannot_use_it(grouped_estimator):
+    """Setting rho under the default scheme did nothing, and said nothing."""
+    with pytest.warns(UserWarning, match="weight_scheme='individual'"):
+        estimator = grouped_estimator[0](rho=0.5)
+
+    # Still honoured as the value to use if the scheme is changed later.
+    assert estimator.rho == 0.5
+
+
+def test_loopable_estimators_accept_positional_arguments():
+    """fit(y, v, X) is the documented call signature and must work."""
+    rng = np.random.RandomState(0)
+    y = rng.randn(10, 1)
+    v = np.abs(rng.randn(10, 1)) + 0.5
+    X = np.ones((10, 1))
+
+    positional = VarianceBasedLikelihoodEstimator().fit(y, v, X)
+    keyword = VarianceBasedLikelihoodEstimator().fit(y=y, v=v, X=X)
+
+    assert np.allclose(positional.params_["fe_params"], keyword.params_["fe_params"])
+    assert np.allclose(positional.params_["tau2"], keyword.params_["tau2"])
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+def test_estimators_accept_unsortable_group_labels(weight_scheme):
+    """Any hashable label, as encode_groups documents -- not just sortable ones.
+
+    np.unique needs an ordering, so a mix of str and int raised TypeError from
+    inside the weight-scheme helpers even though the group primitives handle it.
+    """
+    rng = np.random.RandomState(0)
+    y = rng.randn(12, 1)
+    mixed = np.array([1, 1, "b", "b", 2, 2, "d", "d", 3, 3, "f", "f"], dtype=object)
+
+    fitted = DerSimonianLaird(weight_scheme=weight_scheme).fit(
+        y=y, v=np.full((12, 1), 0.2), X=np.ones((12, 1)), g=mixed
+    )
+    assert fitted.n_groups_ == 6
+
+    equivalent = DerSimonianLaird(weight_scheme=weight_scheme).fit(
+        y=y, v=np.full((12, 1), 0.2), X=np.ones((12, 1)), g=np.repeat(np.arange(6), 2)
+    )
+    assert np.allclose(fitted.params_["fe_params"], equivalent.params_["fe_params"])
+
+    # The result statistics have to encode the labels the same way; counting
+    # them with np.unique raised TypeError only once the fit was over.
+    dataset = Dataset(y=y, v=np.full((12, 1), 0.2), g=mixed)
+    results = DerSimonianLaird(weight_scheme=weight_scheme).fit_dataset(dataset).summary()
+    assert np.isfinite(np.ravel(results.get_re_stats()["tau^2"])).all()
+    assert np.all(results.permutation_test(n_perm=64).perm_p["fe_p"] > 0)
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+@pytest.mark.parametrize("n_perm", [100000, 2**8], ids=["more-than-exact", "exactly-exact"])
+def test_permutation_flips_whole_groups_and_leaves_the_estimator_alone(weight_scheme, n_perm):
+    """Dependent rows are exchangeable only as complete groups.
+
+    Flipping them independently builds a null about half as wide as the truth,
+    which showed up as ~25% rejection at a nominal 5%. Separately, refitting
+    through the live estimator overwrote params_["dof"] with a
+    permutation-shaped array, so fe_dof and to_df broke afterwards.
+
+    ``n_perm == 2**m`` is the boundary: the test counts as exact there, but the
+    sign patterns were only built on the strict inequality, so asking for
+    exactly the exhaustive number raised UnboundLocalError.
+    """
+    rng = np.random.default_rng(0)
+    groups = np.repeat(np.arange(8), 2)
+    dataset = Dataset(y=rng.normal(size=16), v=np.full(16, 0.2), g=groups)
+    results = DerSimonianLaird(weight_scheme=weight_scheme).fit_dataset(dataset).summary()
+
+    before = np.ravel(results.fe_dof).copy()
+    perm = results.permutation_test(n_perm=n_perm)
+
+    # 8 groups, not 16 rows: 2**8 sign patterns exhaust the null.
+    assert perm.n_perm == 2**8
+    assert perm.exact
+    assert np.allclose(np.ravel(results.fe_dof), before)
+    perm.to_df()
+
+
+def test_cluster_weighting_removes_the_replication_advantage():
+    """A group contributing many estimates must not outvote a group with one."""
+    n_singletons = 8
+    groups = np.array([0] * 6 + list(range(1, n_singletons + 1)))
+    n_estimates = groups.size
+    y = np.zeros((n_estimates, 1))
+    y[:6] = 1.0  # the big group is the only one with a non-zero effect
+    v = np.ones((n_estimates, 1))
+    dataset = Dataset(y=y, v=v, g=groups)
+
+    individual = WeightedLeastSquares().fit_dataset(dataset).summary()
+    clustered = WeightedLeastSquares(weight_scheme="rescale").fit_dataset(dataset).summary()
+
+    # Six of fourteen estimates, but only one of nine groups.
+    assert np.isclose(individual.get_fe_stats()["est"].ravel()[0], 6 / 14)
+    assert np.isclose(clustered.get_fe_stats()["est"].ravel()[0], 1 / 9)
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+@pytest.mark.parametrize(
+    "estimator",
+    [WeightedLeastSquares, DerSimonianLaird, Hedges, VarianceBasedLikelihoodEstimator],
+    ids=["WLS", "DL", "HE", "ML"],
+)
+def test_variance_estimators_group_mode_matches_explicit_collapse(estimator):
+    """Group mode must fit the algebraically equivalent one-row-per-group model."""
+    y = np.array([[1.0], [3.0], [6.0], [10.0], [20.0], [22.0]])
+    v = np.array([[1.0], [4.0], [2.0], [8.0], [5.0], [3.0]])
+    X = np.ones((6, 1))
+    groups = np.array([0, 0, 1, 1, 2, 2])
+    rho = 0.4
+    collapsed_y, collapsed_v, collapsed_X = collapse_groups(y, v, X, groups, rho=rho)
+
+    expected = estimator().fit(y=collapsed_y, v=collapsed_v, X=collapsed_X, g=np.arange(3))
+    observed = estimator(weight_scheme="collapse", rho=rho).fit(y=y, v=v, X=X, g=groups)
+
+    assert observed.n_groups_ == 3
+    for key in ("fe_params", "tau2", "inv_cov"):
+        assert np.allclose(observed.params_[key], expected.params_[key])
+
+
+@pytest.mark.filterwarnings("ignore:Cluster-robust")
+def test_sample_size_likelihood_group_mode_matches_explicit_collapse():
+    """The likelihood receives one effective n per independent group.
+
+    Effective, not raw. Rows in a group share subjects, so n must not be
+    counted once per row -- but they are not perfect duplicates either, and
+    pinning n at the group's raw value assumes they are. The effective size
+    ``s*n / (1 + rho(s-1))`` interpolates between the two.
+    """
+    y = np.array([[1.0], [3.0], [6.0], [10.0], [20.0], [22.0]])
+    n = np.array([[20.0], [20.0], [50.0], [50.0], [100.0], [100.0]])
+    X = np.ones((6, 1))
+    groups = np.array([0, 0, 1, 1, 2, 2])
+    collapsed_y, collapsed_n, collapsed_X = collapse_groups_by_n(y, n, X, groups, rho=DEFAULT_RHO)
+
+    expected = SampleSizeBasedLikelihoodEstimator().fit(
+        y=collapsed_y, n=collapsed_n, X=collapsed_X, g=np.arange(3)
+    )
+    observed = SampleSizeBasedLikelihoodEstimator(weight_scheme="collapse").fit(
+        y=y, n=n, X=X, g=groups
+    )
+
+    for key in ("fe_params", "sigma2", "tau2", "inv_cov"):
+        assert np.allclose(observed.params_[key], expected.params_[key])
+
+
+def test_collapse_mode_honours_rho_for_sample_sizes():
+    """rho=1 is the only value for which a group's raw n is its effective n.
+
+    Rows in a group share subjects, so n must not be counted once per row --
+    but they are not perfect duplicates either. For s estimates from the same
+    n subjects correlated at rho, Var(ybar) = (sigma^2 / n)(1 + rho(s-1))/s,
+    i.e. an effective size s*n / (1 + rho(s-1)) running from n at rho=1 up to
+    s*n at rho=0. Pinning it at n biases sigma^2 low by (1 + rho(s-1))/s --
+    a factor of five for four uncorrelated estimates per group. Observations
+    from one group share subjects but measure different outcomes, so rho is
+    well below one and the bias is real.
+    """
+    rng = np.random.RandomState(0)
+    n_groups, group_size = 10, 4
+    groups = np.repeat(np.arange(n_groups), group_size)
+    n_estimates = groups.size
+    n = np.repeat(rng.randint(40, 160, n_groups).astype(float), group_size)[:, None]
+    y = rng.randn(n_estimates, 1)
+    X = np.ones((n_estimates, 1))
+
+    effective = {}
+    for rho in (0.0, 0.5, 1.0):
+        _, collapsed_n, _, _ = _collapse_n_inputs(y, n, X, groups, "collapse", rho)
+        effective[rho] = collapsed_n
+
+    # Less assumed correlation means more independent information per group.
+    assert np.all(effective[0.0] > effective[0.5])
+    assert np.all(effective[0.5] > effective[1.0])
+
+    # The endpoints are the two formulas being interpolated between, and the
+    # closed form holds in between.
+    _, raw_n, _ = collapse_groups_by_n(y, n, X, groups, rho=1.0)
+    assert np.allclose(effective[1.0], raw_n)
+    assert np.allclose(effective[0.0], group_size * raw_n)
+    for rho in (0.0, 0.5, 1.0):
+        assert np.allclose(effective[rho], group_size * raw_n / (1.0 + rho * (group_size - 1)))
+
+
+def test_group_collapse_rejects_a_saturated_collapsed_design(variance_estimator):
+    """Collapsing can saturate a design that was identified before it.
+
+    Nine rows and three predictors is unremarkable, but three groups leave
+    m == p, where the moment estimators divide by zero and report tau^2 = inf
+    with zero standard errors.
+    """
+    groups = np.repeat([0, 1, 2], 3)
+    X = np.c_[np.ones(9), np.repeat([0.0, 1.0, 2.0], 3), np.repeat([0.0, 0.0, 1.0], 3)]
+    y = np.random.RandomState(0).randn(9, 1)
+
+    with pytest.raises(ValueError, match="number of groups must exceed"):
+        variance_estimator(weight_scheme="collapse").fit(
+            y=y, v=np.full((9, 1), 0.1), X=X, g=groups
+        )
+
+
+def test_group_design_check_tolerates_floating_point_noise():
+    """A predictor constant in intent may differ in its last bits."""
+    groups = np.repeat([0, 1, 2], 3)
+    y = np.random.RandomState(0).randn(9, 1)
+    v = np.full((9, 1), 0.1)
+
+    X = np.c_[np.ones(9), np.repeat([1.0, 2.0, 3.0], 3)]
+    X[1, 1] += 1e-15
+    Hedges(weight_scheme="collapse").fit(y=y, v=v, X=X, g=groups)  # must not raise
+
+    # Genuine within-group variation is still rejected.
+    X[1, 1] = 99.0
+    with pytest.raises(ValueError, match="constant"):
+        Hedges(weight_scheme="collapse").fit(y=y, v=v, X=X, g=groups)
+
+
+def test_variance_components_are_insensitive_to_duplication(variance_estimator):
+    """Duplicating a group's estimate must not shrink tau^2.
+
+    Repeated estimates from one group agree with each other by construction. An
+    estimator that counts them as independent sees less dispersion than the row
+    count implies and shrinks tau^2 toward zero, which sharpens the weights and
+    makes downstream inference anti-conservative.
+    """
+    rng = np.random.default_rng(4)
+    n_estimates, n_datasets = 12, 8
+    y = rng.standard_normal((n_estimates, n_datasets)) * 2.0
+    v = np.full((n_estimates, n_datasets), 0.5)
+    groups = np.arange(n_estimates)
+
+    single = variance_estimator(weight_scheme="rescale")
+    single.fit_dataset(Dataset(y=y, v=v, g=groups))
+
+    # Group 0 now contributes four identical estimates instead of one.
+    dupe_idx = np.r_[np.zeros(4, dtype=int), np.arange(1, n_estimates)]
+    duped = variance_estimator(weight_scheme="rescale")
+    duped.fit_dataset(Dataset(y=y[dupe_idx], v=v[dupe_idx], g=groups[dupe_idx]))
+
+    assert np.allclose(np.mean(single.summary().tau2), np.mean(duped.summary().tau2), rtol=0.05)
+
+
+def test_sample_size_identifiability_is_checked_on_the_fitted_values():
+    """sigma^2 and tau^2 are identified by the n the likelihood actually sees.
+
+    Under weight_scheme='rescale' those are effective sample sizes, which vary
+    with group size even when every raw n is identical.
+    """
+    sizes = [1] * 6 + [20] * 6
+    groups = np.concatenate([[j] * s for j, s in enumerate(sizes)])
+    n_estimates = groups.size
+    n = np.full((n_estimates, 1), 50.0)  # every raw n identical
+    X = np.ones((n_estimates, 1))
+    y = 0.5 + np.random.RandomState(2).randn(n_estimates, 1) * 0.4
+
+    fitted = SampleSizeBasedLikelihoodEstimator(weight_scheme="rescale", rho=0.3).fit(
+        y=y, n=n, X=X, g=groups
+    )
+    assert np.isfinite(fitted.params_["sigma2"]).all()
+
+    # Genuinely unidentifiable input is still refused.
+    with pytest.raises(ValueError, match="all-equal sample sizes"):
+        SampleSizeBasedLikelihoodEstimator().fit(y=y, n=n, X=X)
+
+
+def test_near_equal_sample_sizes_warn_rather_than_abort():
+    """``raise Warning`` aborts the fit; this path should only warn."""
+    n = np.full((20, 1), 100.0)
+    n[0] = 101.0
+    y = np.random.RandomState(0).randn(20, 1)
+
+    with pytest.warns(UserWarning, match="too close"):
+        SampleSizeBasedLikelihoodEstimator().fit(y=y, n=n, X=np.ones((20, 1)))

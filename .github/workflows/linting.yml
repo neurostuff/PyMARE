@@ -1,0 +1,54 @@
+name: "Lint Code"
+
+on:
+  push:
+    branches:
+      - "master"
+  pull_request:
+    branches:
+      - "*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linting-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Determine if linting should be run based on commit message.
+  check_skip:
+    name: Determine if CI should be skipped
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.result_step.outputs.ci-skip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: result_step
+        uses: mstachniuk/ci-skip@master
+        with:
+          commit-filter: "[skip ci];[ci skip];[skip github]"
+          commit-filter-separator: ";"
+
+  style_check:
+    name: Style check
+    needs: check_skip
+    if: ${{ needs.check_skip.outputs.skip == 'false' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Set up python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: "Install PyMARE"
+        run: |
+          python -m pip install --progress-bar off --upgrade pip setuptools wheel
+          python -m pip install -e .[tests]
+      - name: "Run linter"
+        run: make lint

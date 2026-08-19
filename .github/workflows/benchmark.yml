@@ -1,0 +1,97 @@
+name: "Benchmark"
+
+on:
+  pull_request:
+    branches:
+      - "*"
+  workflow_dispatch:
+    inputs:
+      factor:
+        description: "Report a regression once a benchmark is this much slower"
+        required: false
+        default: "1.3"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # How much slower a benchmark has to get before this workflow calls it a
+  # regression. asv also requires the difference to be statistically
+  # significant, so this is the second of two conditions rather than the only
+  # one -- without it, the noise on a shared runner would fail most pull
+  # requests. Kept in step with regressions_thresholds in asv.conf.json.
+  FACTOR: ${{ github.event.inputs.factor || '1.3' }}
+
+jobs:
+  benchmark:
+    name: Compare against the base branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # asv builds both commits, so it needs their history.
+          fetch-depth: 0
+      - name: "Set up python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: "Install asv"
+        run: python -m pip install --progress-bar off asv virtualenv
+
+      - name: "Name the two commits asv will compare"
+        run: |
+          # A manual run has no base branch of its own, so it compares against
+          # master, which is what a pull request from this branch would use.
+          base_ref="${GITHUB_BASE_REF:-master}"
+          echo "BASE_REF=${base_ref}" >> "$GITHUB_ENV"
+          git fetch origin "${base_ref}:base" "${GITHUB_REF}:pr"
+      - name: "Register the runner"
+        run: asv machine --yes
+
+      - name: "Time both commits"
+        id: compare
+        run: |
+          set -o pipefail
+          status=0
+          asv continuous --factor "${FACTOR}" --split base pr 2>&1 \
+              | tee benchmark.log \
+              || status=$?
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+
+      - name: "Report what changed"
+        # The job summary rather than a pull request comment: a pull request from
+        # a fork gets a read-only GITHUB_TOKEN, which no permissions block can
+        # elevate, so commenting would 403 on every PyMARE pull request that
+        # follows CONTRIBUTING and works from a fork. The summary is written by
+        # the runner itself, so it works either way, and the check below is what
+        # actually raises the alarm.
+        run: |
+          {
+              echo "## Benchmark: this branch vs \`${BASE_REF}\`"
+              echo
+              echo "A benchmark is flagged once it is at least \`${FACTOR}x\` slower"
+              echo "and the difference is statistically significant."
+              echo
+              echo '```'
+              cat benchmark.log
+              echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "Fail if a benchmark regressed"
+        if: ${{ steps.compare.outputs.status != '0' }}
+        run: |
+          echo "::error::asv reported a performance regression; see the job summary."
+          exit 1
+
+      - name: "Upload the raw results"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            benchmark.log
+            .asv/results

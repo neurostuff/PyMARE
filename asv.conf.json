@@ -1,0 +1,33 @@
+{
+    // The version of the config file format. Do not change.
+    "version": 1,
+
+    "project": "PyMARE",
+    "project_url": "https://github.com/neurostuff/PyMARE",
+    "repo": ".",
+
+    // No build step is needed: install_command below reinstalls from source
+    // directly and never references {wheel_file}. Without this, asv's default
+    // build_command builds a wheel for PyMARE *and* every dependency into the
+    // build cache, and newer asv versions then refuse to guess which one to
+    // install ("Found multiple wheels ... Cannot decide correct one").
+    "build_command": [],
+    "install_command": ["python -mpip install ."],
+
+    "branches": ["master"],
+    "environment_type": "virtualenv",
+
+    "benchmark_dir": "benchmarks",
+    "env_dir": ".asv/env",
+    "results_dir": ".asv/results",
+    "html_dir": ".asv/html",
+
+    // Report a regression only once a benchmark is 30% slower. GitHub's shared
+    // runners are noisy enough that a tighter threshold cries wolf; asv also
+    // requires the change to be statistically significant, so this is the
+    // second of two conditions rather than the only one. Kept in step with
+    // BENCHMARK_FACTOR in .github/workflows/benchmark.yml.
+    "regressions_thresholds": {
+        "^": 0.3
+    }
+}

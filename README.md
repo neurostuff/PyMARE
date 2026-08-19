@@ -7,6 +7,8 @@ A Python library for mixed-effects meta-regression (including meta-analysis).
 [![DOI](https://zenodo.org/badge/228903736.svg)](https://zenodo.org/badge/latestdoi/228903736)
 [![Documentation Status](https://readthedocs.org/projects/pymare/badge/?version=latest)](http://pymare.readthedocs.io/en/latest/?badge=latest)
 ![GitHub CI](https://github.com/neurostuff/pymare/actions/workflows/testing.yml/badge.svg)
+![Lint](https://github.com/neurostuff/pymare/actions/workflows/linting.yml/badge.svg)
+![robumeta alignment](https://github.com/neurostuff/pymare/actions/workflows/robumeta-alignment.yml/badge.svg)
 [![Codecov](https://codecov.io/gh/neurostuff/PyMARE/branch/master/graph/badge.svg)](https://codecov.io/gh/neurostuff/pymare)
 
 **PyMARE is alpha software under heavy development; we reserve the right to make major changes to the API.**
