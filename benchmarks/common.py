@@ -18,6 +18,12 @@ OBSERVATIONS_PER_GROUP = 4
 #: smaller second dimension, or they would dominate the whole suite.
 N_DATASETS_LOOPED = 10
 
+#: The combination tests cost far less per dataset than a regression fit, so at
+#: the shared size they land near a few milliseconds -- short enough that one
+#: scheduler hiccup moves the measurement more than a real regression would. They
+#: get a larger second dimension to lift them out of that range.
+N_DATASETS_COMBINATION = 2000
+
 
 def make_data(
     n_observations=N_OBSERVATIONS,

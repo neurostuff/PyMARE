@@ -9,14 +9,14 @@ import numpy as np
 
 from pymare.estimators import FisherCombinationTest, StoufferCombinationTest
 
-from .common import make_data
+from .common import N_DATASETS_COMBINATION, make_data
 
 # asv benchmark attributes, applied to every benchmark in this module. The
 # ceilings matter because the Benchmark workflow times the whole suite twice on
 # every pull request: bounding the samples keeps that under a couple of minutes,
 # and the floor of two samples keeps a single noisy reading from being the whole
 # measurement.
-repeat = (2, 5, 10.0)
+repeat = (3, 8, 15.0)
 warmup_time = 0.1
 timeout = 180
 
@@ -35,7 +35,7 @@ class TimeCombinationTests:
 
     def setup(self, mode):
         """Build z-scores and group labels."""
-        z, _, _, self.groups = make_data(n_predictors=1)
+        z, _, _, self.groups = make_data(n_datasets=N_DATASETS_COMBINATION, n_predictors=1)
         self.z = z
         self.weights = np.abs(z[:, :1]) + 0.5
 

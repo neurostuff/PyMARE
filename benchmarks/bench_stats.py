@@ -25,7 +25,7 @@ from .common import make_data
 # every pull request: bounding the samples keeps that under a couple of minutes,
 # and the floor of two samples keeps a single noisy reading from being the whole
 # measurement.
-repeat = (2, 5, 10.0)
+repeat = (3, 8, 15.0)
 warmup_time = 0.1
 timeout = 180
 
