@@ -1,9 +1,21 @@
 """Data for tests."""
 
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import pytest
 
 from pymare import Dataset
+from pymare.estimators import (
+    DerSimonianLaird,
+    FisherCombinationTest,
+    Hedges,
+    SampleSizeBasedLikelihoodEstimator,
+    StoufferCombinationTest,
+    VarianceBasedLikelihoodEstimator,
+    WeightedLeastSquares,
+)
 
 
 @pytest.fixture(scope="package")
@@ -75,3 +87,192 @@ def vars_with_intercept():
     v = np.array([[1, 1, 2.4, 0.5, 1, 1, 1.2, 1.5]]).T
     X = np.array([np.ones(8), [1, 1, 2, 2, 4, 4, 2.8, 2.8]]).T
     return (y, v, X)
+
+
+# -----------------------------------------------------------------------------
+# Dependent estimates: shared estimator sets, data builders and references
+# -----------------------------------------------------------------------------
+
+
+@pytest.fixture(
+    params=[StoufferCombinationTest, FisherCombinationTest], ids=["stouffer", "fisher"]
+)
+def combination_estimator(request):
+    """Both combination tests, which share validation and permutation behavior."""
+    return request.param
+
+
+@pytest.fixture(
+    params=[(StoufferCombinationTest, {"group_level": True}), (FisherCombinationTest, {})],
+    ids=["stouffer-group-level", "brown"],
+)
+def group_combination_estimator(request):
+    """Build a combination test that aggregates whole groups rather than rows."""
+    estimator, defaults = request.param
+    return lambda **kwargs: estimator(**{**defaults, **kwargs})
+
+
+@pytest.fixture(
+    params=[DerSimonianLaird, Hedges, VarianceBasedLikelihoodEstimator],
+    ids=["DL", "HE", "ML"],
+)
+def variance_estimator(request):
+    """Return each estimator that obtains tau^2 from the supplied variances."""
+    return request.param
+
+
+@pytest.fixture(params=["individual", "rescale", "collapse"])
+def weight_scheme(request):
+    """Every weighting scheme the grouped estimators accept."""
+    return request.param
+
+
+@pytest.fixture(scope="package")
+def dependent_data():
+    """Build data where estimates within a group share a common offset."""
+
+    def _build(rng, n_groups=10, n_per_group=3, n_datasets=4, rho_sd=1.0):
+        n_estimates = n_groups * n_per_group
+        shared = rng.normal(0, rho_sd, size=(n_groups, n_datasets))
+        noise = rng.normal(0, 0.25, size=(n_estimates, n_datasets))
+        y = np.repeat(shared, n_per_group, axis=0) + noise
+        v = np.abs(rng.normal(0, 0.2, size=(n_estimates, n_datasets))) + 0.5
+        X = np.ones((n_estimates, 1))
+        groups = np.repeat(np.arange(n_groups), n_per_group)
+        return y, v, X, groups
+
+    return _build
+
+
+@pytest.fixture(
+    params=[
+        (WeightedLeastSquares, "v"),
+        (DerSimonianLaird, "v"),
+        (Hedges, "v"),
+        (VarianceBasedLikelihoodEstimator, "v"),
+        (SampleSizeBasedLikelihoodEstimator, "n"),
+    ],
+    ids=["WLS", "DL", "HE", "ML", "SSML"],
+)
+def grouped_estimator(request, dependent_data):
+    """Pair an estimator with the argument it takes and a builder for its kwargs.
+
+    ``_inputs(shared_second=True)`` supplies that argument as a single column,
+    which every estimator has to read as applying to all parallel datasets.
+    """
+    estimator, second_arg = request.param
+
+    def _inputs(shared_second=False, **kwargs):
+        y, v, X, groups = dependent_data(np.random.RandomState(0), **kwargs)
+        if second_arg == "v":
+            second = v
+        else:
+            # Sample sizes must vary for the sample-size-based estimator.
+            second = np.random.RandomState(1).randint(20, 200, size=y.shape).astype(float)
+        if shared_second:
+            second = second[:, :1]
+        return {"y": y, second_arg: second, "X": X}, groups
+
+    return estimator, second_arg, _inputs
+
+
+@pytest.fixture(scope="package")
+def group_level_design():
+    """Build a design whose slope is carried by only the first ``n_nonzero`` groups."""
+
+    def _build(n_nonzero, n_groups=20, group_size=4):
+        groups = np.repeat(np.arange(n_groups), group_size)
+        x = np.repeat((np.arange(n_groups) < n_nonzero).astype(float), group_size)
+        n_estimates = n_groups * group_size
+        return np.c_[np.ones(n_estimates), x], np.ones(n_estimates), groups
+
+    return _build
+
+
+@pytest.fixture(scope="package")
+def explicit_cluster_robust_cov():
+    """Compute the CR0 sandwich as a plain per-dataset, per-group loop."""
+
+    def _reference(y, v, X, beta, groups):
+        n_preds = X.shape[1]
+        robust = np.empty((n_preds, n_preds, y.shape[1]))
+        for i_dataset in range(y.shape[1]):
+            weights = 1.0 / v[:, i_dataset]
+            bread = np.linalg.pinv(X.T @ np.diag(weights) @ X)
+            resid = y[:, i_dataset] - X @ beta[:, i_dataset]
+            meat = np.zeros((n_preds, n_preds))
+            for group in np.unique(groups):
+                members = groups == group
+                score = (X[members] * (weights[members] * resid[members])[:, None]).sum(0)
+                meat += np.outer(score, score)
+            robust[:, :, i_dataset] = bread @ meat @ bread
+        return robust
+
+    return _reference
+
+
+@pytest.fixture(scope="package")
+def correlated_block_data():
+    """Build estimates that share a signal, the first ``block_size`` of which co-vary."""
+
+    def _build(n_estimates, n_datasets, block_size=0, rho=0.8, seed=0):
+        rng = np.random.default_rng(seed)
+        signal = rng.standard_normal(n_datasets) * 2.0
+        shared = rng.standard_normal(n_datasets)
+        y = np.array([signal + rng.standard_normal(n_datasets) for _ in range(n_estimates)])
+        for i in range(block_size):
+            y[i] = (
+                signal + np.sqrt(rho) * shared + np.sqrt(1 - rho) * rng.standard_normal(n_datasets)
+            )
+        groups = np.array([0] * block_size + list(range(1, n_estimates - block_size + 1)))
+        return y, groups
+
+    return _build
+
+
+@pytest.fixture(scope="package")
+def centering_shrinkage():
+    """Apply the centering map that ``np.corrcoef`` implies to a true correlation matrix."""
+
+    def _shrink(corr):
+        n_estimates = corr.shape[0]
+        centering = np.eye(n_estimates) - np.ones((n_estimates, n_estimates)) / n_estimates
+        shrunk = centering @ corr @ centering
+        scale = np.sqrt(np.diag(shrunk))
+        return shrunk / np.outer(scale, scale)
+
+    return _shrink
+
+
+@pytest.fixture(scope="package")
+def block_correlation():
+    """Build an equicorrelated-block correlation matrix and its group labels."""
+
+    def _build(n_estimates, blocks):
+        corr = np.eye(n_estimates)
+        groups = np.empty(n_estimates, dtype=int)
+        start = 0
+        for label, (size, rho) in enumerate(blocks):
+            stop = start + size
+            corr[start:stop, start:stop] = rho + (1 - rho) * np.eye(size)
+            groups[start:stop] = label
+            start = stop
+        groups[start:] = np.arange(len(blocks), len(blocks) + n_estimates - start)
+        return corr, groups
+
+    return _build
+
+
+@pytest.fixture(scope="package")
+def robumeta_dataset():
+    """Load the dataset the robumeta reference values were computed on."""
+    frame = pd.read_csv(Path(__file__).parent / "data" / "robumeta_correlated_effects.csv")
+    n_estimates = len(frame)
+    designs = {
+        "intercept": np.ones((n_estimates, 1)),
+        "within": np.c_[np.ones(n_estimates), frame["within"].to_numpy()],
+        "both": np.c_[
+            np.ones(n_estimates), frame["within"].to_numpy(), frame["between"].to_numpy()
+        ],
+    }
+    return frame, designs

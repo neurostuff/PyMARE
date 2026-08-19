@@ -2,7 +2,7 @@
 
 import sys
 from abc import ABCMeta, abstractmethod
-from inspect import getfullargspec
+from inspect import getfullargspec, signature
 from warnings import warn
 
 import numpy as np
@@ -10,7 +10,552 @@ import wrapt
 from scipy.optimize import Bounds, minimize
 
 from ..results import BayesianMetaRegressionResults, MetaRegressionResults
-from ..stats import ensure_2d, weighted_least_squares
+from ..stats import (
+    DEFAULT_RHO,
+    TAU2_AGGREGATE,
+    TAU2_CORRELATED,
+    TAU2_INDEPENDENT,
+    broadcast_columns,
+    cluster_robust_cov,
+    collapse_groups,
+    collapse_groups_by_n,
+    correlated_effects_tau2,
+    correlated_effects_weights,
+    encode_groups,
+    ensure_2d,
+    satterthwaite_dof,
+    weighted_least_squares,
+)
+
+WEIGHT_SCHEMES = ("individual", "rescale", "collapse")
+
+
+class Options:
+    """Constrain a parameter to a fixed set of values."""
+
+    def __init__(self, allowed):
+        self.allowed = tuple(allowed)
+
+    def check(self, name, value):
+        """Raise if ``value`` is not one of the allowed options."""
+        if value not in self.allowed:
+            raise ValueError(f"Invalid {name} '{value}'; must be one of {list(self.allowed)}.")
+
+
+class Interval:
+    """Constrain a parameter to a closed numeric interval."""
+
+    def __init__(self, low, high):
+        self.low = low
+        self.high = high
+
+    def check(self, name, value):
+        """Raise if ``value`` is not a real number inside the interval."""
+        if not isinstance(value, (int, float, np.integer, np.floating)) or isinstance(value, bool):
+            raise ValueError(f"Invalid {name} {value!r}; must be a number.")
+        if not self.low <= float(value) <= self.high:
+            raise ValueError(f"Invalid {name} {value!r}; must lie in [{self.low}, {self.high}].")
+
+
+#: Constraints shared by the estimators that accept group labels. Assigned to
+#: each class's ``_parameter_constraints`` so that both parameters are checked
+#: by the same mechanism, in the same place.
+WEIGHTING_CONSTRAINTS = {
+    "weight_scheme": Options(WEIGHT_SCHEMES),
+    "rho": Interval(0.0, 1.0),
+}
+
+
+def _resolve_rho(rho, weight_scheme):
+    """Return the assumed within-group correlation, warning when it cannot apply.
+
+    Parameters
+    ----------
+    rho : None or :obj:`float`
+        The value supplied by the caller, or None for the default.
+    weight_scheme : :obj:`str`
+        The scheme supplied alongside it.
+
+    Returns
+    -------
+    :obj:`float`
+        ``rho``, or :data:`~pymare.stats.DEFAULT_RHO` when none was supplied.
+
+    Warns
+    -----
+    UserWarning
+        If ``rho`` was set explicitly under ``weight_scheme="individual"``, which
+        models no within-group correlation and therefore never reads it.
+
+    Notes
+    -----
+    The default is None rather than the number itself so that "the user asked
+    for 0.8" can be told apart from "nobody chose". Without that distinction a
+    deliberate ``rho`` under the default scheme is silently inert, which is the
+    one case where the caller clearly expected it to matter.
+    """
+    if rho is None:
+        return DEFAULT_RHO
+    if weight_scheme == "individual":
+        warn(
+            "rho was supplied but weight_scheme='individual', which models no "
+            "within-group correlation and so ignores it. Use "
+            "weight_scheme='rescale' or 'collapse' for rho to take effect.",
+            stacklevel=3,
+        )
+    return rho
+
+
+def _resolve_weights(v, groups, tau2, weight_scheme):
+    """Return WLS weights, or None to fall back to ``1 / (v + tau2)``.
+
+    Parameters
+    ----------
+    v : :obj:`numpy.ndarray` of shape (K, D)
+        Sampling variances.
+    groups : None or :obj:`numpy.ndarray` of shape (K,)
+        Group labels, or None when no dependence was declared.
+    tau2 : :obj:`float` or :obj:`numpy.ndarray`
+        The tau^2 estimate to fold into the weights.
+    weight_scheme : {"individual", "rescale", "collapse"}
+        The scheme requested by the caller.
+
+    Returns
+    -------
+    None or :obj:`numpy.ndarray` of shape (K, D)
+        Rescaled weights for ``"rescale"``, else None, meaning the caller should
+        use its own default.
+
+    Notes
+    -----
+    ``"rescale"`` gives every row of a group the same weight, built from the
+    group's mean variance, so row multiplicity does not buy group influence.
+    These are the weights the correlated-effects model of
+    :footcite:t:`hedges2010robust` uses and the ones its tau^2 estimator is
+    derived under; see :func:`~pymare.stats.correlated_effects_weights`.
+    ``"collapse"`` returns None because the aggregation has already happened
+    upstream, leaving one row per group for which the ordinary weight is
+    correct. It is a no-op when no group labels are supplied.
+
+    References
+    ----------
+    .. footbibliography::
+    """
+    if weight_scheme in ("individual", "collapse") or groups is None:
+        return None
+
+    return correlated_effects_weights(v, groups, tau2=tau2)
+
+
+def _tau2_model(groups, X, weight_scheme, correlated_effects=False):
+    """Name the reduction tau^2 will be estimated under.
+
+    Parameters
+    ----------
+    groups : None or :obj:`numpy.ndarray` of shape (K,)
+        Group labels, or None when no dependence was declared.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    weight_scheme : {"individual", "rescale", "collapse"}
+        The scheme requested by the caller.
+    correlated_effects : :obj:`bool`, optional
+        Whether the calling estimator has a published correlated-effects
+        counterpart of its tau^2 estimator. Only DerSimonian-Laird does; see
+        :func:`~pymare.stats.correlated_effects_tau2`. Default = False.
+
+    Returns
+    -------
+    :obj:`str`
+        One of ``TAU2_INDEPENDENT``, ``TAU2_CORRELATED`` or ``TAU2_AGGREGATE``.
+
+    Notes
+    -----
+    Single source of truth for a decision three places have to agree on: which
+    arrays tau^2 comes from, whether the design has to be constant within a
+    group, and which reduction the interval and Q in :mod:`pymare.results`
+    describe. Each of those used to re-derive it from ``weight_scheme``.
+    """
+    if weight_scheme not in ("rescale", "collapse") or groups is None:
+        return TAU2_INDEPENDENT
+    if encode_groups(np.asarray(groups).ravel())[1].size <= X.shape[1]:
+        # Too few groups to fit the reduced design; fall back to the raw rows
+        # rather than refusing to run. See _check_collapsed_design.
+        return TAU2_INDEPENDENT
+    if correlated_effects and weight_scheme == "rescale":
+        return TAU2_CORRELATED
+    return TAU2_AGGREGATE
+
+
+def _validate_group_design(X, groups, weight_scheme="collapse"):
+    """Reject group aggregation when predictors vary within a group.
+
+    Parameters
+    ----------
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
+        Group labels, one per observation.
+
+    weight_scheme : {"collapse", "rescale"}, optional
+        The scheme that requested the reduction, named in the error message.
+        Default = "collapse".
+
+    Raises
+    ------
+    ValueError
+        If any predictor takes more than one value within a group.
+
+    Notes
+    -----
+    Collapsing a group to one row replaces its design values with their mean, so
+    a predictor that varied within the group would silently change meaning: the
+    coefficient would answer a between-group question instead.
+
+    ``"rescale"`` keeps every row when *fitting*, but every estimator except
+    DerSimonian-Laird still estimates tau^2 from the same one-row-per-group
+    reduction, so the restriction applies there too. DerSimonian-Laird is exempt
+    because it has a published correlated-effects estimator that works from the
+    observation-level design; see
+    :func:`~pymare.stats.correlated_effects_tau2`.
+
+    The comparison uses a relative tolerance rather than bit-equality. A
+    group-level predictor built by arithmetic -- a ratio, a centered score -- is
+    constant in intent but can differ in the last bits across a group's rows, and
+    rejecting those designs for floating-point reasons would be wrong.
+    """
+    groups = np.asarray(groups).ravel()
+    # Against the design's row count: passing groups.shape[0] made the check
+    # vacuous, and a mismatched label array then failed further down with an
+    # opaque boolean-indexing IndexError instead of naming the real problem.
+    codes, labels = encode_groups(groups, n_observations=X.shape[0])
+    for group in range(labels.size):
+        member_X = X[codes == group]
+        # A relative tolerance, not bit-equality: a group-level predictor
+        # built by arithmetic (a ratio, a centered score) is constant in intent
+        # but can differ in the last bits across a group's rows.
+        if not np.allclose(member_X, member_X[[0]], rtol=1e-10, atol=0.0):
+            reduction = (
+                "reduces the data to one row per group"
+                if weight_scheme == "collapse"
+                else "estimates tau^2 from one aggregate per group for this estimator"
+            )
+            raise ValueError(
+                f"weight_scheme='{weight_scheme}' {reduction}, which requires design "
+                "values to be constant within each group. DerSimonianLaird with "
+                "weight_scheme='rescale' estimates tau^2 from the correlated-effects "
+                "model instead, and has no such restriction."
+            )
+
+
+def _check_collapsed_design(collapsed_y, collapsed_X):
+    """Reject a group reduction that leaves fewer rows than predictors.
+
+    Parameters
+    ----------
+    collapsed_y : :obj:`numpy.ndarray` of shape (m, D)
+        Estimates after aggregation, one row per group.
+    collapsed_X : :obj:`numpy.ndarray` of shape (m, P)
+        Design matrix after aggregation.
+
+    Raises
+    ------
+    ValueError
+        If the number of groups does not exceed the number of predictors.
+
+    Notes
+    -----
+    ``weight_scheme="collapse"`` replaces K rows with m, so a dataset that was
+    comfortably identified before collapsing can be saturated after it. Left
+    unchecked the moment estimators divide by ``m - p == 0`` and report
+    ``tau^2 = inf`` with zero standard errors, from input the user had no reason
+    to think was degenerate.
+
+    :func:`_tau2_inputs` meets the same condition and instead falls back to the
+    raw rows. Both are correct, because they guard different schemes: under
+    ``"collapse"`` the reduction *is* the model and a saturated collapse is fatal,
+    whereas under ``"rescale"`` every row is kept for the coefficients and only
+    tau^2 uses the reduction, so degrading to a biased-but-computable estimate
+    beats refusing to run.
+    """
+    n_rows, n_preds = collapsed_X.shape
+    if n_rows <= n_preds:
+        raise ValueError(
+            f"weight_scheme='collapse' reduces the data to {n_rows} row(s) for "
+            f"{n_preds} predictor(s); the number of groups must exceed the "
+            "number of predictors. Use weight_scheme='rescale' to keep every "
+            "row while still accounting for dependence."
+        )
+
+
+def _collapse_inputs(y, v, X, groups, weight_scheme, rho):
+    """Return one effect and variance per independent group when requested.
+
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        Estimates.
+    v : :obj:`numpy.ndarray` of shape (K, D)
+        Sampling variances.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    groups : None or :obj:`numpy.ndarray` of shape (K,)
+        Group labels, or None when no dependence was declared.
+    weight_scheme : {"individual", "rescale", "collapse"}
+        Only ``"collapse"`` triggers aggregation; the others pass through.
+    rho : :obj:`float`
+        Assumed within-group correlation used by the aggregation.
+
+    Returns
+    -------
+    :obj:`tuple`
+        ``(y, v, X, groups)``, aggregated to one row per group and relabelled
+        ``arange(m)`` when ``weight_scheme="collapse"``, else the inputs unchanged.
+
+    See Also
+    --------
+    pymare.stats.collapse_groups : Performs the aggregation.
+
+    Notes
+    -----
+    Groups are relabelled because after aggregation each row *is* one independent
+    unit, so the post-collapse invariant is one distinct label per row. Keeping
+    the original labels would leave stale group structure implied by the labels.
+    """
+    if weight_scheme != "collapse" or groups is None:
+        return y, v, X, groups
+    _validate_group_design(X, groups)
+    collapsed_y, collapsed_v, collapsed_X = collapse_groups(y, v, X, groups, rho=rho)
+    _check_collapsed_design(collapsed_y, collapsed_X)
+    collapsed_groups = np.arange(collapsed_y.shape[0])
+    return collapsed_y, collapsed_v, collapsed_X, collapsed_groups
+
+
+def _collapse_n_inputs(y, n, X, groups, weight_scheme, rho):
+    r"""Return one effect and an effective ``n`` per independent group.
+
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        Estimates.
+    n : :obj:`numpy.ndarray` of shape (K, D)
+        Sample sizes.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    groups : None or :obj:`numpy.ndarray` of shape (K,)
+        Group labels, or None when no dependence was declared.
+    weight_scheme : {"individual", "rescale", "collapse"}
+        Only ``"collapse"`` triggers aggregation; the others pass through.
+    rho : :obj:`float`
+        Assumed within-group correlation used by the aggregation.
+
+    Returns
+    -------
+    :obj:`tuple`
+        ``(y, n, X, groups)``, aggregated to one row per group and relabelled
+        ``arange(m)`` when ``weight_scheme="collapse"``, else the inputs unchanged.
+
+    See Also
+    --------
+    pymare.stats.collapse_groups_by_n : Performs the aggregation.
+    _collapse_inputs : The counterpart for variance-parameterized models.
+
+    Notes
+    -----
+    The effective sample size, not the raw one. Rows in a group share subjects,
+    so ``n`` must not be counted once per row -- but they are also not perfect
+    duplicates, and treating them as such is its own error. For a group of ``s``
+    estimates from the same ``n`` subjects correlated at ``rho``,
+
+    .. math::
+        \operatorname{Var}(\bar{y}) = \frac{\sigma^2}{n}
+            \cdot \frac{1 + \rho(s-1)}{s}
+            = \frac{\sigma^2}{n^{\text{eff}}}, \qquad
+        n^{\text{eff}} = \frac{sn}{1 + \rho(s-1)},
+
+    which runs from ``n`` at rho=1 up to ``s*n`` at rho=0. Fixing it at ``n`` --
+    as counting each group's sample size once does -- is only right for perfectly
+    correlated repeats, and biases sigma^2 low by ``(1 + rho(s-1)) / s``
+    otherwise: a factor of 4 for four uncorrelated estimates per group. In
+    image-based meta-analysis a group is a study and its rows are separate
+    contrast images, which share subjects but measure different things, so rho is
+    well below one and the bias is real.
+    """
+    if weight_scheme != "collapse" or groups is None:
+        return y, n, X, groups
+    _validate_group_design(X, groups)
+    collapsed_y, collapsed_n, collapsed_X = collapse_groups_by_n(y, n, X, groups, rho=rho)
+    _check_collapsed_design(collapsed_y, collapsed_X)
+    collapsed_groups = np.arange(collapsed_y.shape[0])
+    return collapsed_y, collapsed_n, collapsed_X, collapsed_groups
+
+
+def _tau2_inputs(y, v, X, groups, weight_scheme, rho, by_n=False, model=None):
+    """Return the (y, v, X) that tau^2 should be estimated from.
+
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        Estimates.
+    v : :obj:`numpy.ndarray` of shape (K, D)
+        Sampling variances, or sample sizes when ``by_n`` is True.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    groups : None or :obj:`numpy.ndarray` of shape (K,)
+        Group labels, or None when no dependence was declared.
+    weight_scheme : {"individual", "rescale", "collapse"}
+        ``"individual"`` returns the inputs untouched.
+    rho : :obj:`float`
+        Assumed within-group correlation used by the aggregation.
+    by_n : :obj:`bool`, optional
+        Whether the second array holds sample sizes rather than variances.
+        Default = False.
+    model : None or :obj:`str`, optional
+        The reduction resolved by :func:`_tau2_model`. Passed in by callers that
+        have already recorded it, so that the decision is made once.
+        Default = None, meaning resolve it here.
+
+    Returns
+    -------
+    :obj:`tuple`
+        ``(y, v, X)`` aggregated to one row per group, or the inputs unchanged.
+
+    Notes
+    -----
+    Moment-based tau^2 estimators treat every row as independent, so repeated
+    observations from a group distort the observed dispersion relative to what the
+    row count implies. Collapsing to one effect per group first removes that
+    pseudo-replication.
+
+    Falls back to the raw inputs when there are too few groups to fit the
+    collapsed design, rather than raising as :func:`_check_collapsed_design` does;
+    the two conditions are the same but only one of them is load-bearing. See that
+    function's notes.
+    """
+    if model is None:
+        model = _tau2_model(groups, X, weight_scheme)
+    if model != TAU2_AGGREGATE:
+        return y, v, X
+
+    # The aggregate replaces each group's predictors with their mean, which is
+    # only meaningful when they do not vary within the group.
+    _validate_group_design(X, groups, weight_scheme=weight_scheme)
+    collapse = collapse_groups_by_n if by_n else collapse_groups
+    return collapse(y, v, X, groups, rho=rho)
+
+
+def _dersimonian_laird_tau2(y, v, X):
+    """Estimate tau^2 by the method of moments, from Cochran's Q.
+
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        Estimates.
+    v : :obj:`numpy.ndarray` of shape (K, D)
+        Sampling variances.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray` of shape (D,)
+        The tau^2 estimate per parallel dataset, floored at zero.
+
+    Notes
+    -----
+    ``Q`` is the observed weighted dispersion, whose expectation is ``K - P``
+    under tau^2 = 0, so ``Q - (K - P)`` is the excess and ``A`` converts it to the
+    tau^2 scale. Because ``K`` counts *rows*, dependent rows make the subtracted
+    term grow faster than ``Q`` does; see :func:`_tau2_inputs` for the reduction
+    that removes the pseudo-replication before this is called.
+    """
+    k, p = X.shape
+
+    # Estimate initial betas with WLS, assuming tau^2=0
+    beta_wls, model_cov = weighted_least_squares(y, v, X, return_cov=True)
+
+    # Cochran's Q
+    w = 1.0 / v
+    w_sum = w.sum(0)
+    Q = (w * (y - X.dot(beta_wls)) ** 2).sum(0)
+
+    # Einsum indices: k = observations, p = predictors, i = parallel iterates.
+    # q is a dummy for 2nd p when p x p covariance matrix is passed.
+    Xw2 = np.einsum("kp,ki->ipk", X, w**2)
+    pXw2 = np.einsum("ipk,qpi->iqk", Xw2, model_cov)
+    A = w_sum - np.trace(pXw2.dot(X), axis1=1, axis2=2)
+    return np.maximum(0.0, (Q - (k - p)) / A)
+
+
+def _robust_cov_and_dof(y, v, X, beta, groups, tau2=0.0, model_cov=None, w=None):
+    """Compute the cluster-robust covariance and its degrees of freedom together.
+
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        Estimates.
+    v : :obj:`numpy.ndarray` of shape (K, D)
+        Sampling variances.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    beta : :obj:`numpy.ndarray` of shape (P, D)
+        The fitted coefficients whose covariance is wanted.
+    groups : None or :obj:`numpy.ndarray` of shape (K,)
+        Group labels, or None to leave the model-based covariance untouched.
+    tau2 : :obj:`float` or :obj:`numpy.ndarray`, optional
+        The tau^2 used for the weights, matching the value that produced ``beta``.
+        Default = 0.
+    model_cov : None or :obj:`numpy.ndarray` of shape (P, P, D), optional
+        The model-based covariance, passed through to avoid a redundant
+        pseudo-inverse. Default = None.
+    w : None or :obj:`numpy.ndarray` of shape (K, D), optional
+        The weights that produced ``beta``, so the residuals match the fit.
+        Default = None.
+
+    Returns
+    -------
+    robust_cov : None or :obj:`numpy.ndarray` of shape (P, P, D)
+        The sandwich covariance, or None when ``groups`` is None.
+    n_groups : None or :obj:`int`
+        The number of groups, or None when ``groups`` is None.
+    dof : None or :obj:`numpy.ndarray` of shape (P, D)
+        Satterthwaite degrees of freedom, or None when ``groups`` is None.
+
+    See Also
+    --------
+    pymare.stats.cluster_robust_cov
+    pymare.stats.satterthwaite_dof
+
+    Notes
+    -----
+    The degrees of freedom are computed here, alongside the sandwich, so that they
+    are guaranteed to reflect the same weights and the same group structure.
+    Computing them in ``results`` instead would mean reconstructing both, and any
+    drift would silently change the reference distribution rather than raising.
+
+    ``model_cov`` is only reusable when it is ``(X'WX)^-1`` under these same
+    weights; callers that cannot promise that must pass None, in which case
+    :func:`~pymare.stats.satterthwaite_dof` rebuilds it.
+
+    The group count is returned separately rather than folded into ``params_``
+    because :func:`_loopable` stacks every entry of ``params_`` across parallel
+    datasets, which only works for arrays. ``dof`` is an array of shape ``(P, D)``,
+    so it stacks correctly and does travel in ``params_``.
+    """
+    if groups is None:
+        return None, None, None
+
+    groups = np.asarray(groups).ravel()
+    n_groups = encode_groups(groups, n_observations=y.shape[0])[1].size
+    robust_cov = cluster_robust_cov(y, v, X, beta, groups, tau2=tau2, model_cov=model_cov, w=w)
+    # v may be a single shared column while y has many. cluster_robust_cov
+    # broadcasts on entry; do the same here or the dof come back with v's
+    # column count and no longer line up with fe_params.
+    weights = broadcast_columns(1.0 / (v + tau2) if w is None else w, y.shape[1])
+    # model_cov is only reusable when it is (X'WX)^-1 under these same weights.
+    # Callers that cannot promise that must pass None, in which case
+    # satterthwaite_dof rebuilds the bread from ``weights`` itself.
+    dof = satterthwaite_dof(X, weights, groups, model_cov=model_cov)
+    return robust_cov, n_groups, dof
 
 
 @wrapt.decorator
@@ -20,7 +565,21 @@ def _loopable(wrapped, instance, args, kwargs):
     Designed to handle naive looping over the 2nd dimension of y/v/n inputs, and reconstruction of
     outputs.
     """
+    # fit() is routinely called positionally; binding against the wrapped
+    # signature makes both forms work rather than raising KeyError('y').
+    if args:
+        bound = signature(wrapped).bind(*args, **kwargs)
+        bound.apply_defaults()
+        kwargs = dict(bound.arguments)
+        args = ()
+
     n_iter = kwargs["y"].shape[1]
+    # A single column of v or n applies to every parallel dataset. Expand it
+    # once here so the loop below has one shape to slice, rather than each
+    # argument carrying its own convention.
+    for name in ("v", "n"):
+        if kwargs.get(name) is not None:
+            kwargs[name] = broadcast_columns(kwargs[name], n_iter)
     if n_iter > 10:
         warn(
             "Input contains {} parallel datasets (in 2nd dim of y and"
@@ -38,8 +597,12 @@ def _loopable(wrapped, instance, args, kwargs):
             iter_kwargs["v"] = kwargs["v"][:, i, None]
 
         if "n" in kwargs:
-            n = kwargs["n"][:, i, None] if kwargs["n"].shape[1] > 1 else kwargs["n"]
-            iter_kwargs["n"] = n
+            iter_kwargs["n"] = kwargs["n"][:, i, None]
+
+        # Group labels are per-observation, not per-dataset, so they are shared
+        # across iterates rather than sliced.
+        if kwargs.get("g") is not None:
+            iter_kwargs["g"] = kwargs["g"]
 
         wrapped(**iter_kwargs)
         param_dicts.append(instance.params_.copy())
@@ -55,6 +618,26 @@ def _loopable(wrapped, instance, args, kwargs):
 
 class BaseEstimator(metaclass=ABCMeta):
     """A base class for Estimators."""
+
+    #: Declarative constraints on the constructor arguments, checked together by
+    #: :meth:`_validate_params`. Declaring them means a new parameter is
+    #: validated by adding a line here rather than by remembering to write a
+    #: check; ``weight_scheme`` was validated this way and ``rho`` was not.
+    _parameter_constraints = {}
+
+    def _validate_params(self):
+        """Check every declared constraint against the values just assigned.
+
+        Notes
+        -----
+        Called from ``__init__``, so a typo surfaces at construction rather than
+        after the caller has assembled a Dataset. That is the opposite of
+        scikit-learn's convention, which defers validation to ``fit`` because
+        ``set_params`` would otherwise bypass it -- a rationale that does not
+        apply here, since PyMARE estimators expose no ``set_params``.
+        """
+        for name, constraint in self._parameter_constraints.items():
+            constraint.check(name, getattr(self, name))
 
     # A class-level mapping from Dataset attributes to fit() arguments. Used by
     # fit_dataset() for estimators that take non-standard arguments (e.g., 'z'
@@ -163,7 +746,7 @@ class WeightedLeastSquares(BaseEstimator):
     """Weighted least-squares meta-regression.
 
     Provides the weighted least-squares estimate of the fixed effects given known/assumed
-    between-study variance tau^2, as described in :footcite:t:`brockwell2001comparison`.
+    between-unit variance tau^2, as described in :footcite:t:`brockwell2001comparison`.
     When tau^2 = 0 (default), the model is the standard inverse-weighted fixed-effects
     meta-regression.
 
@@ -173,6 +756,16 @@ class WeightedLeastSquares(BaseEstimator):
         Assumed/known value of tau^2. Must be >= 0.
         If an array, must have ``d`` elements, where ``d`` refers to the number of datasets.
         Default = 0.
+    weight_scheme : {"individual", "rescale", "collapse"}, optional
+        ``"individual"`` uses one inverse-variance weight per row.
+        ``"rescale"`` retains all rows but divides their weights by group
+        size for correlated-effects robust estimation. ``"collapse"`` first
+        reduces every group to one equal-weight mean and its correlated-mean
+        variance. Default is ``"individual"``.
+    rho : None or :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that model a
+        group. Must lie in [0, 1]. Setting it under ``"individual"``, which
+        models no correlation, warns. Default is None, meaning 0.8.
 
     Notes
     -----
@@ -188,10 +781,20 @@ class WeightedLeastSquares(BaseEstimator):
     .. footbibliography::
     """
 
-    def __init__(self, tau2=0.0):
-        self.tau2 = tau2
+    _parameter_constraints = WEIGHTING_CONSTRAINTS
 
-    def fit(self, y, X, v=None):
+    def __init__(
+        self,
+        tau2=0.0,
+        weight_scheme="individual",
+        rho=None,
+    ):
+        self.tau2 = tau2
+        self.weight_scheme = weight_scheme
+        self.rho = _resolve_rho(rho, weight_scheme)
+        self._validate_params()
+
+    def fit(self, y, X, v=None, g=None):
         """Fit the estimator to data.
 
         Parameters
@@ -202,6 +805,12 @@ class WeightedLeastSquares(BaseEstimator):
             The independent variable(s) (X).
         v : :obj:`numpy.ndarray` of shape (n, d), optional
             Sampling variances. If not provided, unit weights will be used.
+        g : :obj:`numpy.ndarray` of shape (n,), optional
+            Group labels marking dependent estimates. If provided,
+            standard errors are computed with the cluster-robust estimator of
+            :footcite:t:`hedges2010robust` instead of the model-based one.
+            Point estimates are also grouped when ``weight_scheme='collapse'`` or
+            reweighted when ``weight_scheme='rescale'``.
 
         Returns
         -------
@@ -213,16 +822,41 @@ class WeightedLeastSquares(BaseEstimator):
         if v is None:
             v = np.ones_like(y)
 
-        beta, inv_cov = weighted_least_squares(y, v, X, self.tau2, return_cov=True)
-        self.params_ = {"fe_params": beta, "tau2": self.tau2, "inv_cov": inv_cov}
+        y, v, X, fit_groups = _collapse_inputs(
+            ensure_2d(y), ensure_2d(v), X, g, self.weight_scheme, self.rho
+        )
+        self.tau2_model_ = _tau2_model(fit_groups, X, self.weight_scheme, correlated_effects=True)
+        w = _resolve_weights(v, fit_groups, self.tau2, self.weight_scheme)
+        beta, model_cov = weighted_least_squares(y, v, X, self.tau2, return_cov=True, w=w)
+        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
+            y, v, X, beta, fit_groups, tau2=self.tau2, model_cov=model_cov, w=w
+        )
+        self.params_ = {
+            "fe_params": beta,
+            "tau2": self.tau2,
+            # NB: the key is a legacy misnomer; the value is a covariance.
+            "inv_cov": model_cov if robust_cov is None else robust_cov,
+        }
+        if dof is not None:
+            self.params_["dof"] = dof
         return self
 
 
 class DerSimonianLaird(BaseEstimator):
     """DerSimonian-Laird meta-regression estimator.
 
-    Estimates the between-subject variance tau^2 using the :footcite:t:`dersimonian1986meta`
+    Estimates the between-unit variance tau^2 using the :footcite:t:`dersimonian1986meta`
     method-of-moments approach.
+
+    Parameters
+    ----------
+    weight_scheme : {"individual", "rescale", "collapse"}, optional
+        Row-level weighting, per-row weights divided by group size, or one
+        aggregate per group. Default is ``"individual"``.
+    rho : None or :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that model a
+        group. Must lie in [0, 1]. Setting it under ``"individual"``, which
+        models no correlation, warns. Default is None, meaning 0.8.
 
     Notes
     -----
@@ -236,7 +870,14 @@ class DerSimonianLaird(BaseEstimator):
     .. footbibliography::
     """
 
-    def fit(self, y, v, X):
+    _parameter_constraints = WEIGHTING_CONSTRAINTS
+
+    def __init__(self, weight_scheme="individual", rho=None):
+        self.weight_scheme = weight_scheme
+        self.rho = _resolve_rho(rho, weight_scheme)
+        self._validate_params()
+
+    def fit(self, y, v, X, g=None):
         """Fit the estimator to data.
 
         Parameters
@@ -247,6 +888,15 @@ class DerSimonianLaird(BaseEstimator):
             Sampling variances.
         X : :obj:`numpy.ndarray` of shape (n, p)
             The independent variable(s) (X).
+        g : :obj:`numpy.ndarray` of shape (n,), optional
+            Group labels marking dependent estimates. If provided,
+            standard errors are computed with the cluster-robust estimator of
+            :footcite:t:`hedges2010robust` instead of the model-based one.
+            With ``weight_scheme="rescale"`` tau^2 comes from the
+            correlated-effects estimator of
+            :func:`~pymare.stats.correlated_effects_tau2`, which reads the
+            observation-level design. ``"collapse"`` instead reduces every group
+            to one row and fits both tau^2 and the coefficients to those.
 
         Returns
         -------
@@ -258,35 +908,71 @@ class DerSimonianLaird(BaseEstimator):
         y = ensure_2d(y)
         v = ensure_2d(v)
 
-        k, p = X.shape
+        model_y, model_v, model_X, model_groups = _collapse_inputs(
+            y, v, X, g, self.weight_scheme, self.rho
+        )
 
-        # Estimate initial betas with WLS, assuming tau^2=0
-        beta_wls, inv_cov = weighted_least_squares(y, v, X, return_cov=True)
-
-        # Cochran's Q
-        w = 1.0 / v
-        w_sum = w.sum(0)
-        Q = (w * (y - X.dot(beta_wls)) ** 2).sum(0)
-
-        # Einsum indices: k = studies, p = predictors, i = parallel iterates.
-        # q is a dummy for 2nd p when p x p covariance matrix is passed.
-        Xw2 = np.einsum("kp,ki->ipk", X, w**2)
-        pXw2 = np.einsum("ipk,qpi->iqk", Xw2, inv_cov)
-        A = w_sum - np.trace(pXw2.dot(X), axis1=1, axis2=2)
-        tau_dl = (Q - (k - p)) / A
-        tau_dl = np.maximum(0.0, tau_dl)
+        self.tau2_model_ = _tau2_model(
+            model_groups, model_X, self.weight_scheme, correlated_effects=True
+        )
+        if self.tau2_model_ == TAU2_CORRELATED:
+            # The correlated-effects generalization of this estimator's own
+            # method of moments, from the observation-level design.
+            tau_dl = correlated_effects_tau2(model_y, model_v, model_X, model_groups, rho=self.rho)
+        else:
+            tau_dl = _dersimonian_laird_tau2(
+                *_tau2_inputs(
+                    model_y,
+                    model_v,
+                    model_X,
+                    model_groups,
+                    self.weight_scheme,
+                    self.rho,
+                    model=self.tau2_model_,
+                )
+            )
 
         # Re-estimate beta with tau^2 estimate
-        beta_dl, inv_cov = weighted_least_squares(y, v, X, tau2=tau_dl, return_cov=True)
-        self.params_ = {"fe_params": beta_dl, "tau2": tau_dl, "inv_cov": inv_cov}
+        w = _resolve_weights(model_v, model_groups, tau_dl, self.weight_scheme)
+        beta_dl, model_cov = weighted_least_squares(
+            model_y, model_v, model_X, tau2=tau_dl, return_cov=True, w=w
+        )
+        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
+            model_y,
+            model_v,
+            model_X,
+            beta_dl,
+            model_groups,
+            tau2=tau_dl,
+            model_cov=model_cov,
+            w=w,
+        )
+        self.params_ = {
+            "fe_params": beta_dl,
+            "tau2": tau_dl,
+            # NB: the key is a legacy misnomer; the value is a covariance.
+            "inv_cov": model_cov if robust_cov is None else robust_cov,
+        }
+        if dof is not None:
+            self.params_["dof"] = dof
         return self
 
 
 class Hedges(BaseEstimator):
     """Hedges meta-regression estimator.
 
-    Estimates the between-subject variance tau^2 using the :footcite:t:`hedges2014statistical`
+    Estimates the between-unit variance tau^2 using the :footcite:t:`hedges2014statistical`
     approach.
+
+    Parameters
+    ----------
+    weight_scheme : {"individual", "rescale", "collapse"}, optional
+        Row-level weighting, per-row weights divided by group size, or one
+        aggregate per group. Default is ``"individual"``.
+    rho : None or :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that model a
+        group. Must lie in [0, 1]. Setting it under ``"individual"``, which
+        models no correlation, warns. Default is None, meaning 0.8.
 
     Notes
     -----
@@ -295,12 +981,33 @@ class Hedges(BaseEstimator):
     (use the 2nd dimension for the parallel iterates).
     The ``X`` matrix must be identical for all iterates.
 
+    Unlike the coefficients, tau^2 is derived from an *unweighted* fit: it is the excess of
+    the ordinary mean squared error over the mean sampling variance. The coefficients are
+    then refitted with ``1 / (v + tau^2)`` weights, and the reported covariance comes from
+    that second fit.
+
+    .. versionchanged:: 0.0.11
+
+        The reported model-based covariance was previously taken from the unweighted fit
+        used to obtain tau^2, so the standard errors did not correspond to the reported
+        coefficients and were substantially too small. They are now ``(X'WX)^-1`` under the
+        same ``1 / (v + tau^2)`` weights that produce the coefficients, matching
+        :obj:`~pymare.estimators.DerSimonianLaird` and the ``metafor`` R package. Point
+        estimates and tau^2 are unaffected.
+
     References
     ----------
     .. footbibliography::
     """
 
-    def fit(self, y, v, X):
+    _parameter_constraints = WEIGHTING_CONSTRAINTS
+
+    def __init__(self, weight_scheme="individual", rho=None):
+        self.weight_scheme = weight_scheme
+        self.rho = _resolve_rho(rho, weight_scheme)
+        self._validate_params()
+
+    def fit(self, y, v, X, g=None):
         """Fit the estimator to data.
 
         Parameters
@@ -311,6 +1018,16 @@ class Hedges(BaseEstimator):
             Sampling variances.
         X : :obj:`numpy.ndarray` of shape (n, p)
             The independent variable(s) (X).
+        g : :obj:`numpy.ndarray` of shape (n,), optional
+            Group labels marking dependent estimates. If provided,
+            standard errors are computed with the cluster-robust estimator of
+            :footcite:t:`hedges2010robust` instead of the model-based one.
+            With ``weight_scheme`` set to ``"rescale"`` or ``"collapse"``,
+            tau^2 is estimated from one aggregate per group, which requires the
+            design to be constant within a group. ``"collapse"`` also fits the
+            fixed effects to those aggregates. Use
+            :class:`~pymare.estimators.DerSimonianLaird` for a design that varies
+            within a group.
 
         Returns
         -------
@@ -319,22 +1036,63 @@ class Hedges(BaseEstimator):
         # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
         self.dataset_ = None
 
-        k, p = X.shape[:2]
-        _unit_v = np.ones_like(y)
-        beta, inv_cov = weighted_least_squares(y, _unit_v, X, return_cov=True)
-        mse = ((y - X.dot(beta)) ** 2).sum(0) / (k - p)
-        tau_ho = mse - v.sum(0) / k
-        tau_ho = np.maximum(0, tau_ho)
-        # Estimate beta with tau^2 estimate
-        beta_ho = weighted_least_squares(y, v, X, tau2=tau_ho)
-        self.params_ = {"fe_params": beta_ho, "tau2": tau_ho, "inv_cov": inv_cov}
+        y = ensure_2d(y)
+        v = ensure_2d(v)
+        model_y, model_v, model_X, model_groups = _collapse_inputs(
+            y, v, X, g, self.weight_scheme, self.rho
+        )
+
+        self.tau2_model_ = _tau2_model(model_groups, model_X, self.weight_scheme)
+        tau_y, tau_v, tau_X = _tau2_inputs(
+            model_y,
+            model_v,
+            model_X,
+            model_groups,
+            self.weight_scheme,
+            self.rho,
+            model=self.tau2_model_,
+        )
+        tau_k, tau_p = tau_X.shape[:2]
+        # tau^2 is the excess of the *unweighted* mean squared error over the
+        # mean sampling variance, so this initial fit is deliberately OLS. It
+        # feeds the variance component only; the coefficients are refitted with
+        # inverse-variance weights below.
+        tau_beta = weighted_least_squares(tau_y, np.ones_like(tau_y), tau_X)
+        mse = ((tau_y - tau_X.dot(tau_beta)) ** 2).sum(0) / (tau_k - tau_p)
+        tau_ho = np.maximum(0, mse - tau_v.sum(0) / tau_k)
+
+        # Estimate beta with tau^2 estimate. The covariance has to come from
+        # this fit rather than the OLS one above: (X'WX)^-1 is only the
+        # covariance of the coefficients computed under those same weights.
+        w = _resolve_weights(model_v, model_groups, tau_ho, self.weight_scheme)
+        beta_ho, model_cov = weighted_least_squares(
+            model_y, model_v, model_X, tau2=tau_ho, return_cov=True, w=w
+        )
+        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
+            model_y,
+            model_v,
+            model_X,
+            beta_ho,
+            model_groups,
+            tau2=tau_ho,
+            model_cov=model_cov,
+            w=w,
+        )
+        self.params_ = {
+            "fe_params": beta_ho,
+            "tau2": tau_ho,
+            # NB: the key is a legacy misnomer; the value is a covariance.
+            "inv_cov": model_cov if robust_cov is None else robust_cov,
+        }
+        if dof is not None:
+            self.params_["dof"] = dof
         return self
 
 
 class VarianceBasedLikelihoodEstimator(BaseEstimator):
     """Likelihood-based estimator for estimates with known variances.
 
-    Initially estimates the between-subject variance tau^2 and fixed effect coefficients
+    Initially estimates the between-unit variance tau^2 and fixed effect coefficients
     using :footcite:t:`dersimonian1986meta` method-of-moments approach, and then
     iteratively estimates them using the specified likelihood-based estimator (ML or REML)
     :footcite:p:`kosmidis2017improving`.
@@ -345,6 +1103,13 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         The estimation method to use.
         Either 'ML' (for maximum-likelihood) or 'REML' (restricted maximum-likelihood).
         Default = 'ML'.
+    weight_scheme : {"individual", "rescale", "collapse"}, optional
+        Row-level weighting, per-row weights divided by group size, or one
+        aggregate per group. Default is ``"individual"``.
+    rho : None or :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that model a
+        group. Must lie in [0, 1]. Setting it under ``"individual"``, which
+        models no correlation, warns. Default is None, meaning 0.8.
     **kwargs
         Keyword arguments to pass to the SciPy minimizer.
 
@@ -359,7 +1124,12 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
     .. footbibliography::
     """
 
-    def __init__(self, method="ml", **kwargs):
+    _parameter_constraints = WEIGHTING_CONSTRAINTS
+
+    def __init__(self, method="ml", weight_scheme="individual", rho=None, **kwargs):
+        self.weight_scheme = weight_scheme
+        self.rho = _resolve_rho(rho, weight_scheme)
+        self._validate_params()
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
             raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
@@ -368,7 +1138,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         self.kwargs = kwargs
 
     @_loopable
-    def fit(self, y, v, X):
+    def fit(self, y, v, X, g=None):
         """Fit the estimator to data.
 
         Parameters
@@ -379,6 +1149,13 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
             Sampling variances.
         X : :obj:`numpy.ndarray` of shape (n, p)
             The independent variable(s) (X).
+        g : :obj:`numpy.ndarray` of shape (n,), optional
+            Group labels marking dependent estimates. If provided,
+            standard errors are computed with the cluster-robust estimator of
+            :footcite:t:`hedges2010robust` instead of the model-based one.
+            With ``weight_scheme`` set to ``"rescale"`` or ``"collapse"``, the
+            likelihood is evaluated on one aggregate per group. ``"collapse"``
+            also fits the fixed effects to those aggregates.
 
         Returns
         -------
@@ -387,8 +1164,28 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
         self.dataset_ = None
 
+        y = ensure_2d(y)
+        v = ensure_2d(v)
+        model_y, model_v, model_X, model_groups = _collapse_inputs(
+            y, v, X, g, self.weight_scheme, self.rho
+        )
+
+        # The likelihood treats every row as independent, so tau^2 is fitted
+        # on one effect per group to avoid counting a group's repeated
+        # estimates as independent evidence.
+        self.tau2_model_ = _tau2_model(model_groups, model_X, self.weight_scheme)
+        fit_y, fit_v, fit_X = _tau2_inputs(
+            model_y,
+            model_v,
+            model_X,
+            model_groups,
+            self.weight_scheme,
+            self.rho,
+            model=self.tau2_model_,
+        )
+
         # use D-L estimate for initial values
-        est_DL = DerSimonianLaird().fit(y, v, X).params_
+        est_DL = DerSimonianLaird().fit(fit_y, fit_v, fit_X).params_
         beta = est_DL["fe_params"]
         tau2 = est_DL["tau2"]
 
@@ -399,11 +1196,38 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         lb[-1] = 0.0  # bound only the variance
         bds = Bounds(lb, ub, keep_feasible=True)
 
-        res = minimize(self._nll_func, theta_init, (y, v, X), bounds=bds, **self.kwargs)
+        res = minimize(
+            self._nll_func, theta_init, (fit_y, fit_v, fit_X), bounds=bds, **self.kwargs
+        )
         beta, tau = res.x[:-1], float(res.x[-1])
         tau = np.max([tau, 0])
-        _, inv_cov = weighted_least_squares(y, v, X, tau, True)
-        self.params_ = {"fe_params": beta[:, None], "tau2": tau, "inv_cov": inv_cov}
+        beta = beta[:, None]
+        w = _resolve_weights(model_v, model_groups, tau, self.weight_scheme)
+        if w is None:
+            _, model_cov = weighted_least_squares(model_y, model_v, model_X, tau, True)
+        else:
+            # Cluster weighting changes the estimand, so beta has to be
+            # recomputed under those weights rather than kept from the
+            # likelihood, whose working model assumes independence.
+            beta, model_cov = weighted_least_squares(model_y, model_v, model_X, tau, True, w=w)
+        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
+            model_y,
+            model_v,
+            model_X,
+            beta,
+            model_groups,
+            tau2=tau,
+            model_cov=model_cov,
+            w=w,
+        )
+        self.params_ = {
+            "fe_params": beta,
+            "tau2": tau,
+            # NB: the key is a legacy misnomer; the value is a covariance.
+            "inv_cov": model_cov if robust_cov is None else robust_cov,
+        }
+        if dof is not None:
+            self.params_["dof"] = dof
         return self
 
     def _ml_nll(self, theta, y, v, X):
@@ -427,7 +1251,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     """Likelihood-based estimator for data with known sample sizes but unknown sampling variances.
 
-    Iteratively estimates the between-subject variance tau^2 and fixed effect betas using the
+    Iteratively estimates the between-unit variance tau^2 and fixed effect betas using the
     specified likelihood-based estimator (ML or REML) :footcite:p:`sangnawakij2019meta`.
 
     Parameters
@@ -436,12 +1260,21 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         The estimation method to use.
         Either 'ML' (for maximum-likelihood) or 'REML' (restricted maximum-likelihood).
         Default = 'ML'.
+    weight_scheme : {"individual", "rescale", "collapse"}, optional
+        Row-level, correlated-effects, or one-aggregate-per-group weighting.
+        In ``"collapse"`` mode a group's rows are replaced by one row carrying
+        the effective sample size ``s*n / (1 + rho(s-1))``, so their ``n`` may
+        differ. Default is ``"individual"``.
+    rho : None or :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that model a
+        group. Must lie in [0, 1]. Setting it under ``"individual"``, which
+        models no correlation, warns. Default is None, meaning 0.8.
     **kwargs
         Keyword arguments to pass to the SciPy minimizer.
 
     Notes
     -----
-    Homogeneity of sigma^2 across studies is assumed.
+    Homogeneity of sigma^2 across input units is assumed.
 
     The ML and REML solutions are obtained via SciPy's scalar function minimizer
     (:func:`scipy.optimize.minimize`).
@@ -452,7 +1285,12 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     .. footbibliography::
     """
 
-    def __init__(self, method="ml", **kwargs):
+    _parameter_constraints = WEIGHTING_CONSTRAINTS
+
+    def __init__(self, method="ml", weight_scheme="individual", rho=None, **kwargs):
+        self.weight_scheme = weight_scheme
+        self.rho = _resolve_rho(rho, weight_scheme)
+        self._validate_params()
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
             raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
@@ -461,7 +1299,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         self.kwargs = kwargs
 
     @_loopable
-    def fit(self, y, n, X):
+    def fit(self, y, n, X, g=None):
         """Fit the estimator to data.
 
         Parameters
@@ -472,6 +1310,14 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
             Sample sizes.
         X : :obj:`numpy.ndarray` of shape (n, p)
             The independent variable(s) (X).
+        g : :obj:`numpy.ndarray` of shape (n,), optional
+            Group labels marking dependent estimates. If provided,
+            standard errors are computed with the cluster-robust estimator of
+            :footcite:t:`hedges2010robust` instead of the model-based one.
+            With ``weight_scheme`` set to ``"rescale"`` or ``"collapse"``, the
+            variance components are estimated from one aggregate per group.
+            ``"collapse"`` preserves one unchanged ``n`` value per group and
+            also fits the fixed effects to those aggregates.
 
         Returns
         -------
@@ -480,22 +1326,50 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
         self.dataset_ = None
 
-        if n.std() < np.sqrt(np.finfo(float).eps):
+        y = ensure_2d(y)
+        n = ensure_2d(n)
+        model_y, model_n, model_X, model_groups = _collapse_n_inputs(
+            y, n, X, g, self.weight_scheme, self.rho
+        )
+
+        # Both variance components are fitted on one effect per group; a
+        # a group's repeated estimates agree with each other by construction, and
+        # counting them as independent shrinks sigma^2 toward zero.
+        self.tau2_model_ = _tau2_model(model_groups, model_X, self.weight_scheme)
+        fit_y, fit_n, fit_X = _tau2_inputs(
+            model_y,
+            model_n,
+            model_X,
+            model_groups,
+            self.weight_scheme,
+            self.rho,
+            by_n=True,
+            model=self.tau2_model_,
+        )
+
+        # sigma^2 and tau^2 are separately identified only when the sample
+        # sizes vary, so the check belongs on ``fit_n`` -- the values the
+        # likelihood actually sees. Under weight_scheme='rescale' those are
+        # effective sample sizes, which can vary sharply even when every raw
+        # ``n`` is identical (and, less often, the reverse).
+        if fit_n.std() < np.sqrt(np.finfo(float).eps):
             raise ValueError(
                 "Sample size-based likelihood estimator cannot "
                 "work with all-equal sample sizes."
             )
 
-        if n.std() < n.mean() / 10:
-            raise Warning(
-                "Sample sizes are too close, sample size-based likelihood estimator may fail."
+        if fit_n.std() < fit_n.mean() / 10:
+            # ``raise Warning`` aborts the fit instead of warning about it.
+            warn(
+                "Sample sizes are too close, sample size-based likelihood estimator may fail.",
+                UserWarning,
             )
 
         # set tau^2 to 0 and compute starting values
         tau2 = 0.0
-        k, p = X.shape
-        beta = weighted_least_squares(y, n, X, tau2)
-        sigma = ((y - X.dot(beta)) ** 2 * n).sum() / (k - p)
+        k, p = fit_X.shape
+        beta = weighted_least_squares(fit_y, fit_n, fit_X, tau2)
+        sigma = ((fit_y - fit_X.dot(beta)) ** 2 * fit_n).sum() / (k - p)
         theta_init = np.r_[beta.ravel(), sigma, tau2]
 
         lb = np.ones(len(theta_init)) * -np.inf
@@ -503,16 +1377,40 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         lb[-2:] = 0.0  # bound only the variances
         bds = Bounds(lb, ub, keep_feasible=True)
 
-        res = minimize(self._nll_func, theta_init, (y, n, X), bounds=bds, **self.kwargs)
+        res = minimize(
+            self._nll_func, theta_init, (fit_y, fit_n, fit_X), bounds=bds, **self.kwargs
+        )
         beta, sigma, tau = res.x[:-2], float(res.x[-2]), float(res.x[-1])
         tau = np.max([tau, 0])
-        _, inv_cov = weighted_least_squares(y, sigma / n, X, tau, True)
+        beta = beta[:, None]
+        v = sigma / model_n
+        w = _resolve_weights(v, model_groups, tau, self.weight_scheme)
+        if w is None:
+            _, model_cov = weighted_least_squares(model_y, v, model_X, tau, True)
+        else:
+            # Cluster weighting changes the estimand, so beta has to be
+            # recomputed under those weights rather than kept from the
+            # likelihood, whose working model assumes independence.
+            beta, model_cov = weighted_least_squares(model_y, v, model_X, tau, True, w=w)
+        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
+            model_y,
+            v,
+            model_X,
+            beta,
+            model_groups,
+            tau2=tau,
+            model_cov=model_cov,
+            w=w,
+        )
         self.params_ = {
-            "fe_params": beta[:, None],
+            "fe_params": beta,
             "sigma2": np.array(sigma),
             "tau2": tau,
-            "inv_cov": inv_cov,
+            # NB: the key is a legacy misnomer; the value is a covariance.
+            "inv_cov": model_cov if robust_cov is None else robust_cov,
         }
+        if dof is not None:
+            self.params_["dof"] = dof
         return self
 
     def _ml_nll(self, theta, y, n, X):
@@ -529,7 +1427,9 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     def _reml_nll(self, theta, y, n, X):
         """REML negative log-likelihood for meta-regression model."""
         ll_ = self._ml_nll(theta, y, n, X)
-        sigma2, tau2 = theta[-2:]
+        # Clamp as _ml_nll does; the Bounds keep these non-negative today, but
+        # the two halves of the objective should not disagree about that.
+        sigma2, tau2 = np.maximum(theta[-2:], 0.0)
         w = 1 / (tau2 + sigma2 / n)
         F = (X * w).T.dot(X)
         return ll_ + 0.5 * np.log(np.linalg.det(F))
@@ -615,16 +1515,16 @@ class StanMetaRegression(BaseEstimator):
         Parameters
         ----------
         y : :obj:`numpy.ndarray` of shape (K,)
-            1d array of study-level estimates
+            1d array of observation-level estimates
         v : :obj:`numpy.ndarray` of shape (K,)
-            1d array of study-level variances
+            1d array of observation-level variances
         X : :obj:`numpy.ndarray` of shape (K[, P])
-            1d or 2d array containing study-level predictors
+            1d or 2d array containing observation-level predictors
             (including intercept); has dimensions K x P, where K is the
-            number of studies and P is the number of predictor variables.
+            number of observations and P is the number of predictor variables.
         groups : :obj:`list` of :obj:`int`, optional
             1d array of integers identifying
-            groups/clusters of observations in the y/v/X inputs. If
+            groups of observations in the y/v/X inputs. If
             provided, values must consist of integers in the range of 1..k
             (inclusive), where k is the number of distinct groups. When
             None (default), it is assumed that each observation in the
@@ -637,9 +1537,9 @@ class StanMetaRegression(BaseEstimator):
         Notes
         -----
         This estimator supports (simple) hierarchical models. When multiple
-        estimates are available for at least one of the studies in `y`, the
-        `groups` argument can be used to specify the nesting structure
-        (i.e., which rows in `y`, `v`, and `X` belong to each study).
+        observations belong to at least one common sampling unit, the `groups`
+        argument can specify the nesting structure (i.e., which rows in `y`,
+        `v`, and `X` belong to each group).
         """
         # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
         self.dataset_ = None
@@ -653,7 +1553,7 @@ class StanMetaRegression(BaseEstimator):
 
         N = y.shape[0]
         groups = groups or np.arange(1, N + 1, dtype=int)
-        K = len(np.unique(groups))
+        K = encode_groups(np.asarray(groups).ravel())[1].size
 
         data = {
             "K": K,

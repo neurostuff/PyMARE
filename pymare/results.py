@@ -1,5 +1,6 @@
 """Tools for representing and manipulating meta-regression results."""
 
+import copy
 import itertools
 import math
 from functools import lru_cache
@@ -15,7 +16,107 @@ try:
 except ImportError:
     az = None
 
-from pymare.stats import q_gen, q_profile
+from pymare.stats import (
+    DEFAULT_RHO,
+    TAU2_AGGREGATE,
+    TAU2_CORRELATED,
+    TAU2_INDEPENDENT,
+    broadcast_columns,
+    collapse_groups,
+    collapse_groups_by_n,
+    encode_groups,
+    q_gen,
+    q_profile,
+)
+
+
+def _expand_unit_order(order, group_codes, n_obs):
+    """Turn a permutation of exchangeable units into a row index array.
+
+    Parameters
+    ----------
+    order : :obj:`numpy.ndarray` of shape (m,)
+        A permutation of the exchangeable units. ``order[k]`` is the unit whose
+        estimates are moved onto unit ``k``'s rows.
+    group_codes : None or :obj:`numpy.ndarray` of shape (K,)
+        Consecutive group codes, one per row, or None when rows are the units.
+    n_obs : :obj:`int`
+        Number of rows.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray` of shape (K,)
+        Row indices realising ``order`` while leaving the group layout alone.
+
+    Notes
+    -----
+    Dependent rows are exchangeable only as complete groups, so a shuffle has to
+    move whole groups rather than individual rows. Shuffling rows independently
+    generates datasets that could not have arisen under the null and builds a
+    reference distribution that is far too narrow.
+
+    The refit is vectorized over permutations and therefore sees one design and
+    one set of group labels for every column, so a permutation may only move a
+    group's estimates onto rows that carry the same label as each other. Writing
+    each source group into the *positions* of the group it replaces preserves
+    that, whereas concatenating groups in the permuted order does not: it assumes
+    the labels are contiguous and equally sized, and silently splits a group
+    across two labels otherwise -- for interleaved labels even under the identity
+    permutation. :func:`_exchangeable_unit_classes` supplies the permutations for
+    which the sizes line up.
+    """
+    if group_codes is None:
+        return order
+    members = [np.flatnonzero(group_codes == unit) for unit in range(order.size)]
+    rows = np.empty(n_obs, dtype=np.intp)
+    for unit, source in enumerate(order):
+        rows[members[unit]] = members[source]
+    return rows
+
+
+def _exchangeable_unit_classes(group_codes, n_units):
+    """Split the exchangeable units into sets that may be permuted with each other.
+
+    Parameters
+    ----------
+    group_codes : None or :obj:`numpy.ndarray` of shape (K,)
+        Consecutive group codes, one per row, or None when rows are the units.
+    n_units : :obj:`int`
+        Number of exchangeable units.
+
+    Returns
+    -------
+    :obj:`list` of :obj:`numpy.ndarray`
+        Unit indices, partitioned by the number of rows each unit contributes.
+
+    Notes
+    -----
+    A permuted dataset is refit against the original group labels, so a group of
+    three rows can only take the place of another group of three rows. Groups of
+    equal size -- the usual case, and the only one the enumeration used to
+    consider -- form a single class and give the full ``m!`` permutations back.
+    """
+    if group_codes is None:
+        return [np.arange(n_units)]
+    sizes = np.bincount(group_codes, minlength=n_units)
+    return [np.flatnonzero(sizes == size) for size in np.unique(sizes)]
+
+
+def _iter_unit_orders(classes, n_units):
+    """Enumerate every permutation that keeps each unit within its size class."""
+    for assignment in itertools.product(*(itertools.permutations(c.tolist()) for c in classes)):
+        order = np.empty(n_units, dtype=np.intp)
+        for positions, sources in zip(classes, assignment):
+            order[positions] = sources
+        yield order
+
+
+def _random_unit_order(classes, n_units):
+    """Draw one permutation that keeps each unit within its size class."""
+    order = np.empty(n_units, dtype=np.intp)
+    for positions in classes:
+        order[positions] = np.random.permutation(positions)
+    return order
 
 
 class MetaRegressionResults:
@@ -32,7 +133,11 @@ class MetaRegressionResults:
         where p is the number of predictors, and d is the number of parallel datasets
         (typically 1).
     fe_cov : :obj:`numpy.ndarray` of shape (p, p)
-        The p x p inverse covariance (or precision) matrix for the fixed effects.
+        The p x p *covariance* matrix of the fixed effects, ``(X'WX)^-1`` (or its
+        cluster-robust replacement). Despite the ``"inv_cov"`` key it arrives
+        under, this is a covariance, not an inverse covariance or a precision
+        matrix -- :attr:`fe_se` takes ``sqrt(diagonal(...))`` of it, which is
+        only meaningful for a covariance.
     tau2 : None or :obj:`numpy.ndarray` of shape (d,) or :obj:`float`, optional
         A 1-d array containing the estimated tau^2 value for each parallel dataset
         (or a float, for a single dataset). May be omitted by fixed-effects estimators.
@@ -50,6 +155,94 @@ class MetaRegressionResults:
         self.fe_params = fe_params
         self.fe_cov = fe_cov
         self.tau2 = tau2
+
+    def _tau2_model(self):
+        """Return the working model the estimator recorded for tau^2.
+
+        Returns
+        -------
+        :obj:`str`
+            One of ``TAU2_INDEPENDENT``, ``TAU2_CORRELATED`` or
+            ``TAU2_AGGREGATE``; see :data:`pymare.stats.TAU2_INDEPENDENT`.
+
+        Notes
+        -----
+        Read from the fitted estimator rather than re-derived from
+        ``weight_scheme`` here. The two used to be worked out independently, and
+        the interval, Q and the permutation null could each describe a different
+        set of units from the tau^2 they accompanied. Estimators that predate the
+        attribute, or that were fitted to arrays alone, report independence.
+        """
+        return getattr(self.estimator, "tau2_model_", TAU2_INDEPENDENT)
+
+    def _analysis_arrays(self):
+        """Return the units and weighting that result statistics must describe.
+
+        Returns
+        -------
+        :obj:`tuple`
+            ``(y, v, X, groups)``. ``groups`` is None unless the statistics have
+            to be computed under the correlated-effects working model, in which
+            case every row is kept and :func:`~pymare.stats.q_gen` reweights them
+            rather than aggregating.
+        """
+        y = self.dataset.y
+        v = broadcast_columns(self.estimator.get_v(self.dataset), y.shape[1])
+        X = self.dataset.X
+        groups = getattr(self.dataset, "g", None)
+        model = self._tau2_model()
+
+        if model == TAU2_CORRELATED:
+            # tau^2 came from the observation-level correlated-effects model, so
+            # Q and the interval have to as well; q_gen applies the same weights.
+            return y, v, X, np.asarray(groups).ravel()
+        if model != TAU2_AGGREGATE:
+            return y, v, X, None
+
+        # Collapse the same way the estimator did. Sample-size-based
+        # estimators aggregate on n, so reduce n and derive v from it rather
+        # than collapsing a v the estimator never used; otherwise these
+        # statistics describe a different aggregation from the one that
+        # produced tau^2.
+        rho = getattr(self.estimator, "rho", DEFAULT_RHO)
+        if "v" in getfullargspec(self.estimator.fit).args[1:]:
+            y, v, X = collapse_groups(y, v, X, groups, rho=rho)
+        else:
+            sigma2 = np.asarray(self.estimator.params_["sigma2"], dtype=float)
+            y, n, X = collapse_groups_by_n(y, self.dataset.n, X, groups, rho=rho)
+            v = sigma2 / n
+        return y, v, X, None
+
+    def _permutation_arrays(self):
+        """Return the estimator inputs the permutation refit must reproduce.
+
+        Notes
+        -----
+        This is a narrower condition than :meth:`_tau2_model`, which also has a
+        reduction to report for ``"rescale"``. A permutation test compares the
+        observed statistic against the same statistic recomputed on permuted
+        data, so the arrays here have to be the ones the estimator actually
+        fitted. Only ``"collapse"`` fits one row per group; ``"rescale"`` keeps
+        every row and only reweights it. Collapsing for ``"rescale"`` built the
+        null from a different model than the observed coefficient, so the two
+        disagreed whenever predictors or variances varied within a group.
+        """
+        y = self.dataset.y
+        X = self.dataset.X
+        groups = getattr(self.dataset, "g", None)
+        has_v = "v" in getfullargspec(self.estimator.fit).args[1:]
+        second = self.dataset.v if has_v else self.dataset.n
+        fits_one_row_per_group = (
+            getattr(self.estimator, "weight_scheme", None) == "collapse" and groups is not None
+        )
+        if fits_one_row_per_group:
+            rho = getattr(self.estimator, "rho", DEFAULT_RHO)
+            if has_v:
+                y, second, X = collapse_groups(y, second, X, groups, rho=rho)
+            else:
+                y, second, X = collapse_groups_by_n(y, second, X, groups, rho=rho)
+            groups = np.arange(y.shape[0])
+        return y, second, X, groups, has_v
 
     @property
     @lru_cache(maxsize=1)
@@ -83,23 +276,101 @@ class MetaRegressionResults:
             p           The p value the estimate.
             ci_l/ci_u   Lower and upper bounds of the estimate.
             =========== ==========================================================================
+
+        Notes
+        -----
+        When the estimator was fitted with group labels, the standard errors
+        are cluster-robust and the sampling distribution of ``est / se`` is
+        referred to a t distribution with Satterthwaite degrees of freedom
+        :footcite:p:`tipton2015small`, computed separately for each predictor
+        and parallel dataset; see :attr:`fe_dof`. Otherwise a normal reference
+        is used, as before.
+
+        References
+        ----------
+        .. footbibliography::
+
         """
         beta, se = self.fe_params, self.fe_se
         epsilon = np.finfo(beta.dtype).eps
-        z_se = ss.norm.ppf(1 - alpha / 2)
         z = beta / se
-        p = 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
+
+        # Cluster-robust standard errors are asymptotic in the number of
+        # groups, so refer them to a t distribution rather than a normal.
+        dof = self.fe_dof
+        if dof is None:
+            crit = ss.norm.ppf(1 - alpha / 2)
+            p = 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
+        else:
+            crit = ss.t.ppf(1 - alpha / 2, dof)
+            p = 2 * ss.t.sf(np.abs(z), dof)
+
+        p = np.asarray(p, dtype=float)
         p[p == 0] += epsilon
+
+        # A standard error that is zero or non-finite carries no information,
+        # but "est / 0" is +-inf and yields p = 0 -- maximally significant. Mark
+        # those entries undefined instead of maximally certain.
+        undefined = ~np.isfinite(se) | (se <= 0)
+        if np.any(undefined):
+            p = np.where(undefined, np.nan, p)
+
+        if dof is not None:
+            # ``est / se`` is a t statistic here, so reporting it as "z" would
+            # leave the two entries disagreeing: thresholding on the z values
+            # and on the p values would select different results. Report the
+            # z that carries the same tail probability instead.
+            z = np.sign(z) * ss.norm.isf(np.clip(p, epsilon, 1.0) / 2)
+
         stats = {
             "est": beta,
             "se": se,
-            "ci_l": beta - z_se * se,
-            "ci_u": beta + z_se * se,
-            "z": z,
+            "ci_l": np.where(undefined, np.nan, beta - crit * se),
+            "ci_u": np.where(undefined, np.nan, beta + crit * se),
+            "z": np.where(undefined, np.nan, z),
             "p": p,
         }
 
         return stats
+
+    @property
+    def fe_dof(self):
+        """Get the degrees of freedom used for fixed-effect inference.
+
+        Satterthwaite degrees of freedom for the CR2 cluster-robust standard
+        errors :footcite:p:`tipton2015small`, as an array of shape ``(p, d)``:
+        one per predictor and parallel dataset. None when no group labels were
+        supplied and a normal reference is therefore used.
+
+        These are *not* the naive :math:`m - p` of
+        :footcite:t:`hedges2010robust`. That count is right only when weight is
+        spread evenly across groups; when a predictor is unbalanced at the
+        group level it badly overstates the information available, and the
+        resulting test rejects far too often. See
+        :func:`~pymare.stats.satterthwaite_dof`.
+
+        Read these before the p-values. :footcite:t:`tipton2015small` established
+        that the approximation holds its nominal level only while the degrees of
+        freedom exceed roughly ``pymare.stats.MIN_DOF_FOR_SATTERTHWAITE``; below
+        that the reference distribution is outside its validated range and
+        :func:`~pymare.stats.satterthwaite_dof` warns. A comfortable number of
+        groups does not guarantee comfortable degrees of freedom, because these
+        depend on how evenly each *predictor* is spread across groups
+        :footcite:p:`pustejovsky2018small,imbens2016robust`.
+
+        References
+        ----------
+        .. footbibliography::
+
+        """
+        dof = getattr(self.estimator, "params_", {}).get("dof")
+        if dof is None:
+            return None
+
+        dof = np.asarray(dof, dtype=float)
+        # _loopable stacks per-dataset results, which can drop a length-1
+        # predictor axis; restore the (p, d) orientation the stats expect.
+        return dof.reshape(self.fe_params.shape)
 
     @lru_cache(maxsize=16)
     def get_re_stats(self, method="QP", alpha=0.05):
@@ -145,15 +416,16 @@ class MetaRegressionResults:
                 )
 
             # Make sure we have an estimate of v if it wasn't observed
-            v = self.estimator.get_v(self.dataset)
+            analysis_y, v, analysis_X, analysis_groups = self._analysis_arrays()
 
             cis = []
             for i in range(n_datasets):
                 args = {
-                    "y": self.dataset.y[:, i],
+                    "y": analysis_y[:, i],
                     "v": v[:, i],
-                    "X": self.dataset.X,
+                    "X": analysis_X,
                     "alpha": alpha,
+                    "groups": analysis_groups,
                 }
 
                 try:
@@ -192,9 +464,10 @@ class MetaRegressionResults:
             ======= ==============================================================================
             Q       Cochran's Q :footcite:p:`cochran1954combination`.
                     This measure follows a chi-squared distribution, with n - k degrees of
-                    freedom, where n is the number of studies and k is the number of regressors.
+                    freedom, where n is the number of independent observations and k is the
+                    number of regressors.
             p(Q)    P values associated with the Cochran's Q values.
-            I^2     The proportion of the variance in study estimates that is due to heterogeneity
+            I^2     The proportion of the variance in input estimates that is due to heterogeneity
                     instead of sampling error :footcite:p:`higgins2002quantifying`.
                     This measure is bounded from 0 to 100.
             H       The ratio of the standard deviation of the estimated overall effect size from
@@ -209,9 +482,20 @@ class MetaRegressionResults:
         if self.dataset is None:
             raise ValueError("The Dataset is unavailable. This method requires a Dataset.")
 
-        v = self.estimator.get_v(self.dataset)
-        q_fe = q_gen(self.dataset.y, v, self.dataset.X, 0)
-        df = self.dataset.y.shape[0] - self.dataset.X.shape[1]
+        y, v, X, groups = self._analysis_arrays()
+        q_fe = q_gen(y, v, X, 0, groups)
+        # Q counts independent units, which is one per group whichever way the
+        # dependence was modelled: by aggregating the rows or by reweighting them.
+        n_units = y.shape[0] if groups is None else encode_groups(groups)[1].size
+        df = n_units - X.shape[1]
+        if df <= 0:
+            # Collapsing to one row per group makes df = m - p, which reaches
+            # zero far more easily than the old K - p. Q is then identically
+            # zero and I^2 / H are 100% / inf from pure rounding noise, which
+            # reads as total heterogeneity rather than no information.
+            nan = np.full(np.shape(q_fe), np.nan)
+            return {"Q": nan, "p(Q)": nan.copy(), "I^2": nan.copy(), "H": nan.copy()}
+
         i2 = np.maximum(100.0 * (q_fe - df) / q_fe, 0.0)
         h = np.maximum(np.sqrt(q_fe / df), 1.0)
         p = ss.chi2.sf(q_fe, df)
@@ -305,16 +589,37 @@ class MetaRegressionResults:
         if self.dataset is None:
             raise ValueError("The Dataset is unavailable. This method requires a Dataset.")
 
-        n_obs, n_datasets = self.dataset.y.shape
-        has_mods = self.dataset.X.shape[1] > 1
+        analysis_y, analysis_second, analysis_X, analysis_groups, has_v = (
+            self._permutation_arrays()
+        )
+        n_obs, n_datasets = analysis_y.shape
+        analysis_second = broadcast_columns(analysis_second, n_datasets)
+        has_mods = analysis_X.shape[1] > 1
+
+        # Rows sharing a group label are dependent, so they are exchangeable
+        # only as whole groups: flipping or shuffling them independently builds
+        # a null that is far too narrow. Under weight_scheme='collapse' (and now
+        # 'rescale') the arrays above are already one row per group, but
+        # 'individual' keeps every row while still using cluster-robust errors,
+        # so the unit has to be recovered from the labels here.
+        if analysis_groups is not None:
+            group_codes, group_labels = encode_groups(analysis_groups, n_observations=n_obs)
+            n_units = group_labels.size
+        else:
+            group_codes = None
+            n_units = n_obs
 
         fe_stats = self.get_fe_stats()
-        re_stats = self.get_re_stats()
 
-        # Ensure that tau2 is an array
-        tau2 = re_stats["tau^2"]
-        if not isinstance(tau2, (list, tuple, np.ndarray)):
-            tau2 = np.full(n_datasets, tau2)
+        # self.tau2 directly, not get_re_stats()["tau^2"] -- they are the same
+        # value, but the latter also profiles the Q statistic for a confidence
+        # interval that is never read, which dominates the runtime here when
+        # there are many parallel datasets.
+        # (D,) whatever the estimator reported: the looping estimators return
+        # tau^2 as (1, D), so indexing it per dataset used to take a whole row.
+        tau2 = np.asarray(self.tau2, dtype=float).reshape(-1)
+        if tau2.size == 1 and n_datasets > 1:
+            tau2 = np.repeat(tau2, n_datasets)
 
         # create results arrays
         fe_p = np.zeros_like(self.fe_params)
@@ -323,57 +628,84 @@ class MetaRegressionResults:
 
         # Calculate # of permutations and determine whether to use exact test
         if has_mods:
-            n_exact = math.factorial(n_obs)
+            # Only groups of equal size may swap places; see _expand_unit_order.
+            unit_classes = _exchangeable_unit_classes(group_codes, n_units)
+            n_exact = math.prod(math.factorial(unit.size) for unit in unit_classes)
+            if group_codes is not None and n_exact == 1:
+                raise ValueError(
+                    "No non-trivial permutation of the groups exists: every group "
+                    "contributes a different number of rows, and a permuted dataset "
+                    "is refit against the original labels, so a group can only take "
+                    "the place of an equally sized one. Use weight_scheme='collapse' "
+                    "to reduce each group to one row, which makes all groups "
+                    "exchangeable."
+                )
         else:
-            n_exact = 2**n_obs
-            if n_exact < n_perm:
-                perms = np.array(list(itertools.product([-1, 1], repeat=n_obs))).T
+            n_exact = 2**n_units
+            # The same inclusive condition as `exact` below; on the strict one
+            # these were left undefined at exactly n_perm == 2**m.
+            if n_exact <= n_perm:
+                perms = np.array(list(itertools.product([-1, 1], repeat=n_units))).T
 
-        exact = n_exact < n_perm
+        # <=, not <: at n_perm == 2**m the exhaustive test costs the same as
+        # the random one and is not an approximation.
+        exact = n_exact <= n_perm
         if exact:
             n_perm = n_exact
 
         # Loop over parallel datasets
         for i in range(n_datasets):
-            y = self.dataset.y[:, i]
+            y = analysis_y[:, i]
             y_perm = np.repeat(y[:, None], n_perm, axis=1)
 
             # for v, we might actually be working with n, depending on estimator
-            has_v = "v" in getfullargspec(self.estimator.fit).args[1:]
-            v = self.dataset.v[:, i] if has_v else self.dataset.n[:, i]
+            v = analysis_second[:, i]
 
             v_perm = np.repeat(v[:, None], n_perm, axis=1)
 
             if has_mods:
-                if exact:
-                    perms = itertools.permutations(range(n_obs))
-                    for j, inds in enumerate(perms):
-                        inds = np.array(inds)
-                        y_perm[:, j] = y[inds]
-                        v_perm[:, j] = v[inds]
-                else:
-                    for j in range(n_perm):
-                        np.random.shuffle(y_perm[:, j])
-                        np.random.shuffle(v_perm[:, j])
+                # Shuffle whole groups, and carry y and v together: shuffling
+                # them independently would break the (y_i, v_i) pairing and
+                # widen the null on top of the dependence problem.
+                unit_order = (
+                    _iter_unit_orders(unit_classes, n_units)
+                    if exact
+                    else (_random_unit_order(unit_classes, n_units) for _ in range(n_perm))
+                )
+                for j, order in enumerate(unit_order):
+                    rows = _expand_unit_order(np.asarray(order), group_codes, n_obs)
+                    y_perm[:, j] = y[rows]
+                    v_perm[:, j] = v[rows]
             else:
                 if exact:
-                    y_perm *= perms
+                    signs = perms
                 else:
-                    signs = np.random.choice(np.array([-1, 1]), (n_obs, n_perm))
-                    y_perm *= signs
+                    signs = np.random.choice(np.array([-1, 1]), (n_units, n_perm))
+                if group_codes is not None:
+                    signs = signs[group_codes]
+                y_perm *= signs
 
             # Pass parameters, remembering that v may actually be n
-            kwargs = {"y": y_perm, "X": self.dataset.X}
+            kwargs = {"y": y_perm, "X": analysis_X}
             kwargs["v" if has_v else "n"] = v_perm
-            params = self.estimator.fit(**kwargs).params_
+            if analysis_groups is not None:
+                kwargs["g"] = analysis_groups
+            # A copy: fit() overwrites params_, including the "dof" entry that
+            # fe_dof reads, so permuting through the live estimator would leave
+            # the results object reporting permutation-shaped degrees of
+            # freedom (or raising on reshape).
+            params = copy.copy(self.estimator).fit(**kwargs).params_
 
             fe_obs = fe_stats["est"][:, i]
             if fe_obs.ndim == 1:
                 fe_obs = fe_obs[:, None]
-            fe_p[:, i] = (np.abs(fe_obs) < np.abs(params["fe_params"])).mean(1)
+            # <=, not <: a permuted statistic that ties with the observed one
+            # is at least as extreme, and excluding ties makes the test
+            # anti-conservative on discrete or degenerate data.
+            fe_p[:, i] = (np.abs(fe_obs) <= np.abs(params["fe_params"])).mean(1)
             if rfx:
                 abs_obs = np.abs(tau2[i])
-                tau_p[i] = (abs_obs < np.abs(params["tau2"])).mean()
+                tau_p[i] = (abs_obs <= np.abs(params["tau2"])).mean()
 
         # p-values can't be smaller than 1/n_perm
         params = {"fe_p": np.maximum(1 / n_perm, fe_p)}
@@ -455,22 +787,67 @@ class CombinationTestResults:
         if self.dataset is None:
             raise ValueError("The Dataset is unavailable. This method requires a Dataset.")
 
+        # 'undirected' takes abs(z) before combining, so its statistic is a
+        # function of |z| alone and every sign-flip permutation reproduces the
+        # observed value exactly. The null distribution is a single point and
+        # the resulting p-value is always 1 / n_perm, which looks like a
+        # significant result rather than a failure. There is no sign-flip null
+        # for a statistic that discards sign, so refuse instead of inventing one.
+        if getattr(self.estimator, "mode", None) == "undirected":
+            raise ValueError(
+                "Permutation testing is not available for mode='undirected'. "
+                "The combined statistic depends only on |z|, so flipping signs "
+                "leaves it unchanged and the permutation null is degenerate. "
+                "Use mode='directed' or mode='concordant'."
+            )
+
         n_obs, n_datasets = self.dataset.y.shape
+        groups = getattr(self.dataset, "g", None)
+        # Dependence-labelled rows are exchangeable only as complete groups.
+        if groups is not None:
+            groups = np.asarray(groups).ravel()
+            # encode_groups, not np.unique: labels only have to be hashable.
+            group_codes, group_labels = encode_groups(groups, n_observations=n_obs)
+            n_units = group_labels.size
+        else:
+            group_codes = None
+            n_units = n_obs
 
         # create results arrays
         p_p = np.zeros_like(self.z)
 
         # Calculate # of permutations and determine whether to use exact test
-        n_exact = 2**n_obs
-        if n_exact < n_perm:
-            perms = np.array(list(itertools.product([-1, 1], repeat=n_obs))).T
+        n_exact = 2**n_units
+        if n_exact <= n_perm:
+            perms = np.array(list(itertools.product([-1, 1], repeat=n_units))).T
             exact = True
             n_perm = n_exact
         else:
             exact = False
 
         # Initialize a copy of the estimator to prevent overwriting results
-        est = self.estimator.__class__(mode=self.estimator.mode)
+        est = copy.copy(self.estimator)
+
+        # Estimate the dependence once, from the observed data, and hold it
+        # fixed across permutations. Leaving it None makes each refit
+        # re-estimate it from y_perm, whose second axis is permutations rather
+        # than features -- and because whole groups share a sign, rows within a
+        # group come back near-perfectly correlated along that axis. That
+        # inflates the variance correction, and with n_perm < 2 it cannot be
+        # estimated at all.
+        permutation_corr = getattr(self.estimator, "corr_", None)
+        if permutation_corr is None and groups is not None and n_datasets > 1:
+            # Skip the centering when every row is identical, exactly as both
+            # estimators do. Centering those rows leaves zeros, whose correlation
+            # is undefined and would be frozen as the identity -- while the fit
+            # being tested read the same rows as perfectly correlated.
+            y_obs = self.dataset.y
+            all_rows_same = np.all(np.equal(y_obs, y_obs[0]), axis=0).all()
+            observed = y_obs if all_rows_same else y_obs - y_obs.mean(0)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                permutation_corr = np.corrcoef(observed, rowvar=True)
+            permutation_corr = np.where(np.isfinite(permutation_corr), permutation_corr, 0.0)
+            np.fill_diagonal(permutation_corr, 1.0)
 
         # Loop over parallel datasets
         for i in range(n_datasets):
@@ -478,21 +855,40 @@ class CombinationTestResults:
             y_perm = np.repeat(y[:, None], n_perm, axis=1)
 
             if exact:
-                y_perm *= perms
+                signs = perms
             else:
-                signs = np.random.choice(np.array([-1, 1]), (n_obs, n_perm))
-                y_perm *= signs
+                signs = np.random.choice(np.array([-1, 1]), (n_units, n_perm))
+            if group_codes is not None:
+                signs = signs[group_codes]
+            y_perm *= signs
 
-            # Some combination tests can handle weights (passed as v)
+            # Some combination tests can handle weights, which the Dataset
+            # carries as ``n``. They are per-observation, so this dataset's
+            # column has to be repeated across permutations to line up with
+            # ``y_perm``; passing the (K, D) array straight through would only
+            # happen to broadcast when D equals n_perm.
             kwargs = {"z": y_perm}
-            if "w" in getfullargspec(est.fit).args:
-                kwargs["w"] = self.dataset.v
+            weights = self.dataset.n
+            if "w" in getfullargspec(est.fit).args and weights is not None:
+                # A single column, not one per permutation. Stouffer broadcasts
+                # either form, but Fisher requires one scalar weight per
+                # observation and rejects the tiled version outright.
+                column = i if weights.shape[1] > 1 else 0
+                kwargs["w"] = weights[:, column, None]
+            if groups is not None:
+                kwargs["g"] = groups
+                kwargs["corr"] = permutation_corr
             params = est.fit(**kwargs).params_
 
-            p_obs = self.z[i]
-            if p_obs.ndim == 1:
-                p_obs = p_obs[:, None]
-            p_p[i] = (p_obs > params["p"]).mean()
+            # Compare on p-values, not on z. The reported z is
+            # ``norm.isf(p)``, which saturates to +/-inf as soon as p hits 0
+            # or 1 -- routine for concordant mode, where p is capped at 1.
+            # Every permutation then ties at -inf and the comparison degrades
+            # to "always significant". p is the actual test statistic in every
+            # mode, is monotone in the evidence, and never overflows.
+            observed = np.ravel(self.p)[i]
+            null = np.ravel(params["p"])
+            p_p[i] = (null <= observed).mean()
 
         # p-values can't be smaller than 1/n_perm
         p_p = np.maximum(1 / n_perm, p_p)
