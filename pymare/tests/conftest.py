@@ -18,6 +18,10 @@ from pymare.estimators import (
 )
 from pymare.tests.utils import get_test_data_path
 
+# -----------------------------------------------------------------------------
+# Basic data
+# -----------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="package")
 def variables():
@@ -91,7 +95,7 @@ def vars_with_intercept():
 
 
 # -----------------------------------------------------------------------------
-# Dependent estimates: shared estimator sets, data builders and references
+# Dependent estimates: estimator sets
 # -----------------------------------------------------------------------------
 
 
@@ -126,6 +130,11 @@ def variance_estimator(request):
 def weight_scheme(request):
     """Every weighting scheme the grouped estimators accept."""
     return request.param
+
+
+# -----------------------------------------------------------------------------
+# Dependent estimates: data builders and references
+# -----------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="package")
@@ -279,6 +288,11 @@ def robumeta_dataset():
     return frame, designs
 
 
+# -----------------------------------------------------------------------------
+# Fitted estimators and their results
+# -----------------------------------------------------------------------------
+
+
 @pytest.fixture
 def fitted_estimator(dataset):
     """Create a fitted Estimator as a fixture."""
@@ -310,6 +324,11 @@ def results_2d(fitted_estimator, dataset_2d):
     """Create a 2D results object as a fixture."""
     est = VarianceBasedLikelihoodEstimator()
     return est.fit_dataset(dataset_2d).summary()
+
+
+# -----------------------------------------------------------------------------
+# Effect size conversion
+# -----------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="module")
