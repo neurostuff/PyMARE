@@ -12,6 +12,12 @@ on:
     # version and the robumeta version are pinned, so a failure here on an
     # unchanged tree means the pinned image can no longer be built.
     - cron: "0 0 1 * *"
+  # GitHub turns off a workflow with a schedule trigger once the repository has
+  # been quiet for 60 days, and a disabled workflow stops answering push and
+  # pull_request too -- which is how this one sat switched off from 2025-06-28
+  # until it was re-enabled by hand. Being able to dispatch it means the next
+  # time that happens, re-enabling is enough to get a run without pushing a
+  # commit to prove it works.
   workflow_dispatch:
 
 permissions:
