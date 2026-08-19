@@ -56,12 +56,11 @@ deterministic, so its workflow can require the file not to move. These numbers
 are Monte Carlo estimates with a standard error of 0.015 to 0.030, so a correct
 model produces different numbers every run and an exact pin would fail
 constantly. What is pinned instead is the claim the file exists to support:
-worst-coefficient coverage at or above 0.85 and |beta bias| at or below 0.10 in every cell. That
-floor is set from measurement: the correct model's tightest cell reads 0.900 and
-the rejected prior reads 0.710 and 0.830, so 0.85 sits between them — about two
-standard errors below the worst honest result and clear of the failures. A
-minimum over coefficients is biased downward, which is why the floor is not
-nearer the nominal 0.95.
+worst-coefficient coverage at or above 0.85 and |beta bias| at or below 0.10 in
+every cell. That floor is set from measurement: the correct model's tightest
+cell reads 0.900 while the rejected prior reads 0.710 and 0.830, so 0.85 sits
+between them. A minimum over coefficients is biased downward, which is why the
+floor is not nearer the nominal 0.95.
 `--check` refuses to certify a run of fewer than 100 replications, so a short run
 cannot clear the floor by luck.
 

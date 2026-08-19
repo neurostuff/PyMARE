@@ -114,37 +114,25 @@ package, so `make install_cmdstan` fetches and builds it. That takes several
 minutes the first time and nothing thereafter.
 
 **Those tests skip locally when CmdStan is missing, but fail in CI.** The
-asymmetry is deliberate. A contributor without CmdStan should not see red, but a
-skip is indistinguishable from a pass in a CI log, and that is exactly how the
-Stan job passed for years while running none of the tests it existed to run --
-its gate probed for a module name that PyStan 3 never provided. The Stan job now
+asymmetry is deliberate: a contributor without CmdStan should not see red, but a
+skip is indistinguishable from a pass in a CI log, which is how this job once
+reported success while running none of the tests it existed to run. The Stan job
 sets `PYMARE_REQUIRE_CMDSTAN=1`, and the `pytest_collection_modifyitems` hook in
-`pymare/tests/conftest.py` fails the run outright, at collection, wherever that
-is set and CmdStan is missing.
+`pymare/tests/conftest.py` fails the run at collection wherever that is set and
+CmdStan is missing.
 
-Only the tests that actually sample are marked `stan`. The ones that check how
-PyMARE's inputs are translated into Stan's data block need neither cmdstanpy nor
-CmdStan, so they are unmarked and run in the ordinary unit job on every
-platform.
+Only the tests that sample are marked `stan`. Those that check how PyMARE's
+inputs are translated into Stan's data block need neither cmdstanpy nor CmdStan,
+so they are unmarked and run in the ordinary unit job on every platform.
 
-The model's accuracy is measured separately, by `validation/stan/simulate.py`,
-which reports bias and credible-interval coverage across a grid of designs and
-records them in `pymare/tests/data/stan_validation.json`. It follows the same
-three-layer arrangement as the robumeta alignment:
-
-1. `make validate_stan` regenerates that file and fails if any design cell
-   misses `pymare.tests.utils.STAN_VALIDATION_THRESHOLDS`.
-2. Two tests in `test_stan_estimators.py` hold the *recorded* file to those same
-   thresholds and to the expected list of design cells. They read the file
-   rather than re-measuring, so they cost nothing and run everywhere — which is
-   what stops the pin from quietly going stale.
-3. The `Validate the Stan model` workflow re-measures on a schedule, on pushes
-   to master that touch the model, and on demand.
-
-The grid takes about ten minutes, which is why it is not part of `test_stan` and
-not run per pull request. Unlike the robumeta reference, these numbers are
-stochastic, so the pin cannot be enforced by requiring the file not to move; the
-thresholds are the claim, and the file is the record of it.
+The model's accuracy is measured separately by `make validate_stan`, which takes
+about ten minutes and so is not run per pull request. It reports bias and
+credible-interval coverage across a grid of designs, records them in
+`pymare/tests/data/stan_validation.json`, and fails if any design cell misses
+`pymare.tests.utils.STAN_VALIDATION_THRESHOLDS`. Two tests hold that recorded
+file to the same thresholds on every run, and the `Validate the Stan model`
+workflow re-measures on a schedule. See `validation/stan/README.md` for the
+arrangement and the measurements.
 
 ### Alignment with robumeta
 

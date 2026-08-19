@@ -1570,17 +1570,15 @@ def _build_stan_data(y, v, X, groups=None, tau_prior_scale=None):
     Notes
     -----
     Every shape and unit decision the Stan program depends on is made here and
-    nowhere else, so that ``fit`` carries no downstream conditionals and the
-    translation can be tested without a CmdStan installation -- which is what
-    the estimator's own tests could not do while the translation lived inside
-    ``fit`` next to a call to the sampler.
+    nowhere else, so ``fit`` carries no downstream conditionals and the
+    translation is testable without a CmdStan installation.
 
-    Two of those decisions are corrections rather than conveniences. ``sigma``
-    is ``sqrt(v)``, because Stan's ``normal`` is parameterized by a standard
-    deviation and PyMARE stores variances. ``id`` is 1-based consecutive codes
-    from :func:`~pymare.stats.encode_groups`, because the Stan program declares
-    it ``int<lower=1, upper=K>``; arbitrary labels, including strings and
-    non-consecutive integers, are therefore accepted here.
+    Two of those decisions are conversions, not conveniences. ``sigma`` is
+    ``sqrt(v)``, because Stan's ``normal`` takes a standard deviation and PyMARE
+    stores variances. ``id`` is 1-based consecutive codes from
+    :func:`~pymare.stats.encode_groups`, because the Stan program declares it
+    ``int<lower=1, upper=K>`` -- which is why arbitrary scalar labels are
+    accepted here.
     """
     y = np.asarray(y)
     if y.ndim > 1 and y.shape[1] > 1:
@@ -1672,44 +1670,25 @@ class StanMetaRegression(BaseEstimator):
     the funnel geometry that dominates divergences in hierarchical models with
     few groups, which is this estimator's principal use case.
 
-    :math:`\tau` is given a half-normal prior whose scale is taken from the data.
-    Stan's prior choice recommendations [2]_ suggest a half-normal(0, 1) or
-    half-t(4, 0, 1) when the number of groups is small enough that the data say
-    little about the group-level variance, on data scaled to unit variance.
-    PyMARE cannot rescale a caller's data, so the scale is derived from it
-    instead, which makes the prior equivariant: a fixed scale would be crushingly
-    informative on data measured in thousands and vacuous on data measured in
-    thousandths.
+    :math:`\tau` gets a half-normal prior, weakly informative per Stan's
+    recommendations [2]_ for models with few groups. Its scale is derived from the
+    data rather than fixed, since a fixed scale would be crushingly informative on
+    data measured in thousands and vacuous on data measured in thousandths.
 
-    The default is ``max(std(y), sqrt(mean(v)))`` rather than either term alone.
-    :math:`\tau` is the standard deviation of the group means, so it cannot
-    plausibly exceed the spread of the estimates themselves; and it should not be
-    presumed smaller than a typical standard error. Taking the larger of the two
-    means the prior never asserts that :math:`\tau` is small when either quantity
-    says otherwise. That asymmetry is what matters: ``validation/stan`` measures
-    credible-interval coverage falling to 0.83 when the scale is too small, while
-    a scale that is too large costs only precision in :math:`\tau^2` and leaves
-    coverage at nominal. Using ``sqrt(mean(v))`` alone, which was the first
-    default tried, undercovers whenever the between-group spread is much larger
-    than the sampling error. Using ``std(y)`` alone is zero when every estimate
-    coincides, which is not a usable scale. Pass ``tau_prior_scale`` explicitly to
-    override it, including to make it diffuse. :math:`\beta` keeps Stan's
-    implicit improper uniform prior, so with a diffuse prior on :math:`\tau` the
-    posterior means agree with
+    The default scale is ``max(std(y), sqrt(mean(v)))``. :math:`\tau` cannot
+    plausibly exceed the spread of the estimates, and should not be presumed
+    smaller than a typical standard error, so the larger of the two never asserts
+    that :math:`\tau` is small when either quantity says otherwise. Erring large
+    is deliberate: too small a scale costs coverage, too large costs only
+    precision in :math:`\tau^2`. ``validation/stan`` records the measurements
+    behind that choice. Pass ``tau_prior_scale`` to override it.
+
+    :math:`\beta` keeps Stan's implicit improper uniform prior, so under a
+    diffuse prior on :math:`\tau` the posterior means agree with
     :obj:`~pymare.estimators.VarianceBasedLikelihoodEstimator` at ``method="ML"``.
 
-    A QR reparameterization of ``X`` was considered and not adopted. It improves
-    the geometry when predictors are strongly correlated and, under a flat prior
-    on :math:`\beta`, leaves the posterior unchanged, but it costs a matrix
-    inverse and a back-transform and is incompatible with the ``normal_id_glm``
-    form the model uses. PyMARE designs typically carry one to three predictors,
-    where the conditioning it addresses is rare.
-
-    The Stan program ships as a source file and is compiled on first use, with
-    the executable cached beside it so that later processes reuse it. Shipping
-    a precompiled binary instead would require building CmdStan at wheel-build
-    time and publishing one wheel per platform, which is not a reasonable trade
-    for one optional estimator in an otherwise pure-Python package.
+    The Stan program is compiled on first use and cached beside the installed
+    source, so the cost is paid once per installation rather than per fit.
 
     References
     ----------
@@ -1721,19 +1700,16 @@ class StanMetaRegression(BaseEstimator):
 
     .. versionchanged:: 0.0.5
 
-        - The backend moved from PyStan 3 to CmdStanPy. PyStan's sampler
-          argument names (``num_samples``, ``num_warmup``, ``num_chains``,
-          ``num_thin``) are rejected with a message naming their replacements.
-        - ``tau2`` is now the between-group variance. It was previously the
-          between-group standard deviation, because the parameter was passed to
-          Stan's ``normal`` where a scale is expected.
-        - Sampling variances are now converted to standard deviations before
-          being passed to Stan. They previously were not, so the model treated
-          ``v`` as ``sqrt(v)``.
-        - ``groups`` accepts any hashable labels and no longer has to be
-          integers in ``1..k``.
-        - :meth:`fit_dataset` now passes ``dataset.g`` as ``groups``. It
-          previously dropped it silently.
+        - The backend moved from PyStan 3 to CmdStanPy. PyStan's sampler argument
+          names (``num_samples``, ``num_warmup``, ``num_chains``, ``num_thin``)
+          are rejected with a message naming their replacements.
+        - ``tau2`` is now the between-group variance rather than its square root,
+          and sampling variances are converted to standard deviations before
+          being passed to Stan. Both were wrong before, so posterior estimates
+          change.
+        - ``groups`` accepts scalar labels of any type, not only integers in
+          ``1..k``, and :meth:`fit_dataset` now passes ``dataset.g`` rather than
+          dropping it.
         - ``ci`` now sets the width of the reported credible interval. It was
           previously accepted and ignored.
     """
@@ -1793,16 +1769,14 @@ class StanMetaRegression(BaseEstimator):
             self.model = cmdstanpy.CmdStanModel(stan_file=STAN_MODEL_PATH, force_compile=force)
             return self
         except Exception as unwritable:
-            # Deliberately broad. CmdStanPy reports *any* failed make invocation
-            # as ValueError, including for the read-only package directory this
-            # fallback exists for, so catching OSError would never fire.
+            # Deliberately broad: CmdStanPy reports any failed make invocation
+            # as ValueError, so catching OSError would never fire here.
             first_failure = unwritable
 
-        # Compile a copy instead. Passing exe_file= would not work: that names an
-        # executable to reuse, not a destination to build into, so a read-only
-        # source directory fails there too -- make writes its intermediates
-        # beside the source. copy2 preserves the modification time, so the copy
-        # is not perpetually newer than its own executable and CmdStanPy's
+        # Compile a copy. exe_file= would not help: it names an executable to
+        # reuse rather than a destination to build into, and make writes its
+        # intermediates beside the source either way. copy2 preserves the mtime,
+        # so the copy never looks newer than its own executable and CmdStanPy's
         # timestamp check keeps the cached build across processes.
         fallback_dir = op.join(op.expanduser("~"), ".pymare", "stan")
         try:
@@ -1811,9 +1785,8 @@ class StanMetaRegression(BaseEstimator):
             shutil.copy2(STAN_MODEL_PATH, fallback_source)
             model = cmdstanpy.CmdStanModel(stan_file=fallback_source, force_compile=force)
         except Exception:
-            # Compiling somewhere writable failed too, so the first failure was
-            # not about writing. Report that one: it names the real problem,
-            # usually an error in the model or the C++ toolchain.
+            # Somewhere writable failed too, so the first failure was not about
+            # writing. Report that one -- it names the real problem.
             raise first_failure
 
         warn(

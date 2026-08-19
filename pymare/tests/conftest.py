@@ -23,17 +23,14 @@ from pymare.tests.utils import cmdstan_is_available, get_test_data_path
 def pytest_collection_modifyitems(config, items):
     """Fail the run where CmdStan is declared present but is not.
 
-    The Stan tests skip when CmdStan is missing, so that a contributor without
-    it does not see red. In CI that leniency is the wrong default: a skip is
-    indistinguishable from a pass in a job log, and that is precisely how the
-    Stan job reported success for years while running none of the tests it
-    existed to run -- its gate probed ``find_spec("pystan")``, but PyStan 3
-    installs a module named ``stan``, so the condition was unsatisfiable.
+    The Stan tests skip when CmdStan is missing, so a contributor without it does
+    not see red. In CI that leniency is wrong: a skip is indistinguishable from a
+    pass in a job log, which is how this job once reported success while running
+    none of the tests it existed to run.
 
-    Setting ``PYMARE_REQUIRE_CMDSTAN=1``, as the Stan CI job does, asserts that
-    the environment is supposed to be able to run them. Failing here, at
-    collection, reports that once and unmissably rather than as a quietly
-    shorter run.
+    ``PYMARE_REQUIRE_CMDSTAN=1``, which the Stan CI job sets, asserts that the
+    environment should be able to run them. Failing at collection reports that
+    once rather than as a quietly shorter run.
     """
     if os.environ.get("PYMARE_REQUIRE_CMDSTAN") != "1":
         return
@@ -402,13 +399,11 @@ def fake_home(tmp_path, monkeypatch):
 
     Notes
     -----
-    Both variables are needed. POSIX ``expanduser`` reads ``HOME``; Windows
-    reads ``USERPROFILE`` and ignores ``HOME`` entirely, falling back to
-    ``HOMEDRIVE``/``HOMEPATH`` and then to leaving ``~`` unexpanded. Setting
-    only ``HOME`` therefore looks like it works everywhere while silently
-    leaving the real profile in place on Windows -- which is what let a test of
-    the Stan compile fallback assert against a temporary path on Linux and macOS
-    while writing into the CI runner's actual home directory on Windows.
+    Both variables are needed. POSIX ``expanduser`` reads ``HOME``; Windows reads
+    ``USERPROFILE`` and ignores ``HOME`` entirely. Setting only ``HOME``
+    therefore looks portable while silently leaving the real profile in place on
+    Windows, so a test can pass on two platforms and write into the runner's
+    actual home directory on the third.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
@@ -428,18 +423,15 @@ def planted_hierarchical_dataset():
     Notes
     -----
     The sampling standard deviations are drawn from ``uniform(0.1, 0.4)``, well
-    away from 1, and that is load-bearing rather than arbitrary. The ``variables``
-    fixture has ``v`` near 1 throughout, where ``sqrt(v)`` and ``v`` are within a
-    few percent of each other -- so a model that passes variances where standard
-    deviations belong fits it about as well as the correct one. That is how the
-    original defect survived. Here ``v`` spans 0.01 to 0.16 while ``sqrt(v)``
-    spans 0.1 to 0.4, a factor of 2.5 to 10 in a consistent direction, so the
-    mistake shows up as a badly inflated tau2. Do not reuse ``variables`` for
-    this.
+    away from 1, and that is load-bearing. The ``variables`` fixture has ``v``
+    near 1, where ``v`` and ``sqrt(v)`` differ by a few percent, so a model that
+    confuses them fits it about as well as the correct one. Here ``v`` spans 0.01
+    to 0.16 against ``sqrt(v)`` from 0.1 to 0.4 -- a factor of 2.5 to 10 in one
+    direction -- so the mistake shows up as an inflated tau2. Do not substitute
+    ``variables`` here.
 
-    ``tau2`` and ``tau`` are likewise kept well apart (0.25 against 0.5) so that
-    reporting the standard deviation under the name of the variance fails a
-    tight interval rather than landing inside it.
+    ``tau2`` and ``tau`` are likewise kept apart (0.25 against 0.5) so reporting
+    one under the other's name fails a tight interval.
     """
     rng = np.random.default_rng(20250818)
 

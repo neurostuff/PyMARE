@@ -235,10 +235,9 @@ def test_stan_2d_input_failure(dataset_2d):
 def test_fit_dataset_forwards_dataset_g(planted_hierarchical_dataset):
     """fit_dataset must route dataset.g into fit()'s groups argument.
 
-    _dataset_attr_map was empty, so the argument fell back to its None default
-    and every fit_dataset() call silently modelled each observation as its own
-    group. Presetting .model with a stub keeps this test free of CmdStan: fit()
-    only compiles when it finds no model.
+    Without the mapping the argument falls back to None and every observation is
+    silently modelled as its own group. Presetting .model with a stub keeps this
+    free of CmdStan, since fit() only compiles when it finds no model.
     """
     dataset, _ = planted_hierarchical_dataset
     est = StanMetaRegression()
@@ -279,11 +278,9 @@ def test_fit_is_quiet_when_there_are_no_divergences():
 def test_fake_home_redirects_expanduser_on_every_platform(fake_home):
     """The home-directory redirect must hold under Windows path rules too.
 
-    ntpath is importable everywhere, so this catches on Linux and macOS the
-    mistake that only shows up on a Windows runner: setting HOME alone leaves
-    ntpath.expanduser pointing at the real user profile, so a test asserting a
-    temporary path passes on two platforms and fails on the third -- after
-    having written into the runner's actual home directory.
+    ntpath is importable everywhere, so this catches on any platform the mistake
+    that only shows up on a Windows runner: setting HOME alone leaves
+    ntpath.expanduser pointing at the real user profile.
     """
     assert posixpath.expanduser("~") == str(fake_home)
     assert ntpath.expanduser("~") == str(fake_home)
@@ -294,14 +291,9 @@ def test_compile_falls_back_when_the_package_directory_is_read_only(monkeypatch,
     """An unwritable site-packages must not make the estimator unusable.
 
     CmdStanPy compiles beside the .stan source, which lives inside the installed
-    package, and that directory is read-only in plenty of ordinary
-    installations.
-
-    The failure is raised as ValueError, not PermissionError: CmdStanPy reports
-    every failed ``make`` the same way, whatever went wrong. An earlier version
-    of this test asserted PermissionError because that is what a read-only
-    filesystem sounds like, and it passed while the fallback it was meant to
-    cover could never fire.
+    package, and that directory is read-only in plenty of installations. Note the
+    exception: CmdStanPy reports every failed ``make`` as ValueError, whatever
+    went wrong, so a handler for PermissionError would never fire.
     """
     cmdstanpy = pytest.importorskip("cmdstanpy")
     compiled_from = []
@@ -566,13 +558,9 @@ def test_recorded_validation_meets_its_thresholds():
     """Every design cell must clear the coverage floor and the bias ceiling.
 
     This is what makes the recorded file load-bearing rather than decorative. It
-    checks the numbers already measured rather than re-measuring, so it costs
+    reads the numbers already measured rather than re-measuring, so it costs
     nothing and runs everywhere; the scheduled Stan validation workflow is what
-    re-measures and enforces the same thresholds against a fresh run.
-
-    The thresholds are not decoration either: the first prior scale tried here
-    produced coverage of 0.810 in the ``sigma x0.1`` cell, which this floor
-    rejects.
+    re-measures and applies the same thresholds to a fresh run.
     """
     recorded = load_stan_validation()
     floor = STAN_VALIDATION_THRESHOLDS["min_coverage"]
@@ -616,10 +604,9 @@ def test_recorded_validation_summarizes_the_worst_coefficient():
 def test_recorded_validation_used_a_fixed_truth():
     """Bias is only meaningful if the coefficients being recovered are held fixed.
 
-    An earlier version of the harness redrew beta from a symmetric normal on
-    every replication. The signed errors then averaged to zero for *any*
-    estimator -- one that always returned zero cleared the bias ceiling about
-    85% of the time -- so the threshold certified nothing.
+    Under a redrawn symmetric truth the signed errors average to zero for any
+    estimator at all, including one that always returns zero, so the bias
+    ceiling would certify nothing.
     """
     recorded = load_stan_validation()
     truths = {tuple(cell["true_beta"]) for cell in recorded["cells"]}
@@ -718,10 +705,8 @@ def test_meta_regression_dispatches_to_stan(planted_hierarchical_dataset):
 def test_the_compiled_model_is_reused_across_fits(planted_hierarchical_dataset):
     """compile() once, fit many.
 
-    The class docstring has always promised this, but it could not be done: the
-    old compile() read self.data, which only fit() assigned, so calling it
-    directly raised AttributeError and every fit recompiled. Under CmdStanPy the
-    executable does not depend on the data, so the promise is now keepable.
+    The compiled executable does not depend on the data, so fitting must reuse it
+    rather than rebuilding per call.
     """
     dataset, _ = planted_hierarchical_dataset
     est = StanMetaRegression(iter_sampling=200, chains=1, seed=5, show_progress=False)

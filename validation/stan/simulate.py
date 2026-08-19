@@ -48,10 +48,9 @@ from pymare.tests.utils import STAN_VALIDATION_THRESHOLDS  # noqa: E402
 cmdstanpy.disable_logging()
 logging.getLogger("cmdstanpy").setLevel(logging.ERROR)
 
-#: One entry per design cell. Each varies a single factor away from the base
-#: configuration, which is the arrangement that attributes a failure to a
-#: factor; a full factorial over five factors would cost 5x the fits and still
-#: need this reading to interpret.
+#: One entry per design cell, each varying a single factor away from BASE, so a
+#: failure is attributable to that factor. A full factorial would cost several
+#: times the fits and still need reading this way.
 CELLS = [
     # Number of groups: the axis the prior on tau is most sensitive to.
     {"name": "groups=5", "n_groups": 5},
@@ -92,11 +91,10 @@ BASE = {
 }
 
 
-#: True coefficients, held fixed across replications rather than redrawn.
-#: Redrawing them from a symmetric distribution makes the pooled bias
-#: uninformative: the error of an estimator that always returned zero would be
-#: -beta, whose mean over replications is zero, so it would clear any bias
-#: threshold. Fixing the truth means a bias estimate measures the estimator.
+#: True coefficients, held fixed across replications. Redrawing them from a
+#: symmetric distribution makes bias uninformative: an estimator that always
+#: returned zero would have errors of -beta, averaging to zero over replications,
+#: and would clear any bias threshold.
 TRUE_BETA = np.array([0.5, -0.8, 0.3])
 
 
@@ -140,9 +138,8 @@ def run_cell(cell, replications, seed):
     config.update({k: v for k, v in cell.items() if k != "name"})
     rng = np.random.default_rng(seed)
 
-    # Per coefficient, not pooled. Pooling hides the case this grid exists to
-    # probe: in the unbalanced cells the sparse moderator is the coefficient at
-    # risk, and good intercept coverage would mask bad coverage for it.
+    # Per coefficient, not pooled: in the unbalanced cells the sparse moderator
+    # is the coefficient at risk, and intercept coverage would mask it.
     beta_errors = collections.defaultdict(list)
     covered = collections.defaultdict(list)
     tau2_errors, tau2_truth, divergent = [], [], 0
@@ -245,11 +242,10 @@ def main():
     )
     args = parser.parse_args()
 
-    # Compile before any worker starts. CmdStanPy builds in place, and parallel
-    # make invocations on the same source collide: with a cold cache and four
-    # workers, one of them reliably fails with "Failed to compile Stan model"
-    # before a single cell runs. One compile up front makes every worker a
-    # cache hit.
+    # Compile before forking. CmdStanPy builds in place, so parallel make
+    # invocations on the same source collide: on a cold cache one worker
+    # reliably fails before any cell runs. One compile up front makes every
+    # worker a cache hit.
     print("compiling the model", flush=True)
     StanMetaRegression().compile()
 
@@ -293,9 +289,8 @@ def main():
     if not args.check:
         return 0
 
-    # A handful of replications can clear the coverage floor by luck -- at 10
-    # replications the estimate moves in steps of 0.05 and its standard error is
-    # 0.07 -- so a short run must not be able to certify the model.
+    # A short run can clear the coverage floor by luck: at 10 replications the
+    # estimate moves in steps of 0.05 with a standard error of 0.07.
     if args.replications < MIN_REPLICATIONS_TO_CHECK:
         print(
             f"\n--check needs at least {MIN_REPLICATIONS_TO_CHECK} replications to mean "

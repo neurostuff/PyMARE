@@ -944,17 +944,15 @@ def _arviz_credible_interval_kwargs(ci):
 
     Notes
     -----
-    ArviZ 1.0 split the library into ``arviz_base``/``arviz_stats``/``arviz_plots``
-    and renamed the interval arguments: ``hdi_prob`` became ``ci_prob``, paired
-    with a ``ci_kind`` that defaults to an equal-tailed rather than a
-    highest-density interval. Requesting ``ci_kind="hdi"`` keeps the reported
-    interval the same kind across both versions, which is what the ``ci``
-    argument has always meant here.
+    ArviZ 1.0 renamed ``hdi_prob`` to ``ci_prob`` and paired it with a
+    ``ci_kind`` defaulting to an equal-tailed rather than a highest-density
+    interval, so ``ci_kind="hdi"`` is needed to keep ``ci`` meaning the same
+    thing across both versions.
 
-    ``round_to="none"`` is not cosmetic. ArviZ 1.x defaults to ``"auto"``, which
-    formats the summary for display by converting the floats to strings; a
-    caller doing arithmetic on the returned DataFrame would silently get
-    concatenation instead. ArviZ 0.x has no such argument.
+    ``round_to="none"`` is not cosmetic: ArviZ 1.x otherwise formats the summary
+    for display by converting the floats to strings, so arithmetic on the
+    returned DataFrame would silently concatenate. ArviZ 0.x has no such
+    argument.
     """
     if int(az.__version__.split(".")[0]) >= 1:
         return {"ci_prob": ci / 100.0, "ci_kind": "hdi", "round_to": "none"}
@@ -1013,11 +1011,10 @@ class BayesianMetaRegressionResults:
         if not 0 < ci < 100:
             raise ValueError(f"Invalid ci {ci!r}; must lie in (0, 100).")
 
-        # Convert explicitly. ArviZ 1.x removed the automatic dispatch that used
-        # to let summary() accept a sampler fit directly, so a fit stored raw
-        # here would fail at every call site rather than at this one. Import
-        # lazily: cmdstanpy is an optional dependency, and a caller who passes
-        # an already-converted object should not need it installed.
+        # Convert here, not on use: ArviZ 1.x removed the automatic dispatch that
+        # let summary() accept a sampler fit, so a raw fit would fail at every
+        # call site instead of this one. The import is lazy because a caller
+        # passing an already-converted object should not need cmdstanpy.
         try:
             from cmdstanpy import CmdStanMCMC
         except ImportError:
@@ -1088,13 +1085,11 @@ class BayesianMetaRegressionResults:
 
         Notes
         -----
-        The plotted variables default to the same ones :meth:`summary` reports,
-        rather than to everything the sampler recorded. A fitted model has one
-        ``theta`` per group, so plotting everything means one panel per group:
-        illegible at any size, and a hard error under ArviZ 1.x, which caps a
-        figure at ``rcParams["plot.max_subplots"]`` panels. Pass
-        ``include_theta=True`` for the group-level means, and raise that
-        rcParam if there are many groups.
+        The plotted variables default to the ones :meth:`summary` reports rather
+        than everything recorded. A fitted model has one ``theta`` per group, so
+        plotting everything gives one panel per group -- illegible, and a hard
+        error under ArviZ 1.x, which caps panels at
+        ``rcParams["plot.max_subplots"]``.
         """
         name = "plot_{}".format(kind)
         # Three-argument getattr: the two-argument form raises AttributeError
