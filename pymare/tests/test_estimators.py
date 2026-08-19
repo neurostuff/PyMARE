@@ -1,5 +1,7 @@
 """Tests for pymare.estimators.estimators."""
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -12,7 +14,12 @@ from pymare.estimators import (
     WeightedLeastSquares,
 )
 from pymare.estimators.estimators import _collapse_n_inputs
-from pymare.stats import DEFAULT_RHO, collapse_groups, collapse_groups_by_n
+from pymare.stats import (
+    DEFAULT_RHO,
+    collapse_groups,
+    collapse_groups_by_n,
+    weighted_least_squares,
+)
 
 
 def test_weighted_least_squares_estimator(dataset):
@@ -249,8 +256,8 @@ def test_sample_size_based_restricted_maximum_likelihood_estimator(dataset_n):
     assert np.allclose(tau2, 3.2177, atol=1e-4)
 
 
-def test_2d_looping(dataset_2d):
-    """Test 2D looping in estimators."""
+def test_2d_parallel_datasets(dataset_2d):
+    """Test parallel datasets in the second dimension of y and v."""
     est = VarianceBasedLikelihoodEstimator().fit_dataset(dataset_2d)
     results = est.summary()
     beta, tau2 = results.fe_params, results.tau2
@@ -276,17 +283,123 @@ def test_2d_looping(dataset_2d):
     assert np.allclose(tau2[0, 2], 7.7649, atol=1e-4)
 
 
-def test_2d_loop_warning(dataset_2d):
-    """Test 2D looping warning on certain estimators."""
-    est = VarianceBasedLikelihoodEstimator()
-    y = np.random.normal(size=(10, 100))
-    v = np.random.randint(1, 50, size=(10, 100))
-    dataset = Dataset(y, v)
-    # Warning is raised when 2nd dim is > 10
-    with pytest.warns(UserWarning, match="Input contains"):
-        est.fit_dataset(dataset)
-    # But not when it's smaller
-    est.fit_dataset(dataset_2d)
+def test_many_parallel_datasets_are_fitted_in_one_search():
+    """The likelihood estimators fit every parallel dataset at once, and say nothing.
+
+    They used to loop over the second dimension in Python and warn that doing so
+    would be slow. The search is now vectorized over that dimension, so there is
+    nothing to warn about -- but each column still has to come back with the
+    answer it would have got on its own.
+    """
+    rng = np.random.RandomState(0)
+    y = rng.normal(size=(10, 40))
+    v = np.abs(rng.normal(size=(10, 40))) + 0.5
+    X = np.ones((10, 1))
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        together = VarianceBasedLikelihoodEstimator().fit(y=y, v=v, X=X)
+
+    for column in (0, 17, 39):
+        alone = VarianceBasedLikelihoodEstimator().fit(y=y[:, [column]], v=v[:, [column]], X=X)
+        assert np.allclose(
+            together.params_["tau2"][:, column], alone.params_["tau2"].ravel(), atol=1e-8
+        )
+        assert np.allclose(
+            together.params_["fe_params"][:, column],
+            alone.params_["fe_params"].ravel(),
+            atol=1e-8,
+        )
+
+
+def test_one_variance_column_applies_to_every_parallel_dataset():
+    """A single column of v or n is shared across the datasets, not rejected.
+
+    y may carry many columns against one column of sampling variances or sample
+    sizes, which is how a problem with one observed variance per observation
+    arrives. The fit has to read that as the same variance for every dataset.
+    """
+    rng = np.random.RandomState(1)
+    y = rng.normal(size=(12, 4))
+    v = np.abs(rng.normal(size=(12, 1))) + 0.5
+    n = rng.randint(20, 200, size=(12, 1)).astype(float)
+    X = np.ones((12, 1))
+
+    shared = VarianceBasedLikelihoodEstimator().fit(y=y, v=v, X=X)
+    repeated = VarianceBasedLikelihoodEstimator().fit(y=y, v=np.repeat(v, 4, axis=1), X=X)
+
+    assert shared.params_["tau2"].shape == (1, 4)
+    assert np.allclose(shared.params_["tau2"], repeated.params_["tau2"])
+    assert np.allclose(shared.params_["fe_params"], repeated.params_["fe_params"])
+
+    shared_n = SampleSizeBasedLikelihoodEstimator().fit(y=y, n=n, X=X)
+    repeated_n = SampleSizeBasedLikelihoodEstimator().fit(y=y, n=np.repeat(n, 4, axis=1), X=X)
+
+    assert shared_n.params_["sigma2"].shape == (1, 4)
+    assert np.allclose(shared_n.params_["sigma2"], repeated_n.params_["sigma2"])
+    assert np.allclose(shared_n.params_["tau2"], repeated_n.params_["tau2"])
+
+
+@pytest.mark.parametrize("method", ["ML", "REML"])
+def test_variance_based_likelihood_lands_on_a_minimum(dataset, method):
+    """The reported tau^2 must beat its neighbours, not merely sit close to one.
+
+    The profiled likelihood is searched rather than solved, so what is worth
+    pinning is the property the search is there to deliver.
+    """
+    est = VarianceBasedLikelihoodEstimator(method=method).fit_dataset(dataset)
+    y, v, X = dataset.y, dataset.v, dataset.X
+    tau2 = est.params_["tau2"].ravel()
+    at_estimate = est._nll_func(tau2, y, v, X)
+
+    for candidate in (np.zeros_like(tau2), tau2 / 2, tau2 * 2, tau2 + 1.0, tau2 * 100):
+        assert at_estimate <= est._nll_func(candidate, y, v, X) + 1e-9
+
+
+@pytest.mark.parametrize("method", ["ML", "REML"])
+def test_sample_size_based_likelihood_lands_on_a_minimum(dataset_n, method):
+    """The reported variance ratio must beat its neighbours and both extremes."""
+    est = SampleSizeBasedLikelihoodEstimator(method=method).fit_dataset(dataset_n)
+    y, n, X = dataset_n.y, dataset_n.n, dataset_n.X
+    tau2 = est.params_["tau2"].ravel()
+    ratio = tau2 / (tau2 + est.params_["sigma2"].ravel())
+    at_estimate = est._nll_func(ratio, y, n, X)
+
+    candidates = (
+        np.zeros_like(ratio),
+        np.ones_like(ratio),
+        ratio / 2,
+        np.minimum(ratio * 2, 1.0),
+    )
+    for candidate in candidates:
+        assert at_estimate <= est._nll_func(candidate, y, n, X) + 1e-9
+
+
+def test_sample_size_based_likelihood_matches_a_search_over_both_variances(dataset_n):
+    """Profiling the scale out must not lose to a direct search over the components.
+
+    The fit searches ``tau^2 / (tau^2 + sigma^2)`` and recovers the scale in
+    closed form, in place of a search over sigma^2 and tau^2 themselves. A grid
+    over the original two, scored by the likelihood written out in its original
+    form, is an independent check that the substitution costs nothing.
+    """
+    est = SampleSizeBasedLikelihoodEstimator(method="ML").fit_dataset(dataset_n)
+    y, n, X = dataset_n.y, dataset_n.n, dataset_n.X
+
+    def joint_nll(sigma2, tau2):
+        """Score the ML objective in its original parameters, minimized over beta."""
+        v = tau2 + sigma2 / n
+        resid = y - X.dot(weighted_least_squares(y, v, X))
+        return -0.5 * (np.log(1.0 / v).sum() - (resid**2 / v).sum())
+
+    at_estimate = joint_nll(est.params_["sigma2"].ravel(), est.params_["tau2"].ravel())
+    on_grid = min(
+        joint_nll(sigma2, tau2)
+        for sigma2 in np.linspace(0.5, 40.0, 80)
+        for tau2 in np.linspace(0.0, 12.0, 80)
+    )
+
+    assert at_estimate <= on_grid + 1e-9
 
 
 @pytest.mark.parametrize(
@@ -484,7 +597,7 @@ def test_rho_warns_when_the_weight_scheme_cannot_use_it(grouped_estimator):
     assert estimator.rho == 0.5
 
 
-def test_loopable_estimators_accept_positional_arguments():
+def test_likelihood_estimators_accept_positional_arguments():
     """fit(y, v, X) is the documented call signature and must work."""
     rng = np.random.RandomState(0)
     y = rng.randn(10, 1)
@@ -740,6 +853,37 @@ def test_sample_size_identifiability_is_checked_on_the_fitted_values():
     # Genuinely unidentifiable input is still refused.
     with pytest.raises(ValueError, match="all-equal sample sizes"):
         SampleSizeBasedLikelihoodEstimator().fit(y=y, n=n, X=X)
+
+
+def test_sample_size_identifiability_is_judged_per_dataset():
+    """The spread that separates sigma^2 from tau^2 has to be inside one column.
+
+    Columns that are each constant still differ from one another, so a spread taken
+    over the whole array reports variation that no single likelihood can use. Each
+    column is its own fit and has to be judged on its own.
+    """
+    y = np.array([[1.0, 2.0], [3.0, 1.0], [6.0, 4.0], [2.0, 5.0], [4.0, 3.0]])
+    X = np.ones((5, 1))
+
+    # Every column holds one constant sample size; only the columns differ.
+    with pytest.raises(ValueError, match="2 of 2 parallel datasets"):
+        SampleSizeBasedLikelihoodEstimator().fit(y=y, n=np.array([[20.0, 50.0]] * 5), X=X)
+
+    # One constant column beside one that varies: the constant one still counts.
+    mixed = np.array([[20.0, 20.0], [20.0, 45.0], [20.0, 80.0], [20.0, 120.0], [20.0, 200.0]])
+    with pytest.raises(ValueError, match="1 of 2 parallel datasets"):
+        SampleSizeBasedLikelihoodEstimator().fit(y=y, n=mixed, X=X)
+
+
+def test_near_equal_sample_sizes_warn_per_dataset():
+    """One barely-varying column warns even when the others vary plenty."""
+    rng = np.random.RandomState(0)
+    y = rng.randn(20, 2)
+    n = np.column_stack([rng.randint(20, 200, size=20).astype(float), np.full(20, 100.0)])
+    n[0, 1] = 101.0
+
+    with pytest.warns(UserWarning, match="1 of 2 parallel datasets"):
+        SampleSizeBasedLikelihoodEstimator().fit(y=y, n=n, X=np.ones((20, 1)))
 
 
 def test_near_equal_sample_sizes_warn_rather_than_abort():

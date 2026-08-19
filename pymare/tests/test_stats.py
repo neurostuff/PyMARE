@@ -9,10 +9,12 @@ from pymare import stats
 from pymare.estimators import DerSimonianLaird
 from pymare.estimators.estimators import _dersimonian_laird_tau2
 from pymare.stats import (
+    _SCAN_FRACTIONS,
     MIN_DOF_FOR_SATTERTHWAITE,
     _cr2_low_rank_apply,
     _cr2_low_rank_factors,
     _symmetric_sqrt,
+    bounded_scalar_min,
     cluster_robust_cov,
     collapse_groups,
     collapse_groups_by_n,
@@ -29,6 +31,149 @@ from pymare.stats import (
     weighted_intercept_cr2_sufficient_statistics,
     weighted_least_squares,
 )
+
+
+def test_bounded_scalar_min_finds_each_datasets_own_minimum():
+    """Every parallel dataset gets its own optimum out of the one shared search."""
+    targets = np.array([0.0, 0.25, 0.5, 1.0, 1e-7, 0.999])
+    x, fval = bounded_scalar_min(
+        lambda x: (x - targets) ** 2, np.zeros(targets.size), np.ones(targets.size)
+    )
+
+    assert np.allclose(x, targets, atol=1e-8)
+    assert np.allclose(fval, 0.0, atol=1e-14)
+
+
+def test_bounded_scalar_min_returns_optima_on_the_bounds_exactly():
+    """A monotone objective is minimized at an end of the interval, not just near it.
+
+    The refinement narrows a bracket from the inside, so the end itself is only
+    ever reached in the limit. It comes back exactly because the coarse scan
+    evaluated it and the better of the two is returned.
+    """
+    x, _ = bounded_scalar_min(lambda x: np.array([x[0], -x[1]]), np.zeros(2), np.array([1.0, 4.0]))
+
+    assert np.array_equal(x, [0.0, 4.0])
+
+
+def test_bounded_scalar_min_finds_a_minimum_off_the_linear_scan():
+    """A dip between two scan points is found by refining the bracket around it."""
+    x, _ = bounded_scalar_min(lambda x: np.abs(x - 0.3141592) ** 0.5, np.zeros(1), np.ones(1))
+
+    assert np.allclose(x, 0.3141592, atol=1e-6)
+
+
+def test_bounded_scalar_min_does_not_refine_a_constant_objective():
+    """There is nothing to locate, so the refinement stops before its first step."""
+    calls = []
+
+    def objective(x):
+        """Score a candidate, and record that it was scored."""
+        calls.append(1)
+        return np.zeros_like(x)
+
+    x, fval = bounded_scalar_min(objective, np.zeros(1), np.ones(1))
+
+    assert np.allclose(fval, 0.0)
+    assert np.isfinite(x).all()
+    assert len(calls) == _SCAN_FRACTIONS.size
+
+
+def test_bounded_scalar_min_converges_on_a_very_flat_minimum():
+    """A minimum with almost no curvature must not stall the refinement.
+
+    Parabolic interpolation fits such a minimum badly and can creep towards it by
+    ever-smaller steps that never shrink the bracket. The step-size safeguard is
+    what bounds the iteration count, so this is asserted under a low ``maxiter``:
+    without the safeguard the search is still far away when it runs out.
+    """
+    x, _ = bounded_scalar_min(lambda x: np.abs(x - 0.4) ** 6, np.zeros(1), np.ones(1), maxiter=25)
+
+    assert np.allclose(x, 0.4, atol=1e-3)
+
+
+def test_bounded_scalar_min_isolates_a_degenerate_dataset():
+    """A dataset whose objective is nan must not disturb the others."""
+    targets = np.array([0.25, np.nan, 0.75])
+    x, _ = bounded_scalar_min(lambda x: (x - targets) ** 2, np.zeros(3), np.ones(3))
+
+    assert np.allclose(x[[0, 2]], [0.25, 0.75], atol=1e-8)
+    assert np.isfinite(x[1])
+
+
+def test_bounded_scalar_min_refines_a_bracket_with_equal_ends():
+    """Equal values at the two ends of the bracket do not make it flat.
+
+    An objective steeper on one side of its minimum than the other can hold both
+    ends at the same height while the middle point sits far below them. Reading
+    that as flat stops the refinement before its first step and returns the scan
+    point, which is a whole scan cell out.
+    """
+    # Slopes 10 and 1 either side of the minimum, placed so that the two scan
+    # points bracketing 8/24 come out at exactly equal height.
+    minimum = 79.0 / 264.0
+
+    def asymmetric(x):
+        """Score a candidate on a V with a steep left arm and a gentle right one."""
+        return np.where(x < minimum, 10.0 * (minimum - x), x - minimum)
+
+    ends = asymmetric(np.array([7.0 / 24.0, 9.0 / 24.0]))
+    assert abs(ends[0] - ends[1]) < 1e-15
+    assert asymmetric(np.array([8.0 / 24.0]))[0] < ends[0] / 2
+
+    x, _ = bounded_scalar_min(asymmetric, np.zeros(1), np.ones(1))
+
+    assert np.allclose(x, minimum, atol=1e-6)
+
+
+def test_bounded_scalar_min_rejects_reversed_bounds():
+    """A descending interval flips every ordering the refinement relies on.
+
+    It would not announce itself: the tolerance changes sign along with the
+    interval, so the first convergence test passes and a scan point comes back as
+    though it had been refined.
+    """
+    with pytest.raises(ValueError, match="lower must not exceed upper"):
+        bounded_scalar_min(lambda x: (x - 0.3) ** 2, np.ones(1), np.zeros(1))
+
+
+def test_bounded_scalar_min_accepts_a_degenerate_interval():
+    """A single point is an ordered interval, and the only answer it can give."""
+    x, fval = bounded_scalar_min(lambda t: (t - 0.3) ** 2, np.full(1, 0.5), np.full(1, 0.5))
+
+    assert np.allclose(x, 0.5)
+    assert np.allclose(fval, 0.04)
+
+
+def test_bounded_scalar_min_requires_matching_1d_bounds():
+    """Bounds carry the dataset count, so their shape is not inferred."""
+    with pytest.raises(ValueError, match="1d arrays of the same shape"):
+        bounded_scalar_min(lambda x: x, 0.0, 1.0)
+
+    with pytest.raises(ValueError, match="1d arrays of the same shape"):
+        bounded_scalar_min(lambda x: x, np.zeros(3), np.ones(2))
+
+
+def test_weighted_least_squares_handles_a_collinear_design():
+    """A rank-deficient design still gets the pseudo-inverse answer.
+
+    The ordinary inverse the fast path uses is undefined there, and the fallback
+    is what keeps a duplicated predictor from turning the covariance into
+    infinities.
+    """
+    rng = np.random.RandomState(0)
+    y = rng.standard_normal((8, 3))
+    v = np.abs(rng.standard_normal((8, 3))) + 0.5
+    repeated = rng.standard_normal((8, 1))
+    X = np.c_[np.ones(8), repeated, repeated]
+
+    beta, cov = weighted_least_squares(y, v, X, return_cov=True)
+
+    assert np.isfinite(beta).all()
+    assert np.isfinite(cov).all()
+    # The minimum-norm solution splits a duplicated predictor's coefficient
+    # evenly between its two copies, which an ordinary inverse cannot do.
+    assert np.allclose(beta[1], beta[2])
 
 
 def test_q_gen(vars_with_intercept):

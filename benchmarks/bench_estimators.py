@@ -15,12 +15,7 @@ from pymare.estimators import (
     WeightedLeastSquares,
 )
 
-from .common import (
-    N_DATASETS_LOOPED,
-    make_data,
-    make_group_level_design,
-    make_sample_sizes,
-)
+from .common import make_data, make_group_level_design, make_sample_sizes
 
 # asv benchmark attributes, applied to every benchmark in this module. The
 # ceilings matter because the Benchmark workflow times the whole suite twice on
@@ -101,22 +96,21 @@ class TimeCorrelatedEffectsFit:
 
 
 class TimeLikelihoodEstimators:
-    """Time the likelihood estimators, which loop over datasets.
+    """Time the likelihood estimators, which search for their variance components.
 
-    They optimize per dataset, so they get the smaller second dimension. That
-    also makes them the benchmark that would catch a loop appearing in a path
-    that used to vectorize.
+    They cost more per dataset than the closed-form estimators because the search
+    evaluates the likelihood many times, but the search runs across the second
+    dimension rather than along it. They get the shared size for that reason, and
+    they are the benchmark that would catch a per-dataset loop reappearing.
     """
 
     params = ["ML", "REML"]
     param_names = ["method"]
 
     def setup(self, method):
-        """Build a problem small enough for a per-dataset optimizer."""
-        self.y, self.v, self.X, self.groups = make_data(
-            n_observations=40, n_datasets=N_DATASETS_LOOPED, n_predictors=2
-        )
-        self.n = make_sample_sizes(n_observations=40, n_datasets=N_DATASETS_LOOPED)
+        """Build the shared problem, at the shared size."""
+        self.y, self.v, self.X, self.groups = make_data(n_observations=40, n_predictors=2)
+        self.n = make_sample_sizes(n_observations=40)
 
     def time_variance_based_fit(self, method):
         """Fit from sampling variances."""
