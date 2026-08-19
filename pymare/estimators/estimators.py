@@ -1452,16 +1452,28 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         # likelihood actually sees. Under weight_scheme='rescale' those are
         # effective sample sizes, which can vary sharply even when every raw
         # ``n`` is identical (and, less often, the reverse).
-        if fit_n.std() < np.sqrt(np.finfo(float).eps):
+        #
+        # Reduced over observations, not over the whole array: each column is a
+        # separate likelihood, and one that holds a single constant sample size
+        # is unidentifiable however much the other columns differ from it. A
+        # whole-array spread hides exactly that, because columns that are each
+        # constant still differ from each other.
+        spread = fit_n.std(axis=0)
+        unidentified = spread < np.sqrt(np.finfo(float).eps)
+        if unidentified.any():
             raise ValueError(
-                "Sample size-based likelihood estimator cannot "
-                "work with all-equal sample sizes."
+                "Sample size-based likelihood estimator cannot work with all-equal "
+                f"sample sizes, and {int(unidentified.sum())} of {unidentified.size} "
+                "parallel datasets have them."
             )
 
-        if fit_n.std() < fit_n.mean() / 10:
+        marginal = spread < fit_n.mean(axis=0) / 10
+        if marginal.any():
             # ``raise Warning`` aborts the fit instead of warning about it.
             warn(
-                "Sample sizes are too close, sample size-based likelihood estimator may fail.",
+                "Sample sizes are too close in "
+                f"{int(marginal.sum())} of {marginal.size} parallel datasets, "
+                "sample size-based likelihood estimator may fail.",
                 UserWarning,
             )
 

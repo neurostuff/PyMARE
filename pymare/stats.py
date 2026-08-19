@@ -1042,6 +1042,17 @@ def bounded_scalar_min(f, lower, upper, xtol=1e-6, ftol=1e-12, maxiter=50):
             f"{lower.shape} and {upper.shape}."
         )
 
+    # Checked rather than assumed: a reversed interval descends, which flips the
+    # sign of the tolerance and of every ordering the refinement relies on, and
+    # the search would quietly return a scan point instead of raising.
+    reversed_bounds = lower > upper
+    if reversed_bounds.any():
+        raise ValueError(
+            f"lower must not exceed upper, and does in {int(reversed_bounds.sum())} of "
+            f"{reversed_bounds.size} datasets (first at index "
+            f"{int(np.argmax(reversed_bounds))})."
+        )
+
     def evaluate(candidate):
         """Score a candidate, reading nan as inf."""
         value = np.asarray(f(candidate), dtype=float)
@@ -1075,7 +1086,12 @@ def bounded_scalar_min(f, lower, upper, xtol=1e-6, ftol=1e-12, maxiter=50):
     last_step = previous_step = high - low
 
     for _ in range(maxiter):
-        flat = np.abs(f_low - f_high) <= ftol * (1.0 + np.abs(f_mid))
+        # Both ends against the middle, not against each other: an objective
+        # steeper on one side than the other can hold its two ends at equal
+        # height while the middle sits far below them, and comparing the ends
+        # alone reads that as flat and stops on the scan point.
+        spread = np.maximum(np.abs(f_low - f_mid), np.abs(f_high - f_mid))
+        flat = spread <= ftol * (1.0 + np.abs(f_mid))
         if np.all(settled | flat | (high - low <= tol)):
             break
 

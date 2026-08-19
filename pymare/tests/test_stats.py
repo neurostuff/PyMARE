@@ -101,6 +101,50 @@ def test_bounded_scalar_min_isolates_a_degenerate_dataset():
     assert np.isfinite(x[1])
 
 
+def test_bounded_scalar_min_refines_a_bracket_with_equal_ends():
+    """Equal values at the two ends of the bracket do not make it flat.
+
+    An objective steeper on one side of its minimum than the other can hold both
+    ends at the same height while the middle point sits far below them. Reading
+    that as flat stops the refinement before its first step and returns the scan
+    point, which is a whole scan cell out.
+    """
+    # Slopes 10 and 1 either side of the minimum, placed so that the two scan
+    # points bracketing 8/24 come out at exactly equal height.
+    minimum = 79.0 / 264.0
+
+    def asymmetric(x):
+        """Score a candidate on a V with a steep left arm and a gentle right one."""
+        return np.where(x < minimum, 10.0 * (minimum - x), x - minimum)
+
+    ends = asymmetric(np.array([7.0 / 24.0, 9.0 / 24.0]))
+    assert abs(ends[0] - ends[1]) < 1e-15
+    assert asymmetric(np.array([8.0 / 24.0]))[0] < ends[0] / 2
+
+    x, _ = bounded_scalar_min(asymmetric, np.zeros(1), np.ones(1))
+
+    assert np.allclose(x, minimum, atol=1e-6)
+
+
+def test_bounded_scalar_min_rejects_reversed_bounds():
+    """A descending interval flips every ordering the refinement relies on.
+
+    It would not announce itself: the tolerance changes sign along with the
+    interval, so the first convergence test passes and a scan point comes back as
+    though it had been refined.
+    """
+    with pytest.raises(ValueError, match="lower must not exceed upper"):
+        bounded_scalar_min(lambda x: (x - 0.3) ** 2, np.ones(1), np.zeros(1))
+
+
+def test_bounded_scalar_min_accepts_a_degenerate_interval():
+    """A single point is an ordered interval, and the only answer it can give."""
+    x, fval = bounded_scalar_min(lambda t: (t - 0.3) ** 2, np.full(1, 0.5), np.full(1, 0.5))
+
+    assert np.allclose(x, 0.5)
+    assert np.allclose(fval, 0.04)
+
+
 def test_bounded_scalar_min_requires_matching_1d_bounds():
     """Bounds carry the dataset count, so their shape is not inferred."""
     with pytest.raises(ValueError, match="1d arrays of the same shape"):

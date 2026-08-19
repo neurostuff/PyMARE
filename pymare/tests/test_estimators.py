@@ -855,6 +855,37 @@ def test_sample_size_identifiability_is_checked_on_the_fitted_values():
         SampleSizeBasedLikelihoodEstimator().fit(y=y, n=n, X=X)
 
 
+def test_sample_size_identifiability_is_judged_per_dataset():
+    """The spread that separates sigma^2 from tau^2 has to be inside one column.
+
+    Columns that are each constant still differ from one another, so a spread taken
+    over the whole array reports variation that no single likelihood can use. Each
+    column is its own fit and has to be judged on its own.
+    """
+    y = np.array([[1.0, 2.0], [3.0, 1.0], [6.0, 4.0], [2.0, 5.0], [4.0, 3.0]])
+    X = np.ones((5, 1))
+
+    # Every column holds one constant sample size; only the columns differ.
+    with pytest.raises(ValueError, match="2 of 2 parallel datasets"):
+        SampleSizeBasedLikelihoodEstimator().fit(y=y, n=np.array([[20.0, 50.0]] * 5), X=X)
+
+    # One constant column beside one that varies: the constant one still counts.
+    mixed = np.array([[20.0, 20.0], [20.0, 45.0], [20.0, 80.0], [20.0, 120.0], [20.0, 200.0]])
+    with pytest.raises(ValueError, match="1 of 2 parallel datasets"):
+        SampleSizeBasedLikelihoodEstimator().fit(y=y, n=mixed, X=X)
+
+
+def test_near_equal_sample_sizes_warn_per_dataset():
+    """One barely-varying column warns even when the others vary plenty."""
+    rng = np.random.RandomState(0)
+    y = rng.randn(20, 2)
+    n = np.column_stack([rng.randint(20, 200, size=20).astype(float), np.full(20, 100.0)])
+    n[0, 1] = 101.0
+
+    with pytest.warns(UserWarning, match="1 of 2 parallel datasets"):
+        SampleSizeBasedLikelihoodEstimator().fit(y=y, n=n, X=np.ones((20, 1)))
+
+
 def test_near_equal_sample_sizes_warn_rather_than_abort():
     """``raise Warning`` aborts the fit; this path should only warn."""
     n = np.full((20, 1), 100.0)
