@@ -1,6 +1,6 @@
-"""Data for tests."""
+"""Fixtures for the PyMARE test suite."""
 
-from pathlib import Path
+import os.path as op
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,7 @@ from pymare.estimators import (
     VarianceBasedLikelihoodEstimator,
     WeightedLeastSquares,
 )
+from pymare.tests.utils import get_test_data_path
 
 
 @pytest.fixture(scope="package")
@@ -266,7 +267,7 @@ def block_correlation():
 @pytest.fixture(scope="package")
 def robumeta_dataset():
     """Load the dataset the robumeta reference values were computed on."""
-    frame = pd.read_csv(Path(__file__).parent / "data" / "robumeta_correlated_effects.csv")
+    frame = pd.read_csv(op.join(get_test_data_path(), "robumeta_correlated_effects.csv"))
     n_estimates = len(frame)
     designs = {
         "intercept": np.ones((n_estimates, 1)),
@@ -276,3 +277,60 @@ def robumeta_dataset():
         ],
     }
     return frame, designs
+
+
+@pytest.fixture
+def fitted_estimator(dataset):
+    """Create a fitted Estimator as a fixture."""
+    est = DerSimonianLaird()
+    return est.fit_dataset(dataset)
+
+
+@pytest.fixture
+def small_variance_estimator(small_variance_dataset):
+    """Create a fitted Estimator with small variances as a fixture."""
+    est = DerSimonianLaird()
+    return est.fit_dataset(small_variance_dataset)
+
+
+@pytest.fixture
+def results(fitted_estimator):
+    """Create a results object as a fixture."""
+    return fitted_estimator.summary()
+
+
+@pytest.fixture
+def small_variance_results(small_variance_estimator):
+    """Create a results object with small variances as a fixture."""
+    return small_variance_estimator.summary()
+
+
+@pytest.fixture
+def results_2d(fitted_estimator, dataset_2d):
+    """Create a 2D results object as a fixture."""
+    est = VarianceBasedLikelihoodEstimator()
+    return est.fit_dataset(dataset_2d).summary()
+
+
+@pytest.fixture(scope="module")
+def one_samp_data():
+    """Create one-sample data for tests."""
+    return {
+        "m": np.array([7, 5, 4]),
+        "sd": np.sqrt(np.array([4.2, 1.2, 1.9])),
+        "n": np.array([24, 31, 40]),
+        "r": np.array([0.2, 0.18, 0.3]),
+    }
+
+
+@pytest.fixture(scope="module")
+def two_samp_data():
+    """Create two-sample data for tests."""
+    return {
+        "m1": np.array([4, 2]),
+        "sd1": np.sqrt(np.array([1, 9])),
+        "n1": np.array([12, 15]),
+        "m2": np.array([5, 2.5]),
+        "sd2": np.sqrt(np.array([4, 16])),
+        "n2": np.array([12, 16]),
+    }
