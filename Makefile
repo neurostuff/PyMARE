@@ -1,4 +1,5 @@
-.PHONY: all_tests benchmark check_robumeta_alignment help install_cmdstan lint test_robumeta test_stan unittest
+.PHONY: all_tests benchmark check_robumeta_alignment help install_cmdstan lint test_robumeta
+.PHONY: test_stan unittest validate_stan
 
 # --cov-append matches what CI does, so a local run of two targets in a row
 # reports their combined coverage rather than only the last one's.
@@ -14,6 +15,7 @@ help:
 	@echo "  test_stan                  to run the Stan sampling tests (needs the stan extra and CmdStan)"
 	@echo "  test_robumeta              to run the robumeta alignment tests"
 	@echo "  check_robumeta_alignment   to regenerate the robumeta reference values (needs Docker)"
+	@echo "  validate_stan              to re-measure the Stan model's bias and coverage (~10 min)"
 	@echo "  benchmark                  to run the asv suite once in the current environment"
 	@echo "  all_tests                  to run lint and every test target"
 
@@ -35,6 +37,13 @@ test_stan:
 
 test_robumeta:
 	@python -m pytest -m "robumeta" $(PYTEST_COV)
+
+# What the "Validate the Stan model" workflow runs. Regenerates
+# pymare/tests/data/stan_validation.json and fails if any design cell misses the
+# thresholds in pymare.tests.utils.STAN_VALIDATION_THRESHOLDS. Slow -- about ten
+# minutes -- which is why it is not part of unittest or test_stan.
+validate_stan:
+	@python validation/stan/simulate.py --check
 
 # What the "Check robumeta alignment" workflow runs. Needs Docker, because the
 # reference values come from R.

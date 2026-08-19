@@ -6,8 +6,9 @@ here is the data-generating process rather than another package: the model is
 fitted to data simulated from itself, and checked for whether it recovers what
 was planted and whether its credible intervals cover at their nominal rate.
 
-Not run in CI. The fast tests in `pymare/tests/test_stan_estimators.py` check one
-planted configuration; this checks the grid.
+The fast tests in `pymare/tests/test_stan_estimators.py` check one planted
+configuration; this checks the grid. It is not run per pull request, but it is
+not detached from CI either — see "How this is wired into CI" below.
 
 ## The model
 
@@ -31,16 +32,45 @@ still shown in the guide.
 [sug]: https://mc-stan.org/docs/stan-users-guide/measurement-error.html
 [priors]: https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations
 
+## How this is wired into CI
+
+Three layers, mirroring the robumeta alignment in `validation/robumeta`:
+
+1. **`make validate_stan`** re-measures the grid and fails if any design cell
+   misses `pymare.tests.utils.STAN_VALIDATION_THRESHOLDS`. It writes the results
+   to `pymare/tests/data/stan_validation.json`.
+2. **`test_recorded_validation_meets_its_thresholds`** and
+   **`test_recorded_validation_covers_every_design_cell`** hold that recorded
+   file to the same thresholds and to the expected list of cells. They read the
+   file rather than re-measuring, so they cost nothing and run on every pull
+   request on every platform. This is what stops the record from going stale
+   unnoticed — a pinned file nothing reads is decoration.
+3. **The `Validate the Stan model` workflow** re-measures on a schedule, on
+   pushes to master touching the model, and on demand.
+
+The grid is about 1400 fits and takes ten minutes, which is why it is not part
+of `test_stan` and not run per pull request.
+
+**Why thresholds rather than pinned values.** The robumeta reference is
+deterministic, so its workflow can require the file not to move. These numbers
+are Monte Carlo estimates with a standard error of 0.015 to 0.030, so a correct
+model produces different numbers every run and an exact pin would fail
+constantly. What is pinned instead is the claim the file exists to support:
+coverage at or above 0.90 and |beta bias| at or below 0.10 in every cell. That
+floor is roughly nominal minus two standard errors — loose enough not to fire on
+noise, and tight enough that it rejects the 0.810 the first prior scale produced.
+`--check` refuses to certify a run of fewer than 100 replications, so a short run
+cannot clear the floor by luck.
+
 ## Reproducing
 
 ```bash
 pip install -e .[stan]
 python -m cmdstanpy.install_cmdstan
-python validation/stan/simulate.py --replications 100
+make validate_stan          # or: python validation/stan/simulate.py --check
 ```
 
-About 10 minutes on 8 cores. Results are written to `results.json`, which is
-committed, so a change to the model can be diffed against it.
+About 10 minutes on 8 cores.
 
 ## What was measured
 

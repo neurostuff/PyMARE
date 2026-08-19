@@ -102,6 +102,7 @@ environment does not have:
 | `make test_stan` | the Stan sampling tests | `pip install -e .[stan]`, then `make install_cmdstan` |
 | `make test_robumeta` | the robumeta alignment tests | nothing extra |
 | `make check_robumeta_alignment` | regenerates the robumeta reference values | Docker |
+| `make validate_stan` | re-measures the Stan model's bias and coverage (~10 min) | the same as `test_stan` |
 | `make lint` | flake8 over `pymare` and `benchmarks` | nothing extra |
 
 Each of these has a GitHub Actions job behind it, so a target that passes
@@ -126,9 +127,24 @@ PyMARE's inputs are translated into Stan's data block need neither cmdstanpy nor
 CmdStan, so they are unmarked and run in the ordinary unit job on every
 platform.
 
-The model's accuracy is measured separately, in `validation/stan/`, which
-reports bias and credible-interval coverage across a grid of designs. That is
-not run in CI; see its README for what it measured and how to rerun it.
+The model's accuracy is measured separately, by `validation/stan/simulate.py`,
+which reports bias and credible-interval coverage across a grid of designs and
+records them in `pymare/tests/data/stan_validation.json`. It follows the same
+three-layer arrangement as the robumeta alignment:
+
+1. `make validate_stan` regenerates that file and fails if any design cell
+   misses `pymare.tests.utils.STAN_VALIDATION_THRESHOLDS`.
+2. Two tests in `test_stan_estimators.py` hold the *recorded* file to those same
+   thresholds and to the expected list of design cells. They read the file
+   rather than re-measuring, so they cost nothing and run everywhere — which is
+   what stops the pin from quietly going stale.
+3. The `Validate the Stan model` workflow re-measures on a schedule, on pushes
+   to master that touch the model, and on demand.
+
+The grid takes about ten minutes, which is why it is not part of `test_stan` and
+not run per pull request. Unlike the robumeta reference, these numbers are
+stochastic, so the pin cannot be enforced by requiring the file not to move; the
+thresholds are the claim, and the file is the record of it.
 
 ### Alignment with robumeta
 

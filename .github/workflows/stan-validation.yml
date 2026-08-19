@@ -1,0 +1,115 @@
+name: "Validate the Stan model"
+
+on:
+  # Not on pull_request: the grid is ~1400 fits and takes about ten minutes,
+  # which is too slow to sit in front of every change. The fast checks that do
+  # run per pull request are the "stan" marked tests in the Run Tests workflow,
+  # plus the two tests there that hold the *recorded* results in
+  # pymare/tests/data/stan_validation.json to these same thresholds. This
+  # workflow is what re-measures them.
+  push:
+    branches:
+      - "master"
+    paths:
+      - "pymare/estimators/stan/**"
+      - "pymare/estimators/estimators.py"
+      - "validation/stan/**"
+      - ".github/workflows/stan-validation.yml"
+  schedule:
+    # Monthly, to catch the model rotting against a new CmdStan or ArviZ rather
+    # than against a change to PyMARE.
+    - cron: "0 0 1 * *"
+  workflow_dispatch:
+    inputs:
+      replications:
+        description: "Replications per design cell (at least 100)"
+        required: false
+        default: "100"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stan-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMDSTAN_VERSION: "2.36.0"
+  REPLICATIONS: ${{ github.event.inputs.replications || '100' }}
+
+jobs:
+  validate:
+    name: Bias and credible-interval coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Set up python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: "Install PyMARE with the stan extra"
+        run: |
+          python -m pip install --progress-bar off --upgrade pip setuptools wheel
+          python -m pip install -e .[tests,stan]
+      - name: "Cache CmdStan"
+        id: cache_cmdstan
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmdstan
+          key: cmdstan-${{ runner.os }}-${{ runner.arch }}-${{ env.CMDSTAN_VERSION }}
+      - name: "Install CmdStan"
+        if: steps.cache_cmdstan.outputs.cache-hit != 'true'
+        run: python -m cmdstanpy.install_cmdstan --version "${CMDSTAN_VERSION}" --cores 2
+
+      # Regenerates pymare/tests/data/stan_validation.json and fails if any cell
+      # misses STAN_VALIDATION_THRESHOLDS. The numbers are stochastic, so unlike
+      # the robumeta reference this cannot require the file to be unchanged --
+      # a correct model produces slightly different numbers every run. The
+      # thresholds are the claim; the file is the record of it.
+      - name: "Re-measure the model and enforce the thresholds"
+        id: measure
+        run: |
+          python validation/stan/simulate.py \
+              --replications "${REPLICATIONS}" \
+              --jobs 2 \
+              --check \
+              | tee measured.txt
+
+      - name: "Report what was measured"
+        if: always()
+        run: |
+          {
+              echo "## Stan model validation"
+              echo
+              echo "\`${REPLICATIONS}\` replications per design cell, CmdStan \`${CMDSTAN_VERSION}\`."
+              echo
+              echo '```'
+              tail -n 20 measured.txt 2>/dev/null || echo "the run produced no output"
+              echo '```'
+              echo
+              if git diff --quiet -- pymare/tests/data/stan_validation.json; then
+                  echo "The recorded results did not move."
+              else
+                  echo "<details><summary>Change against the recorded results</summary>"
+                  echo
+                  echo '```diff'
+                  git diff -- pymare/tests/data/stan_validation.json
+                  echo '```'
+                  echo
+                  echo "</details>"
+                  echo
+                  echo "These numbers are stochastic, so movement is expected. What matters"
+                  echo "is that every cell still clears the thresholds, which the step above"
+                  echo "enforces. Commit the regenerated file to refresh the record."
+              fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "Upload the regenerated results"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stan-validation
+          path: pymare/tests/data/stan_validation.json

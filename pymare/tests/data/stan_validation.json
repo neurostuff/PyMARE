@@ -1,7 +1,11 @@
 {
   "replications": 100,
   "seed": 20260818,
-  "elapsed_seconds": 583.2,
+  "elapsed_seconds": 402.9,
+  "thresholds": {
+    "min_coverage": 0.9,
+    "max_beta_bias": 0.1
+  },
   "cells": [
     {
       "name": "groups=5",

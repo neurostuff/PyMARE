@@ -8,9 +8,20 @@ actually rests on and which no single fit can establish.
 
 Run with::
 
-    python validation/stan/simulate.py --replications 100 --out results.json
+    make validate_stan
 
-The measured output is recorded in this directory's README.md.
+or equivalently::
+
+    python validation/stan/simulate.py --check
+
+which writes ``pymare/tests/data/stan_validation.json`` and exits non-zero if any
+design cell misses ``pymare.tests.utils.STAN_VALIDATION_THRESHOLDS``. Two tests
+in ``pymare/tests/test_stan_estimators.py`` hold that recorded file to the same
+thresholds on every run, so the record cannot go stale unnoticed, and the
+"Validate the Stan model" workflow re-measures on a schedule.
+
+This directory's README.md explains the arrangement and records what was
+measured.
 """
 
 import argparse
@@ -29,6 +40,7 @@ sys.path.insert(0, op.join(op.dirname(op.abspath(__file__)), "..", ".."))
 
 from pymare import Dataset  # noqa: E402
 from pymare.estimators import StanMetaRegression  # noqa: E402
+from pymare.tests.utils import STAN_VALIDATION_THRESHOLDS  # noqa: E402
 
 # CmdStanPy narrates every chain through its own handler; at a few thousand fits
 # that is the only thing on screen.
@@ -64,6 +76,10 @@ CELLS = [
     {"name": "unbalanced covariate", "unbalanced": True},
     {"name": "unbalanced covariate, tau2=1", "unbalanced": True, "tau2": 1.0},
 ]
+
+#: Fewest replications at which ``--check`` is allowed to pass. Matches the
+#: floor the pinned results are held to in ``test_stan_estimators.py``.
+MIN_REPLICATIONS_TO_CHECK = 100
 
 BASE = {
     "n_groups": 20,
@@ -166,7 +182,7 @@ def _interval(row):
 
 
 def main():
-    """Run the grid and write the results."""
+    """Run the grid, write the results, and optionally enforce the thresholds."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--replications", type=int, default=100)
     parser.add_argument("--seed", type=int, default=20260818)
@@ -176,7 +192,23 @@ def main():
         default=max(1, (os.cpu_count() or 2) // 2),
         help="cells to fit concurrently; each fit already uses one core per chain",
     )
-    parser.add_argument("--out", default=op.join(op.dirname(op.abspath(__file__)), "results.json"))
+    parser.add_argument(
+        "--out",
+        default=op.join(
+            op.dirname(op.abspath(__file__)),
+            "..",
+            "..",
+            "pymare",
+            "tests",
+            "data",
+            "stan_validation.json",
+        ),
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="exit non-zero if any cell misses STAN_VALIDATION_THRESHOLDS",
+    )
     args = parser.parse_args()
 
     started = time.time()
@@ -201,6 +233,7 @@ def main():
         "replications": args.replications,
         "seed": args.seed,
         "elapsed_seconds": round(time.time() - started, 1),
+        "thresholds": STAN_VALIDATION_THRESHOLDS,
         "cells": results,
     }
     with open(args.out, "w") as fobj:
@@ -213,8 +246,42 @@ def main():
             f"{cell['beta_coverage']:>10.3f}{cell['tau2_bias']:>11.4f}"
             f"{cell['fits_with_divergences']:>9d}"
         )
-    print(f"\nwrote {args.out} in {payload['elapsed_seconds']}s")
+    print(f"\nwrote {op.normpath(args.out)} in {payload['elapsed_seconds']}s")
+
+    if not args.check:
+        return 0
+
+    # A handful of replications can clear the coverage floor by luck -- at 10
+    # replications the estimate moves in steps of 0.05 and its standard error is
+    # 0.07 -- so a short run must not be able to certify the model.
+    if args.replications < MIN_REPLICATIONS_TO_CHECK:
+        print(
+            f"\n--check needs at least {MIN_REPLICATIONS_TO_CHECK} replications to mean "
+            f"anything; got {args.replications}."
+        )
+        return 1
+
+    # The same thresholds the pinned results are held to, applied to this run.
+    floor = STAN_VALIDATION_THRESHOLDS["min_coverage"]
+    ceiling = STAN_VALIDATION_THRESHOLDS["max_beta_bias"]
+    failures = [
+        f"{cell['name']}: coverage {cell['beta_coverage']:.3f} below {floor:.2f}"
+        for cell in results
+        if cell["beta_coverage"] < floor
+    ] + [
+        f"{cell['name']}: |beta bias| {abs(cell['beta_bias']):.4f} above {ceiling}"
+        for cell in results
+        if abs(cell["beta_bias"]) > ceiling
+    ]
+    if failures:
+        print("\nTHRESHOLDS NOT MET:")
+        for failure in failures:
+            print(f"  {failure}")
+        return 1
+
+    print(f"all {len(results)} cells meet the thresholds")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

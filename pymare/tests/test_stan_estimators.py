@@ -17,7 +17,12 @@ from pymare import meta_regression
 from pymare.estimators import StanMetaRegression, VarianceBasedLikelihoodEstimator
 from pymare.estimators.estimators import _build_stan_data
 from pymare.results import BayesianMetaRegressionResults
-from pymare.tests.utils import cmdstan_is_available
+from pymare.tests.utils import (
+    STAN_VALIDATION_CELLS,
+    STAN_VALIDATION_THRESHOLDS,
+    cmdstan_is_available,
+    load_stan_validation,
+)
 
 requires_cmdstan = pytest.mark.skipif(
     not cmdstan_is_available(),
@@ -357,6 +362,57 @@ def test_summary_requests_the_configured_credible_interval(ci):
         # summary for display; neither is what this container promises.
         assert kwargs["ci_kind"] == "hdi"
         assert kwargs["round_to"] == "none"
+
+
+# -----------------------------------------------------------------------------
+# The recorded simulation results. No CmdStan needed; the numbers are pinned.
+# -----------------------------------------------------------------------------
+
+
+def test_recorded_validation_covers_every_design_cell():
+    """The pinned results must describe the grid the harness actually runs.
+
+    Without this, adding a cell to validation/stan/simulate.py and forgetting to
+    regenerate would leave the new cell permanently unmeasured while the file
+    still looked current.
+    """
+    recorded = load_stan_validation()
+    names = [cell["name"] for cell in recorded["cells"]]
+
+    assert tuple(names) == STAN_VALIDATION_CELLS
+    assert len(names) == len(set(names)), "duplicate cells in the recorded results"
+    assert recorded["replications"] >= 100
+
+
+def test_recorded_validation_meets_its_thresholds():
+    """Every design cell must clear the coverage floor and the bias ceiling.
+
+    This is what makes the recorded file load-bearing rather than decorative. It
+    checks the numbers already measured rather than re-measuring, so it costs
+    nothing and runs everywhere; the scheduled Stan validation workflow is what
+    re-measures and enforces the same thresholds against a fresh run.
+
+    The thresholds are not decoration either: the first prior scale tried here
+    produced coverage of 0.810 in the ``sigma x0.1`` cell, which this floor
+    rejects.
+    """
+    recorded = load_stan_validation()
+    floor = STAN_VALIDATION_THRESHOLDS["min_coverage"]
+    ceiling = STAN_VALIDATION_THRESHOLDS["max_beta_bias"]
+
+    undercovered = [
+        (cell["name"], cell["beta_coverage"])
+        for cell in recorded["cells"]
+        if cell["beta_coverage"] < floor
+    ]
+    assert not undercovered, f"cells below {floor:.2f} coverage: {undercovered}"
+
+    biased = [
+        (cell["name"], cell["beta_bias"])
+        for cell in recorded["cells"]
+        if abs(cell["beta_bias"]) > ceiling
+    ]
+    assert not biased, f"cells with |beta bias| above {ceiling}: {biased}"
 
 
 # -----------------------------------------------------------------------------
