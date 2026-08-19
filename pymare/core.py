@@ -185,7 +185,9 @@ class Dataset:
                     df["v"] = self.v[:, i_set]
 
                 if self.n is not None:
-                    df["n"] = self.n[:, i_set]
+                    # A single column of n applies to every parallel dataset,
+                    # which the constructor allows and the estimators honour.
+                    df["n"] = self.n[:, i_set if self.n.shape[1] > 1 else 0]
 
                 if self.g is not None:
                     df["g"] = self.g[:, 0]

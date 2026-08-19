@@ -12,12 +12,17 @@ from scipy.optimize import Bounds, minimize
 from ..results import BayesianMetaRegressionResults, MetaRegressionResults
 from ..stats import (
     DEFAULT_RHO,
+    TAU2_AGGREGATE,
+    TAU2_CORRELATED,
+    TAU2_INDEPENDENT,
+    broadcast_columns,
     cluster_robust_cov,
     collapse_groups,
     collapse_groups_by_n,
+    correlated_effects_tau2,
+    correlated_effects_weights,
     encode_groups,
     ensure_2d,
-    group_weights,
     satterthwaite_dof,
     weighted_least_squares,
 )
@@ -25,28 +30,80 @@ from ..stats import (
 WEIGHT_SCHEMES = ("individual", "rescale", "collapse")
 
 
-def _check_weight_scheme(weight_scheme):
-    """Validate the ``weight_scheme`` argument shared by the WLS-family estimators.
+class Options:
+    """Constrain a parameter to a fixed set of values."""
+
+    def __init__(self, allowed):
+        self.allowed = tuple(allowed)
+
+    def check(self, name, value):
+        """Raise if ``value`` is not one of the allowed options."""
+        if value not in self.allowed:
+            raise ValueError(f"Invalid {name} '{value}'; must be one of {list(self.allowed)}.")
+
+
+class Interval:
+    """Constrain a parameter to a closed numeric interval."""
+
+    def __init__(self, low, high):
+        self.low = low
+        self.high = high
+
+    def check(self, name, value):
+        """Raise if ``value`` is not a real number inside the interval."""
+        if not isinstance(value, (int, float, np.integer, np.floating)) or isinstance(value, bool):
+            raise ValueError(f"Invalid {name} {value!r}; must be a number.")
+        if not self.low <= float(value) <= self.high:
+            raise ValueError(f"Invalid {name} {value!r}; must lie in [{self.low}, {self.high}].")
+
+
+#: Constraints shared by the estimators that accept group labels. Assigned to
+#: each class's ``_parameter_constraints`` so that both parameters are checked
+#: by the same mechanism, in the same place.
+WEIGHTING_CONSTRAINTS = {
+    "weight_scheme": Options(WEIGHT_SCHEMES),
+    "rho": Interval(0.0, 1.0),
+}
+
+
+def _resolve_rho(rho, weight_scheme):
+    """Return the assumed within-group correlation, warning when it cannot apply.
 
     Parameters
     ----------
+    rho : None or :obj:`float`
+        The value supplied by the caller, or None for the default.
     weight_scheme : :obj:`str`
-        The value supplied by the caller.
+        The scheme supplied alongside it.
 
-    Raises
-    ------
-    ValueError
-        If ``weight_scheme`` is not one of ``WEIGHT_SCHEMES``.
+    Returns
+    -------
+    :obj:`float`
+        ``rho``, or :data:`~pymare.stats.DEFAULT_RHO` when none was supplied.
+
+    Warns
+    -----
+    UserWarning
+        If ``rho`` was set explicitly under ``weight_scheme="individual"``, which
+        models no within-group correlation and therefore never reads it.
 
     Notes
     -----
-    Called from ``__init__`` rather than ``fit`` so that a typo surfaces at
-    construction, before any fitting work is done.
+    The default is None rather than the number itself so that "the user asked
+    for 0.8" can be told apart from "nobody chose". Without that distinction a
+    deliberate ``rho`` under the default scheme is silently inert, which is the
+    one case where the caller clearly expected it to matter.
     """
-    if weight_scheme not in WEIGHT_SCHEMES:
-        raise ValueError(
-            f"Invalid weight_scheme '{weight_scheme}'; must be one of {list(WEIGHT_SCHEMES)}."
+    if rho is None:
+        return DEFAULT_RHO
+    if weight_scheme == "individual":
+        warn(
+            "rho was supplied but weight_scheme='individual', which models no "
+            "within-group correlation and so ignores it. Use "
+            "weight_scheme='rescale' or 'collapse' for rho to take effect.",
+            stacklevel=3,
         )
+    return rho
 
 
 def _resolve_weights(v, groups, tau2, weight_scheme):
@@ -71,19 +128,65 @@ def _resolve_weights(v, groups, tau2, weight_scheme):
 
     Notes
     -----
-    ``"rescale"`` divides each observation's weight by its group size, so row
-    multiplicity does not automatically buy group influence. ``"collapse"``
-    returns None because the aggregation has already happened upstream, leaving
-    one row per group for which the ordinary weight is correct. It is a no-op
-    when no group labels are supplied.
+    ``"rescale"`` gives every row of a group the same weight, built from the
+    group's mean variance, so row multiplicity does not buy group influence.
+    These are the weights the correlated-effects model of
+    :footcite:t:`hedges2010robust` uses and the ones its tau^2 estimator is
+    derived under; see :func:`~pymare.stats.correlated_effects_weights`.
+    ``"collapse"`` returns None because the aggregation has already happened
+    upstream, leaving one row per group for which the ordinary weight is
+    correct. It is a no-op when no group labels are supplied.
+
+    References
+    ----------
+    .. footbibliography::
     """
     if weight_scheme in ("individual", "collapse") or groups is None:
         return None
 
-    return group_weights(v, groups, tau2=tau2)
+    return correlated_effects_weights(v, groups, tau2=tau2)
 
 
-def _validate_group_design(X, groups):
+def _tau2_model(groups, X, weight_scheme, correlated_effects=False):
+    """Name the reduction tau^2 will be estimated under.
+
+    Parameters
+    ----------
+    groups : None or :obj:`numpy.ndarray` of shape (K,)
+        Group labels, or None when no dependence was declared.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    weight_scheme : {"individual", "rescale", "collapse"}
+        The scheme requested by the caller.
+    correlated_effects : :obj:`bool`, optional
+        Whether the calling estimator has a published correlated-effects
+        counterpart of its tau^2 estimator. Only DerSimonian-Laird does; see
+        :func:`~pymare.stats.correlated_effects_tau2`. Default = False.
+
+    Returns
+    -------
+    :obj:`str`
+        One of ``TAU2_INDEPENDENT``, ``TAU2_CORRELATED`` or ``TAU2_AGGREGATE``.
+
+    Notes
+    -----
+    Single source of truth for a decision three places have to agree on: which
+    arrays tau^2 comes from, whether the design has to be constant within a
+    group, and which reduction the interval and Q in :mod:`pymare.results`
+    describe. Each of those used to re-derive it from ``weight_scheme``.
+    """
+    if weight_scheme not in ("rescale", "collapse") or groups is None:
+        return TAU2_INDEPENDENT
+    if encode_groups(np.asarray(groups).ravel())[1].size <= X.shape[1]:
+        # Too few groups to fit the reduced design; fall back to the raw rows
+        # rather than refusing to run. See _check_collapsed_design.
+        return TAU2_INDEPENDENT
+    if correlated_effects and weight_scheme == "rescale":
+        return TAU2_CORRELATED
+    return TAU2_AGGREGATE
+
+
+def _validate_group_design(X, groups, weight_scheme="collapse"):
     """Reject group aggregation when predictors vary within a group.
 
     Parameters
@@ -92,6 +195,10 @@ def _validate_group_design(X, groups):
         Fixed effect design matrix.
     groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
         Group labels, one per observation.
+
+    weight_scheme : {"collapse", "rescale"}, optional
+        The scheme that requested the reduction, named in the error message.
+        Default = "collapse".
 
     Raises
     ------
@@ -102,8 +209,14 @@ def _validate_group_design(X, groups):
     -----
     Collapsing a group to one row replaces its design values with their mean, so
     a predictor that varied within the group would silently change meaning: the
-    coefficient would answer a between-group question instead. ``"rescale"``
-    keeps every row and so has no such restriction.
+    coefficient would answer a between-group question instead.
+
+    ``"rescale"`` keeps every row when *fitting*, but every estimator except
+    DerSimonian-Laird still estimates tau^2 from the same one-row-per-group
+    reduction, so the restriction applies there too. DerSimonian-Laird is exempt
+    because it has a published correlated-effects estimator that works from the
+    observation-level design; see
+    :func:`~pymare.stats.correlated_effects_tau2`.
 
     The comparison uses a relative tolerance rather than bit-equality. A
     group-level predictor built by arithmetic -- a ratio, a centered score -- is
@@ -111,17 +224,26 @@ def _validate_group_design(X, groups):
     rejecting those designs for floating-point reasons would be wrong.
     """
     groups = np.asarray(groups).ravel()
-    codes, labels = encode_groups(groups, n_observations=groups.shape[0])
+    # Against the design's row count: passing groups.shape[0] made the check
+    # vacuous, and a mismatched label array then failed further down with an
+    # opaque boolean-indexing IndexError instead of naming the real problem.
+    codes, labels = encode_groups(groups, n_observations=X.shape[0])
     for group in range(labels.size):
         member_X = X[codes == group]
         # A relative tolerance, not bit-equality: a group-level predictor
         # built by arithmetic (a ratio, a centered score) is constant in intent
         # but can differ in the last bits across a group's rows.
         if not np.allclose(member_X, member_X[[0]], rtol=1e-10, atol=0.0):
+            reduction = (
+                "reduces the data to one row per group"
+                if weight_scheme == "collapse"
+                else "estimates tau^2 from one aggregate per group for this estimator"
+            )
             raise ValueError(
-                "weight_scheme='collapse' requires design values to be constant "
-                "within each group. Use weight_scheme='rescale' for predictors "
-                "that vary within a group."
+                f"weight_scheme='{weight_scheme}' {reduction}, which requires design "
+                "values to be constant within each group. DerSimonianLaird with "
+                "weight_scheme='rescale' estimates tau^2 from the correlated-effects "
+                "model instead, and has no such restriction."
             )
 
 
@@ -267,7 +389,7 @@ def _collapse_n_inputs(y, n, X, groups, weight_scheme, rho):
     return collapsed_y, collapsed_n, collapsed_X, collapsed_groups
 
 
-def _tau2_inputs(y, v, X, groups, weight_scheme, rho, by_n=False):
+def _tau2_inputs(y, v, X, groups, weight_scheme, rho, by_n=False, model=None):
     """Return the (y, v, X) that tau^2 should be estimated from.
 
     Parameters
@@ -287,6 +409,10 @@ def _tau2_inputs(y, v, X, groups, weight_scheme, rho, by_n=False):
     by_n : :obj:`bool`, optional
         Whether the second array holds sample sizes rather than variances.
         Default = False.
+    model : None or :obj:`str`, optional
+        The reduction resolved by :func:`_tau2_model`. Passed in by callers that
+        have already recorded it, so that the decision is made once.
+        Default = None, meaning resolve it here.
 
     Returns
     -------
@@ -305,13 +431,14 @@ def _tau2_inputs(y, v, X, groups, weight_scheme, rho, by_n=False):
     the two conditions are the same but only one of them is load-bearing. See that
     function's notes.
     """
-    if weight_scheme not in ("rescale", "collapse") or groups is None:
+    if model is None:
+        model = _tau2_model(groups, X, weight_scheme)
+    if model != TAU2_AGGREGATE:
         return y, v, X
 
-    n_groups = encode_groups(np.asarray(groups).ravel())[1].size
-    if n_groups <= X.shape[1]:
-        return y, v, X
-
+    # The aggregate replaces each group's predictors with their mean, which is
+    # only meaningful when they do not vary within the group.
+    _validate_group_design(X, groups, weight_scheme=weight_scheme)
     collapse = collapse_groups_by_n if by_n else collapse_groups
     return collapse(y, v, X, groups, rho=rho)
 
@@ -420,12 +547,10 @@ def _robust_cov_and_dof(y, v, X, beta, groups, tau2=0.0, model_cov=None, w=None)
     groups = np.asarray(groups).ravel()
     n_groups = encode_groups(groups, n_observations=y.shape[0])[1].size
     robust_cov = cluster_robust_cov(y, v, X, beta, groups, tau2=tau2, model_cov=model_cov, w=w)
-    weights = np.asarray(1.0 / (v + tau2) if w is None else w, dtype=float)
     # v may be a single shared column while y has many. cluster_robust_cov
     # broadcasts on entry; do the same here or the dof come back with v's
     # column count and no longer line up with fe_params.
-    if weights.ndim == 2 and weights.shape[1] != y.shape[1]:
-        weights = np.broadcast_to(weights, y.shape)
+    weights = broadcast_columns(1.0 / (v + tau2) if w is None else w, y.shape[1])
     # model_cov is only reusable when it is (X'WX)^-1 under these same weights.
     # Callers that cannot promise that must pass None, in which case
     # satterthwaite_dof rebuilds the bread from ``weights`` itself.
@@ -449,6 +574,12 @@ def _loopable(wrapped, instance, args, kwargs):
         args = ()
 
     n_iter = kwargs["y"].shape[1]
+    # A single column of v or n applies to every parallel dataset. Expand it
+    # once here so the loop below has one shape to slice, rather than each
+    # argument carrying its own convention.
+    for name in ("v", "n"):
+        if kwargs.get(name) is not None:
+            kwargs[name] = broadcast_columns(kwargs[name], n_iter)
     if n_iter > 10:
         warn(
             "Input contains {} parallel datasets (in 2nd dim of y and"
@@ -466,8 +597,7 @@ def _loopable(wrapped, instance, args, kwargs):
             iter_kwargs["v"] = kwargs["v"][:, i, None]
 
         if "n" in kwargs:
-            n = kwargs["n"][:, i, None] if kwargs["n"].shape[1] > 1 else kwargs["n"]
-            iter_kwargs["n"] = n
+            iter_kwargs["n"] = kwargs["n"][:, i, None]
 
         # Group labels are per-observation, not per-dataset, so they are shared
         # across iterates rather than sliced.
@@ -488,6 +618,26 @@ def _loopable(wrapped, instance, args, kwargs):
 
 class BaseEstimator(metaclass=ABCMeta):
     """A base class for Estimators."""
+
+    #: Declarative constraints on the constructor arguments, checked together by
+    #: :meth:`_validate_params`. Declaring them means a new parameter is
+    #: validated by adding a line here rather than by remembering to write a
+    #: check; ``weight_scheme`` was validated this way and ``rho`` was not.
+    _parameter_constraints = {}
+
+    def _validate_params(self):
+        """Check every declared constraint against the values just assigned.
+
+        Notes
+        -----
+        Called from ``__init__``, so a typo surfaces at construction rather than
+        after the caller has assembled a Dataset. That is the opposite of
+        scikit-learn's convention, which defers validation to ``fit`` because
+        ``set_params`` would otherwise bypass it -- a rationale that does not
+        apply here, since PyMARE estimators expose no ``set_params``.
+        """
+        for name, constraint in self._parameter_constraints.items():
+            constraint.check(name, getattr(self, name))
 
     # A class-level mapping from Dataset attributes to fit() arguments. Used by
     # fit_dataset() for estimators that take non-standard arguments (e.g., 'z'
@@ -612,9 +762,10 @@ class WeightedLeastSquares(BaseEstimator):
         size for correlated-effects robust estimation. ``"collapse"`` first
         reduces every group to one equal-weight mean and its correlated-mean
         variance. Default is ``"individual"``.
-    rho : :obj:`float`, optional
-        Assumed within-group correlation, used by the schemes that aggregate a
-        group. Default is 0.8.
+    rho : None or :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that model a
+        group. Must lie in [0, 1]. Setting it under ``"individual"``, which
+        models no correlation, warns. Default is None, meaning 0.8.
 
     Notes
     -----
@@ -630,16 +781,18 @@ class WeightedLeastSquares(BaseEstimator):
     .. footbibliography::
     """
 
+    _parameter_constraints = WEIGHTING_CONSTRAINTS
+
     def __init__(
         self,
         tau2=0.0,
         weight_scheme="individual",
-        rho=DEFAULT_RHO,
+        rho=None,
     ):
-        _check_weight_scheme(weight_scheme)
         self.tau2 = tau2
         self.weight_scheme = weight_scheme
-        self.rho = rho
+        self.rho = _resolve_rho(rho, weight_scheme)
+        self._validate_params()
 
     def fit(self, y, X, v=None, g=None):
         """Fit the estimator to data.
@@ -672,6 +825,7 @@ class WeightedLeastSquares(BaseEstimator):
         y, v, X, fit_groups = _collapse_inputs(
             ensure_2d(y), ensure_2d(v), X, g, self.weight_scheme, self.rho
         )
+        self.tau2_model_ = _tau2_model(fit_groups, X, self.weight_scheme, correlated_effects=True)
         w = _resolve_weights(v, fit_groups, self.tau2, self.weight_scheme)
         beta, model_cov = weighted_least_squares(y, v, X, self.tau2, return_cov=True, w=w)
         robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
@@ -699,9 +853,10 @@ class DerSimonianLaird(BaseEstimator):
     weight_scheme : {"individual", "rescale", "collapse"}, optional
         Row-level weighting, per-row weights divided by group size, or one
         aggregate per group. Default is ``"individual"``.
-    rho : :obj:`float`, optional
-        Assumed within-group correlation, used by the schemes that aggregate a
-        group. Default is 0.8.
+    rho : None or :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that model a
+        group. Must lie in [0, 1]. Setting it under ``"individual"``, which
+        models no correlation, warns. Default is None, meaning 0.8.
 
     Notes
     -----
@@ -715,10 +870,12 @@ class DerSimonianLaird(BaseEstimator):
     .. footbibliography::
     """
 
-    def __init__(self, weight_scheme="individual", rho=DEFAULT_RHO):
-        _check_weight_scheme(weight_scheme)
+    _parameter_constraints = WEIGHTING_CONSTRAINTS
+
+    def __init__(self, weight_scheme="individual", rho=None):
         self.weight_scheme = weight_scheme
-        self.rho = rho
+        self.rho = _resolve_rho(rho, weight_scheme)
+        self._validate_params()
 
     def fit(self, y, v, X, g=None):
         """Fit the estimator to data.
@@ -735,9 +892,11 @@ class DerSimonianLaird(BaseEstimator):
             Group labels marking dependent estimates. If provided,
             standard errors are computed with the cluster-robust estimator of
             :footcite:t:`hedges2010robust` instead of the model-based one.
-            With ``weight_scheme`` set to ``"rescale"`` or ``"collapse"``,
-            tau^2 is estimated from one aggregate per group. ``"collapse"`` also
-            fits the fixed effects to those aggregates.
+            With ``weight_scheme="rescale"`` tau^2 comes from the
+            correlated-effects estimator of
+            :func:`~pymare.stats.correlated_effects_tau2`, which reads the
+            observation-level design. ``"collapse"`` instead reduces every group
+            to one row and fits both tau^2 and the coefficients to those.
 
         Returns
         -------
@@ -753,16 +912,25 @@ class DerSimonianLaird(BaseEstimator):
             y, v, X, g, self.weight_scheme, self.rho
         )
 
-        tau_dl = _dersimonian_laird_tau2(
-            *_tau2_inputs(
-                model_y,
-                model_v,
-                model_X,
-                model_groups,
-                self.weight_scheme,
-                self.rho,
-            )
+        self.tau2_model_ = _tau2_model(
+            model_groups, model_X, self.weight_scheme, correlated_effects=True
         )
+        if self.tau2_model_ == TAU2_CORRELATED:
+            # The correlated-effects generalization of this estimator's own
+            # method of moments, from the observation-level design.
+            tau_dl = correlated_effects_tau2(model_y, model_v, model_X, model_groups, rho=self.rho)
+        else:
+            tau_dl = _dersimonian_laird_tau2(
+                *_tau2_inputs(
+                    model_y,
+                    model_v,
+                    model_X,
+                    model_groups,
+                    self.weight_scheme,
+                    self.rho,
+                    model=self.tau2_model_,
+                )
+            )
 
         # Re-estimate beta with tau^2 estimate
         w = _resolve_weights(model_v, model_groups, tau_dl, self.weight_scheme)
@@ -801,9 +969,10 @@ class Hedges(BaseEstimator):
     weight_scheme : {"individual", "rescale", "collapse"}, optional
         Row-level weighting, per-row weights divided by group size, or one
         aggregate per group. Default is ``"individual"``.
-    rho : :obj:`float`, optional
-        Assumed within-group correlation, used by the schemes that aggregate a
-        group. Default is 0.8.
+    rho : None or :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that model a
+        group. Must lie in [0, 1]. Setting it under ``"individual"``, which
+        models no correlation, warns. Default is None, meaning 0.8.
 
     Notes
     -----
@@ -831,10 +1000,12 @@ class Hedges(BaseEstimator):
     .. footbibliography::
     """
 
-    def __init__(self, weight_scheme="individual", rho=DEFAULT_RHO):
-        _check_weight_scheme(weight_scheme)
+    _parameter_constraints = WEIGHTING_CONSTRAINTS
+
+    def __init__(self, weight_scheme="individual", rho=None):
         self.weight_scheme = weight_scheme
-        self.rho = rho
+        self.rho = _resolve_rho(rho, weight_scheme)
+        self._validate_params()
 
     def fit(self, y, v, X, g=None):
         """Fit the estimator to data.
@@ -852,8 +1023,11 @@ class Hedges(BaseEstimator):
             standard errors are computed with the cluster-robust estimator of
             :footcite:t:`hedges2010robust` instead of the model-based one.
             With ``weight_scheme`` set to ``"rescale"`` or ``"collapse"``,
-            tau^2 is estimated from one aggregate per group. ``"collapse"`` also
-            fits the fixed effects to those aggregates.
+            tau^2 is estimated from one aggregate per group, which requires the
+            design to be constant within a group. ``"collapse"`` also fits the
+            fixed effects to those aggregates. Use
+            :class:`~pymare.estimators.DerSimonianLaird` for a design that varies
+            within a group.
 
         Returns
         -------
@@ -868,6 +1042,7 @@ class Hedges(BaseEstimator):
             y, v, X, g, self.weight_scheme, self.rho
         )
 
+        self.tau2_model_ = _tau2_model(model_groups, model_X, self.weight_scheme)
         tau_y, tau_v, tau_X = _tau2_inputs(
             model_y,
             model_v,
@@ -875,6 +1050,7 @@ class Hedges(BaseEstimator):
             model_groups,
             self.weight_scheme,
             self.rho,
+            model=self.tau2_model_,
         )
         tau_k, tau_p = tau_X.shape[:2]
         # tau^2 is the excess of the *unweighted* mean squared error over the
@@ -930,9 +1106,10 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
     weight_scheme : {"individual", "rescale", "collapse"}, optional
         Row-level weighting, per-row weights divided by group size, or one
         aggregate per group. Default is ``"individual"``.
-    rho : :obj:`float`, optional
-        Assumed within-group correlation, used by the schemes that aggregate a
-        group. Default is 0.8.
+    rho : None or :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that model a
+        group. Must lie in [0, 1]. Setting it under ``"individual"``, which
+        models no correlation, warns. Default is None, meaning 0.8.
     **kwargs
         Keyword arguments to pass to the SciPy minimizer.
 
@@ -947,10 +1124,12 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
     .. footbibliography::
     """
 
-    def __init__(self, method="ml", weight_scheme="individual", rho=DEFAULT_RHO, **kwargs):
-        _check_weight_scheme(weight_scheme)
+    _parameter_constraints = WEIGHTING_CONSTRAINTS
+
+    def __init__(self, method="ml", weight_scheme="individual", rho=None, **kwargs):
         self.weight_scheme = weight_scheme
-        self.rho = rho
+        self.rho = _resolve_rho(rho, weight_scheme)
+        self._validate_params()
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
             raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
@@ -994,6 +1173,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         # The likelihood treats every row as independent, so tau^2 is fitted
         # on one effect per group to avoid counting a group's repeated
         # estimates as independent evidence.
+        self.tau2_model_ = _tau2_model(model_groups, model_X, self.weight_scheme)
         fit_y, fit_v, fit_X = _tau2_inputs(
             model_y,
             model_v,
@@ -1001,6 +1181,7 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
             model_groups,
             self.weight_scheme,
             self.rho,
+            model=self.tau2_model_,
         )
 
         # use D-L estimate for initial values
@@ -1081,11 +1262,13 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         Default = 'ML'.
     weight_scheme : {"individual", "rescale", "collapse"}, optional
         Row-level, correlated-effects, or one-aggregate-per-group weighting.
-        In ``"collapse"`` mode, repeated rows must supply an identical ``n``
-        within each group. Default is ``"individual"``.
-    rho : :obj:`float`, optional
-        Assumed within-group correlation, used by the schemes that aggregate a
-        group. Default is 0.8.
+        In ``"collapse"`` mode a group's rows are replaced by one row carrying
+        the effective sample size ``s*n / (1 + rho(s-1))``, so their ``n`` may
+        differ. Default is ``"individual"``.
+    rho : None or :obj:`float`, optional
+        Assumed within-group correlation, used by the schemes that model a
+        group. Must lie in [0, 1]. Setting it under ``"individual"``, which
+        models no correlation, warns. Default is None, meaning 0.8.
     **kwargs
         Keyword arguments to pass to the SciPy minimizer.
 
@@ -1102,10 +1285,12 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
     .. footbibliography::
     """
 
-    def __init__(self, method="ml", weight_scheme="individual", rho=DEFAULT_RHO, **kwargs):
-        _check_weight_scheme(weight_scheme)
+    _parameter_constraints = WEIGHTING_CONSTRAINTS
+
+    def __init__(self, method="ml", weight_scheme="individual", rho=None, **kwargs):
         self.weight_scheme = weight_scheme
-        self.rho = rho
+        self.rho = _resolve_rho(rho, weight_scheme)
+        self._validate_params()
         nll_func = getattr(self, "_{}_nll".format(method.lower()))
         if nll_func is None:
             raise ValueError("No log-likelihood function defined for method '{}'.".format(method))
@@ -1150,6 +1335,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         # Both variance components are fitted on one effect per group; a
         # a group's repeated estimates agree with each other by construction, and
         # counting them as independent shrinks sigma^2 toward zero.
+        self.tau2_model_ = _tau2_model(model_groups, model_X, self.weight_scheme)
         fit_y, fit_n, fit_X = _tau2_inputs(
             model_y,
             model_n,
@@ -1158,6 +1344,7 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
             self.weight_scheme,
             self.rho,
             by_n=True,
+            model=self.tau2_model_,
         )
 
         # sigma^2 and tau^2 are separately identified only when the sample

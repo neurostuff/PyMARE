@@ -18,6 +18,10 @@ except ImportError:
 
 from pymare.stats import (
     DEFAULT_RHO,
+    TAU2_AGGREGATE,
+    TAU2_CORRELATED,
+    TAU2_INDEPENDENT,
+    broadcast_columns,
     collapse_groups,
     collapse_groups_by_n,
     encode_groups,
@@ -32,17 +36,17 @@ def _expand_unit_order(order, group_codes, n_obs):
     Parameters
     ----------
     order : :obj:`numpy.ndarray` of shape (m,)
-        A permutation of the exchangeable units.
+        A permutation of the exchangeable units. ``order[k]`` is the unit whose
+        estimates are moved onto unit ``k``'s rows.
     group_codes : None or :obj:`numpy.ndarray` of shape (K,)
         Consecutive group codes, one per row, or None when rows are the units.
     n_obs : :obj:`int`
-        Number of rows. Unused when ``group_codes`` is None beyond documenting
-        the expected length.
+        Number of rows.
 
     Returns
     -------
-    :obj:`numpy.ndarray`
-        Row indices realising ``order``, with each group's rows kept together.
+    :obj:`numpy.ndarray` of shape (K,)
+        Row indices realising ``order`` while leaving the group layout alone.
 
     Notes
     -----
@@ -50,11 +54,69 @@ def _expand_unit_order(order, group_codes, n_obs):
     move whole groups rather than individual rows. Shuffling rows independently
     generates datasets that could not have arisen under the null and builds a
     reference distribution that is far too narrow.
+
+    The refit is vectorized over permutations and therefore sees one design and
+    one set of group labels for every column, so a permutation may only move a
+    group's estimates onto rows that carry the same label as each other. Writing
+    each source group into the *positions* of the group it replaces preserves
+    that, whereas concatenating groups in the permuted order does not: it assumes
+    the labels are contiguous and equally sized, and silently splits a group
+    across two labels otherwise -- for interleaved labels even under the identity
+    permutation. :func:`_exchangeable_unit_classes` supplies the permutations for
+    which the sizes line up.
     """
     if group_codes is None:
         return order
     members = [np.flatnonzero(group_codes == unit) for unit in range(order.size)]
-    return np.concatenate([members[unit] for unit in order])
+    rows = np.empty(n_obs, dtype=np.intp)
+    for unit, source in enumerate(order):
+        rows[members[unit]] = members[source]
+    return rows
+
+
+def _exchangeable_unit_classes(group_codes, n_units):
+    """Split the exchangeable units into sets that may be permuted with each other.
+
+    Parameters
+    ----------
+    group_codes : None or :obj:`numpy.ndarray` of shape (K,)
+        Consecutive group codes, one per row, or None when rows are the units.
+    n_units : :obj:`int`
+        Number of exchangeable units.
+
+    Returns
+    -------
+    :obj:`list` of :obj:`numpy.ndarray`
+        Unit indices, partitioned by the number of rows each unit contributes.
+
+    Notes
+    -----
+    A permuted dataset is refit against the original group labels, so a group of
+    three rows can only take the place of another group of three rows. Groups of
+    equal size -- the usual case, and the only one the enumeration used to
+    consider -- form a single class and give the full ``m!`` permutations back.
+    """
+    if group_codes is None:
+        return [np.arange(n_units)]
+    sizes = np.bincount(group_codes, minlength=n_units)
+    return [np.flatnonzero(sizes == size) for size in np.unique(sizes)]
+
+
+def _iter_unit_orders(classes, n_units):
+    """Enumerate every permutation that keeps each unit within its size class."""
+    for assignment in itertools.product(*(itertools.permutations(c.tolist()) for c in classes)):
+        order = np.empty(n_units, dtype=np.intp)
+        for positions, sources in zip(classes, assignment):
+            order[positions] = sources
+        yield order
+
+
+def _random_unit_order(classes, n_units):
+    """Draw one permutation that keeps each unit within its size class."""
+    order = np.empty(n_units, dtype=np.intp)
+    for positions in classes:
+        order[positions] = np.random.permutation(positions)
+    return order
 
 
 class MetaRegressionResults:
@@ -94,48 +156,48 @@ class MetaRegressionResults:
         self.fe_cov = fe_cov
         self.tau2 = tau2
 
-    def _collapses_to_groups(self, groups, n_preds):
-        """Whether result statistics should use one aggregate per group.
-
-        Parameters
-        ----------
-        groups : None or :obj:`numpy.ndarray` of shape (K,)
-            Group labels from the Dataset, or None.
-        n_preds : :obj:`int`
-            Number of predictors, used for the same fallback the estimator uses.
+    def _tau2_model(self):
+        """Return the working model the estimator recorded for tau^2.
 
         Returns
         -------
-        :obj:`bool`
-            True when the estimator estimated tau^2 from aggregated rows.
+        :obj:`str`
+            One of ``TAU2_INDEPENDENT``, ``TAU2_CORRELATED`` or
+            ``TAU2_AGGREGATE``; see :data:`pymare.stats.TAU2_INDEPENDENT`.
 
         Notes
         -----
-        This has to match the condition the estimator used for tau^2, which is
-        ``_tau2_inputs``: both ``"rescale"`` and ``"collapse"`` estimate tau^2
-        from one effect per group, and both fall back to the raw rows when there
-        are too few groups to fit the design.
-
-        Testing only for ``"collapse"`` here left ``"rescale"`` reporting a tau^2
-        taken from collapsed data alongside a confidence interval, Q, I^2 and H
-        taken from the raw rows -- so the point estimate could fall outside its
-        own interval. When two functions must agree about a reduction, the durable
-        fix is to make the agreement structural rather than to patch one side.
+        Read from the fitted estimator rather than re-derived from
+        ``weight_scheme`` here. The two used to be worked out independently, and
+        the interval, Q and the permutation null could each describe a different
+        set of units from the tau^2 they accompanied. Estimators that predate the
+        attribute, or that were fitted to arrays alone, report independence.
         """
-        if groups is None:
-            return False
-        if getattr(self.estimator, "weight_scheme", None) not in ("rescale", "collapse"):
-            return False
-        return np.unique(np.asarray(groups).ravel()).size > n_preds
+        return getattr(self.estimator, "tau2_model_", TAU2_INDEPENDENT)
 
     def _analysis_arrays(self):
-        """Return the independent-unit arrays used by result statistics."""
+        """Return the units and weighting that result statistics must describe.
+
+        Returns
+        -------
+        :obj:`tuple`
+            ``(y, v, X, groups)``. ``groups`` is None unless the statistics have
+            to be computed under the correlated-effects working model, in which
+            case every row is kept and :func:`~pymare.stats.q_gen` reweights them
+            rather than aggregating.
+        """
         y = self.dataset.y
-        v = self.estimator.get_v(self.dataset)
+        v = broadcast_columns(self.estimator.get_v(self.dataset), y.shape[1])
         X = self.dataset.X
         groups = getattr(self.dataset, "g", None)
-        if not self._collapses_to_groups(groups, X.shape[1]):
-            return y, v, X
+        model = self._tau2_model()
+
+        if model == TAU2_CORRELATED:
+            # tau^2 came from the observation-level correlated-effects model, so
+            # Q and the interval have to as well; q_gen applies the same weights.
+            return y, v, X, np.asarray(groups).ravel()
+        if model != TAU2_AGGREGATE:
+            return y, v, X, None
 
         # Collapse the same way the estimator did. Sample-size-based
         # estimators aggregate on n, so reduce n and derive v from it rather
@@ -149,16 +211,31 @@ class MetaRegressionResults:
             sigma2 = np.asarray(self.estimator.params_["sigma2"], dtype=float)
             y, n, X = collapse_groups_by_n(y, self.dataset.n, X, groups, rho=rho)
             v = sigma2 / n
-        return y, v, X
+        return y, v, X, None
 
     def _permutation_arrays(self):
-        """Return estimator inputs reduced to independent groups."""
+        """Return the estimator inputs the permutation refit must reproduce.
+
+        Notes
+        -----
+        This is a narrower condition than :meth:`_tau2_model`, which also has a
+        reduction to report for ``"rescale"``. A permutation test compares the
+        observed statistic against the same statistic recomputed on permuted
+        data, so the arrays here have to be the ones the estimator actually
+        fitted. Only ``"collapse"`` fits one row per group; ``"rescale"`` keeps
+        every row and only reweights it. Collapsing for ``"rescale"`` built the
+        null from a different model than the observed coefficient, so the two
+        disagreed whenever predictors or variances varied within a group.
+        """
         y = self.dataset.y
         X = self.dataset.X
         groups = getattr(self.dataset, "g", None)
         has_v = "v" in getfullargspec(self.estimator.fit).args[1:]
         second = self.dataset.v if has_v else self.dataset.n
-        if self._collapses_to_groups(groups, X.shape[1]):
+        fits_one_row_per_group = (
+            getattr(self.estimator, "weight_scheme", None) == "collapse" and groups is not None
+        )
+        if fits_one_row_per_group:
             rho = getattr(self.estimator, "rho", DEFAULT_RHO)
             if has_v:
                 y, second, X = collapse_groups(y, second, X, groups, rho=rho)
@@ -339,7 +416,7 @@ class MetaRegressionResults:
                 )
 
             # Make sure we have an estimate of v if it wasn't observed
-            analysis_y, v, analysis_X = self._analysis_arrays()
+            analysis_y, v, analysis_X, analysis_groups = self._analysis_arrays()
 
             cis = []
             for i in range(n_datasets):
@@ -348,6 +425,7 @@ class MetaRegressionResults:
                     "v": v[:, i],
                     "X": analysis_X,
                     "alpha": alpha,
+                    "groups": analysis_groups,
                 }
 
                 try:
@@ -404,9 +482,12 @@ class MetaRegressionResults:
         if self.dataset is None:
             raise ValueError("The Dataset is unavailable. This method requires a Dataset.")
 
-        y, v, X = self._analysis_arrays()
-        q_fe = q_gen(y, v, X, 0)
-        df = y.shape[0] - X.shape[1]
+        y, v, X, groups = self._analysis_arrays()
+        q_fe = q_gen(y, v, X, 0, groups)
+        # Q counts independent units, which is one per group whichever way the
+        # dependence was modelled: by aggregating the rows or by reweighting them.
+        n_units = y.shape[0] if groups is None else encode_groups(groups)[1].size
+        df = n_units - X.shape[1]
         if df <= 0:
             # Collapsing to one row per group makes df = m - p, which reaches
             # zero far more easily than the old K - p. Q is then identically
@@ -512,6 +593,7 @@ class MetaRegressionResults:
             self._permutation_arrays()
         )
         n_obs, n_datasets = analysis_y.shape
+        analysis_second = broadcast_columns(analysis_second, n_datasets)
         has_mods = analysis_X.shape[1] > 1
 
         # Rows sharing a group label are dependent, so they are exchangeable
@@ -533,9 +615,11 @@ class MetaRegressionResults:
         # value, but the latter also profiles the Q statistic for a confidence
         # interval that is never read, which dominates the runtime here when
         # there are many parallel datasets.
-        tau2 = self.tau2
-        if not isinstance(tau2, (list, tuple, np.ndarray)):
-            tau2 = np.full(n_datasets, tau2)
+        # (D,) whatever the estimator reported: the looping estimators return
+        # tau^2 as (1, D), so indexing it per dataset used to take a whole row.
+        tau2 = np.asarray(self.tau2, dtype=float).reshape(-1)
+        if tau2.size == 1 and n_datasets > 1:
+            tau2 = np.repeat(tau2, n_datasets)
 
         # create results arrays
         fe_p = np.zeros_like(self.fe_params)
@@ -544,10 +628,23 @@ class MetaRegressionResults:
 
         # Calculate # of permutations and determine whether to use exact test
         if has_mods:
-            n_exact = math.factorial(n_units)
+            # Only groups of equal size may swap places; see _expand_unit_order.
+            unit_classes = _exchangeable_unit_classes(group_codes, n_units)
+            n_exact = math.prod(math.factorial(unit.size) for unit in unit_classes)
+            if group_codes is not None and n_exact == 1:
+                raise ValueError(
+                    "No non-trivial permutation of the groups exists: every group "
+                    "contributes a different number of rows, and a permuted dataset "
+                    "is refit against the original labels, so a group can only take "
+                    "the place of an equally sized one. Use weight_scheme='collapse' "
+                    "to reduce each group to one row, which makes all groups "
+                    "exchangeable."
+                )
         else:
             n_exact = 2**n_units
-            if n_exact < n_perm:
+            # The same inclusive condition as `exact` below; on the strict one
+            # these were left undefined at exactly n_perm == 2**m.
+            if n_exact <= n_perm:
                 perms = np.array(list(itertools.product([-1, 1], repeat=n_units))).T
 
         # <=, not <: at n_perm == 2**m the exhaustive test costs the same as
@@ -562,8 +659,7 @@ class MetaRegressionResults:
             y_perm = np.repeat(y[:, None], n_perm, axis=1)
 
             # for v, we might actually be working with n, depending on estimator
-            second_column = i if analysis_second.shape[1] > 1 else 0
-            v = analysis_second[:, second_column]
+            v = analysis_second[:, i]
 
             v_perm = np.repeat(v[:, None], n_perm, axis=1)
 
@@ -572,9 +668,9 @@ class MetaRegressionResults:
                 # them independently would break the (y_i, v_i) pairing and
                 # widen the null on top of the dependence problem.
                 unit_order = (
-                    itertools.permutations(range(n_units))
+                    _iter_unit_orders(unit_classes, n_units)
                     if exact
-                    else (np.random.permutation(n_units) for _ in range(n_perm))
+                    else (_random_unit_order(unit_classes, n_units) for _ in range(n_perm))
                 )
                 for j, order in enumerate(unit_order):
                     rows = _expand_unit_order(np.asarray(order), group_codes, n_obs)
@@ -710,8 +806,9 @@ class CombinationTestResults:
         # Dependence-labelled rows are exchangeable only as complete groups.
         if groups is not None:
             groups = np.asarray(groups).ravel()
-            _, group_codes = np.unique(groups, return_inverse=True)
-            n_units = np.unique(group_codes).size
+            # encode_groups, not np.unique: labels only have to be hashable.
+            group_codes, group_labels = encode_groups(groups, n_observations=n_obs)
+            n_units = group_labels.size
         else:
             group_codes = None
             n_units = n_obs
@@ -740,7 +837,13 @@ class CombinationTestResults:
         # estimated at all.
         permutation_corr = getattr(self.estimator, "corr_", None)
         if permutation_corr is None and groups is not None and n_datasets > 1:
-            observed = self.dataset.y - self.dataset.y.mean(0)
+            # Skip the centering when every row is identical, exactly as both
+            # estimators do. Centering those rows leaves zeros, whose correlation
+            # is undefined and would be frozen as the identity -- while the fit
+            # being tested read the same rows as perfectly correlated.
+            y_obs = self.dataset.y
+            all_rows_same = np.all(np.equal(y_obs, y_obs[0]), axis=0).all()
+            observed = y_obs if all_rows_same else y_obs - y_obs.mean(0)
             with np.errstate(invalid="ignore", divide="ignore"):
                 permutation_corr = np.corrcoef(observed, rowvar=True)
             permutation_corr = np.where(np.isfinite(permutation_corr), permutation_corr, 0.0)

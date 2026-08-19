@@ -1,6 +1,9 @@
 """Data for tests."""
 
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import pytest
 
 from pymare import Dataset
@@ -152,18 +155,25 @@ def dependent_data():
     ids=["WLS", "DL", "HE", "ML", "SSML"],
 )
 def grouped_estimator(request, dependent_data):
-    """Pair an estimator with a builder for the fit kwargs it accepts."""
+    """Pair an estimator with the argument it takes and a builder for its kwargs.
+
+    ``_inputs(shared_second=True)`` supplies that argument as a single column,
+    which every estimator has to read as applying to all parallel datasets.
+    """
     estimator, second_arg = request.param
 
-    def _inputs(**kwargs):
+    def _inputs(shared_second=False, **kwargs):
         y, v, X, groups = dependent_data(np.random.RandomState(0), **kwargs)
         if second_arg == "v":
-            return {"y": y, "v": v, "X": X}, groups
-        # Sample sizes must vary for the sample-size-based estimator.
-        sizes = np.random.RandomState(1).randint(20, 200, size=y.shape).astype(float)
-        return {"y": y, "n": sizes, "X": X}, groups
+            second = v
+        else:
+            # Sample sizes must vary for the sample-size-based estimator.
+            second = np.random.RandomState(1).randint(20, 200, size=y.shape).astype(float)
+        if shared_second:
+            second = second[:, :1]
+        return {"y": y, second_arg: second, "X": X}, groups
 
-    return estimator, _inputs
+    return estimator, second_arg, _inputs
 
 
 @pytest.fixture(scope="package")
@@ -251,3 +261,18 @@ def block_correlation():
         return corr, groups
 
     return _build
+
+
+@pytest.fixture(scope="package")
+def robumeta_dataset():
+    """Load the dataset the robumeta reference values were computed on."""
+    frame = pd.read_csv(Path(__file__).parent / "data" / "robumeta_correlated_effects.csv")
+    n_estimates = len(frame)
+    designs = {
+        "intercept": np.ones((n_estimates, 1)),
+        "within": np.c_[np.ones(n_estimates), frame["within"].to_numpy()],
+        "both": np.c_[
+            np.ones(n_estimates), frame["within"].to_numpy(), frame["between"].to_numpy()
+        ],
+    }
+    return frame, designs

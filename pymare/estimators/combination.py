@@ -229,13 +229,16 @@ class StoufferCombinationTest(CombinationTest):
             if corr.shape != (z.shape[0], z.shape[0]):
                 raise ValueError(f"Correlation matrix must have shape {(z.shape[0], z.shape[0])}.")
 
-        unique_groups = np.unique(groups)
-        group_z = np.empty((unique_groups.size, z.shape[1]), dtype=float)
+        # encode_groups, not np.unique: labels only have to be hashable, and
+        # np.unique needs an ordering, so a mix of str and int labels -- which
+        # Dataset and the regression estimators accept -- raised TypeError here.
+        group_codes, group_labels = encode_groups(groups, n_observations=z.shape[0])
+        group_z = np.empty((group_labels.size, z.shape[1]), dtype=float)
         group_w = np.empty_like(group_z)
         centered = z if np.all(z == z[0]) else z - z.mean(axis=0)
 
-        for group_idx, group in enumerate(unique_groups):
-            members = np.flatnonzero(groups == group)
+        for group_idx in range(group_labels.size):
+            members = np.flatnonzero(group_codes == group_idx)
             member_w = w[members]
             if not np.allclose(member_w, member_w[[0]], rtol=1e-12, atol=1e-15):
                 raise ValueError(
@@ -283,8 +286,11 @@ class StoufferCombinationTest(CombinationTest):
 
         Returns
         -------
-        sigma : float
-            The variance inflation term.
+        sigma : :obj:`numpy.ndarray` of shape (d,) or (1,)
+            The variance inflation term, one per feature. Weights may differ by
+            feature, and the diagonal term ``(w**2).sum(0)`` this is added to is
+            already per feature, so collapsing it to a scalar taken from the
+            first column understated or overstated every other column.
         """
         # Only center if the samples are not all the same, to prevent division by zero
         # when calculating the correlation matrix.
@@ -292,16 +298,18 @@ class StoufferCombinationTest(CombinationTest):
         all_samples_same = np.all(np.equal(z, z[0]), axis=0).all()
         z = z if all_samples_same else z - z.mean(0)
 
-        # Use the value from one feature, as all features have the same groups and weights
+        # Groups are the same for every feature; weights are not, so keep their
+        # column axis and return one inflation term per feature.
         groups = np.asarray(g).reshape(g.shape[0], -1)[:, 0]
-        weights = np.asarray(w).reshape(w.shape[0], -1)[:, 0]
+        weights = np.asarray(w, dtype=float).reshape(w.shape[0], -1)
 
-        # Loop over groups
-        unique_groups = np.unique(groups)
+        # Loop over groups, encoded rather than sorted so that any hashable
+        # label works, as encode_groups documents and Dataset allows.
+        group_codes, group_labels = encode_groups(groups, n_observations=z.shape[0])
 
-        sigma = 0
-        for group in unique_groups:
-            group_indices = np.where(groups == group)[0]
+        sigma = np.zeros(weights.shape[1])
+        for group in range(group_labels.size):
+            group_indices = np.flatnonzero(group_codes == group)
             group_z = z[group_indices]
 
             # For groups with only one sample the contribution to the summand is 0
@@ -328,7 +336,7 @@ class StoufferCombinationTest(CombinationTest):
             group_weights = weights[group_indices]
             w_i, w_j = group_weights[upper_indices[0]], group_weights[upper_indices[1]]
 
-            sigma += (2 * w_i * w_j * non_diag_corr).sum()
+            sigma += (2 * w_i * w_j * non_diag_corr[:, None]).sum(axis=0)
 
         return sigma
 
@@ -573,8 +581,9 @@ class FisherCombinationTest(CombinationTest):
         all_samples_same = np.all(np.equal(z, z[0]), axis=0).all()
         z_centered = z if all_samples_same else z - z.mean(0)
 
-        for group in np.unique(groups):
-            group_indices = np.where(groups == group)[0]
+        group_codes, group_labels = encode_groups(groups, n_observations=n_observations)
+        for group in range(group_labels.size):
+            group_indices = np.flatnonzero(group_codes == group)
 
             # Groups with a single sample contribute nothing.
             n_samples = len(group_indices)

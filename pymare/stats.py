@@ -42,6 +42,14 @@ _MIN_LEVERAGE_COMPLEMENT = 1e-10
 # is the conventional choice for correlated effects.
 DEFAULT_RHO = 0.8
 
+#: How an estimator obtained tau^2. Recorded on the fitted estimator as
+#: ``tau2_model_`` so that :mod:`pymare.results` uses the same reduction for the
+#: interval and for Q instead of re-deriving it from the weight scheme and
+#: drifting out of step with it.
+TAU2_INDEPENDENT = "independent"
+TAU2_AGGREGATE = "aggregate"
+TAU2_CORRELATED = "correlated-effects"
+
 
 class WeightedInterceptCR2Statistics(NamedTuple):
     """Reusable sufficient statistics for signed intercept-only CR2 tests."""
@@ -51,6 +59,37 @@ class WeightedInterceptCR2Statistics(NamedTuple):
     adjusted_sum_squares: np.ndarray
     adjusted_weight_sum: float
     total_weight: float
+
+
+def broadcast_columns(arr, n_datasets):
+    """Expand a single shared column to one column per parallel dataset.
+
+    Parameters
+    ----------
+    arr : None or :obj:`numpy.ndarray` of shape (K, 1) or (K, D)
+        A per-observation quantity such as ``v``, ``n`` or a weight array.
+    n_datasets : :obj:`int`
+        The number of parallel datasets the caller is working with.
+
+    Returns
+    -------
+    None or :obj:`numpy.ndarray` of shape (K, D)
+        A read-only view when a shared column was expanded, else the input.
+
+    Notes
+    -----
+    A single column applies to every parallel dataset, which is what NumPy's own
+    broadcasting rules say about a length-one axis. Normalizing once, at the
+    boundary, leaves the code downstream with exactly one shape to reason about.
+    Re-deriving the convention at each site is what left the looping estimators
+    honouring it for ``n`` and not for ``v``.
+    """
+    if arr is None:
+        return None
+    arr = ensure_2d(np.asarray(arr, dtype=float))
+    if arr.shape[1] == 1 and n_datasets > 1:
+        return np.broadcast_to(arr, (arr.shape[0], n_datasets))
+    return arr
 
 
 def encode_groups(groups, n_observations=None):
@@ -213,8 +252,8 @@ def weighted_intercept_cr2(signs, sufficient_statistics):
     return statistics
 
 
-def group_weights(v, groups, tau2=0.0):
-    r"""Rescale inverse-variance weights so replication does not buy influence.
+def correlated_effects_weights(v, groups, tau2=0.0):
+    r"""Weight rows so that a group's total does not grow with its row count.
 
     Parameters
     ----------
@@ -223,73 +262,177 @@ def group_weights(v, groups, tau2=0.0):
     groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
         Group labels, one per estimate. Any hashable labels are accepted.
     tau2 : :obj:`float` or :obj:`numpy.ndarray`, optional
-        tau^2 estimate to use for the weights.
-        Default = 0.
+        tau^2 estimate to fold into the weights. Default = 0.
 
     Returns
     -------
     :obj:`numpy.ndarray` of shape (K, D)
-        The rescaled weights, one per input row.
+        One weight per row, constant within each group.
 
     See Also
     --------
+    correlated_effects_tau2 : The tau^2 estimator derived under these weights.
     collapse_groups : Reduces each group to a single row instead of reweighting
         its rows, which is the stricter alternative when exact invariance to row
         count is required.
 
     Notes
     -----
-    The ordinary weight :math:`1 / (v_i + \tau^2)` gives a group that
-    contributed :math:`n_j` estimates :math:`n_j` times the pull of a group that
-    contributed one, because the weights of its members are summed. Dividing
-    each weight by its group size,
+    Every row of group :math:`j` receives the same weight, built from the
+    group's mean variance :math:`\bar{v}_j`:
 
     .. math::
-        w_i = \frac{1}{n_j (v_i + \tau^2)},
+        w_{ij} = \frac{1}{n_j(\bar{v}_j + \tau^2)},
 
-    makes a group's total weight the *mean* of its members' weights rather than
-    their sum, so a group's say no longer grows with its row count while
-    genuinely more precise groups still count more.
+    which is equation (7) of :footcite:t:`fisher2015robumeta` and the weighting
+    the R package `robumeta <https://cran.r-project.org/package=robumeta>`_
+    applies for the correlated effects model of :footcite:t:`hedges2010robust`.
+    A group's weights therefore sum to :math:`1/(\bar{v}_j + \tau^2)` however
+    many rows it contributed, so replication cannot buy influence.
 
-    This follows the "correlated effects" weighting of
-    :footcite:t:`hedges2010robust`, but is not identical to the version in the R
-    package `robumeta <https://cran.r-project.org/package=robumeta>`_
-    :footcite:p:`fisher2015robumeta`, which assigns every row in a group the
-    *same* weight, built from the group's mean variance:
+    The alternative -- keeping each row's own :math:`1/v_i` and dividing by the
+    group size -- is more efficient when within-group variance differences are
+    genuine, but a group's total is then the *mean of inverse variances*, which
+    is unbounded in a single row: one variance reported a thousand times too
+    small hands that group almost all of the weight in the analysis. This form
+    is bounded by the group's other rows, is the model the tau^2 estimator is
+    derived under, and is what the correlated effects model assumes in the first
+    place, since dependence arising from shared units implies
+    :math:`v_{ij} \approx v_j`.
 
-    .. math::
-        w_{ij}^{\text{robumeta}} = \frac{1}{n_j(\bar{v}_j + \tau^2)},
-        \qquad \bar{v}_j = \frac{1}{n_j}\sum_i v_{ij}.
-
-    The two agree exactly for singleton groups and for groups whose ``v`` is
-    constant, and differ otherwise: this function's group total is
-    :math:`\operatorname{mean}_i(1/v_i)` while robumeta's is
-    :math:`1/\operatorname{mean}_i(v_i)`, so by the arithmetic-harmonic mean
-    inequality this function never gives a group *less* total weight than
-    robumeta does. Keeping the row-specific :math:`v_i` preserves genuine
-    precision differences between rows; robumeta equalizes them because its
-    working model assumes :math:`v_{ij} \approx v_j` within a group.
-
-    Invariance to duplication is exact only when the duplicated row's precision
-    equals its group's mean precision, which is automatic when ``v`` is constant
-    within the group. That is the common case for sample-size-driven variances,
-    where :math:`v_i = \sigma^2 / n_j` is shared by every row of a group, and
-    the group's total reduces exactly to :math:`1/(\sigma^2/n_j + \tau^2)` --
-    dependent on the group's sample size and not on how many rows it supplied.
-    With heterogeneous within-group variances the cancellation is only
-    approximate: duplicating an above-average-precision row raises its group's
-    total somewhat, and duplicating a below-average one lowers it. This is a
-    property of correlated-effects weighting rather than of this
-    implementation; robumeta behaves the same way. Use
-    :func:`~pymare.stats.collapse_groups` if one row per group is what the
-    design actually warrants.
+    Under robust variance estimation the weights affect only efficiency, never
+    the validity of the standard errors :footcite:p:`hedges2010robust`.
 
     References
     ----------
     .. footbibliography::
 
     """
-    return normalize_group_weights(1.0 / (v + tau2), groups)
+    v = ensure_2d(np.asarray(v, dtype=float))
+    codes, labels = encode_groups(groups, n_observations=v.shape[0])
+    sizes = np.bincount(codes, minlength=labels.size)[:, None]
+    return (1.0 / (sizes * (group_mean(v, groups) + tau2)))[codes]
+
+
+def correlated_effects_tau2(y, v, X, groups, rho=DEFAULT_RHO):
+    r"""Estimate tau^2 under the correlated-effects working model.
+
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        Estimates.
+    v : :obj:`numpy.ndarray` of shape (K, D) or (K, 1)
+        Sampling variances. A single column applies to every parallel dataset.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix, at the level the coefficients are fitted.
+    groups : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
+        Group labels, one per estimate.
+    rho : :obj:`float`, optional
+        Assumed correlation between estimates within a group.
+        Default = 0.8.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray` of shape (D,)
+        The tau^2 estimate per parallel dataset, floored at zero.
+
+    Raises
+    ------
+    ValueError
+        If ``rho`` falls outside [0, 1], or there are no more groups than
+        predictors.
+
+    See Also
+    --------
+    collapse_groups : The alternative reduction, which replaces each group with
+        one row and therefore requires a design that is constant within a group.
+    correlated_effects_weights : The weights this estimator is derived under.
+
+    Notes
+    -----
+    This is the method-of-moments estimator of :footcite:t:`hedges2010robust`,
+    in the form given as equations (8) and (9) of
+    :footcite:t:`fisher2015robumeta`. Writing :math:`w_j` for the group weights
+    of :func:`correlated_effects_weights` at :math:`\tau^2 = 0`,
+    :math:`V = (\sum_j w_j X_j'X_j)^{-1}`, and :math:`J_j` for the
+    :math:`n_j \times n_j` matrix of ones,
+
+    .. math::
+        Q_E = \sum_j w_j (T_j - X_j b)'(T_j - X_j b),
+
+    .. math::
+        \hat{\tau}^2 = \frac{Q_E - m
+            + \operatorname{tr}\left(V \sum_j \frac{w_j}{n_j}X_j'X_j\right)
+            + \rho \operatorname{tr}\left(V \sum_j \frac{w_j}{n_j}
+              \left[X_j'J_jX_j - X_j'X_j\right]\right)}
+            {\sum_j n_j w_j
+            - \operatorname{tr}\left(V \sum_j w_j^2 X_j'J_jX_j\right)}.
+
+    Every term uses the observation-level design :math:`X_j`, so the estimate
+    reflects the model the coefficients were fitted under. This is what
+    distinguishes it from :func:`collapse_groups`, which replaces a group's
+    predictors with their mean and so cannot see variation within a group --
+    the reason :func:`pymare.estimators.estimators._validate_group_design`
+    refuses that substitution. The assumed correlation :math:`\rho` enters
+    analytically, through the :math:`X_j'J_jX_j` terms, rather than by
+    aggregating the data first.
+
+    With one estimate per group the two :math:`\operatorname{tr}` terms
+    containing :math:`J_j` coincide with their :math:`X_j'X_j` counterparts, the
+    :math:`\rho` term vanishes, and the expression reduces exactly to
+    DerSimonian-Laird :footcite:p:`dersimonian1986meta` -- as it must, since
+    there is then no dependence to model.
+
+    References
+    ----------
+    .. footbibliography::
+
+    """
+    if not 0.0 <= rho <= 1.0:
+        raise ValueError(f"rho must lie in [0, 1]; got {rho}.")
+
+    y = ensure_2d(np.asarray(y, dtype=float))
+    v = ensure_2d(np.asarray(v, dtype=float))
+    X = np.asarray(X, dtype=float)
+    n_preds = X.shape[1]
+
+    codes, labels = encode_groups(groups, n_observations=y.shape[0])
+    n_groups = labels.size
+    if n_groups <= n_preds:
+        raise ValueError(
+            f"The correlated-effects tau^2 needs more groups than predictors: got "
+            f"{n_groups} group(s) for {n_preds} predictor(s)."
+        )
+
+    sizes = np.bincount(codes, minlength=n_groups)[:, None].astype(float)
+    # Equation (7) at tau^2 = 0: the "initial meta-regression" of equation (8).
+    group_w = np.broadcast_to(1.0 / (sizes * group_mean(v, groups)), (n_groups, y.shape[1]))
+    row_w = group_w[codes]
+
+    # X_j'X_j and X_j'J_jX_j, the latter being the outer product of the group's
+    # column sums, since J_j is all ones.
+    gram = np.zeros((n_groups, n_preds, n_preds))
+    np.add.at(gram, codes, X[:, :, None] * X[:, None, :])
+    sums = np.zeros((n_groups, n_preds))
+    np.add.at(sums, codes, X)
+    outer = sums[:, :, None] * sums[:, None, :]
+
+    def _weighted(scale, moment):
+        """Contract a per-group p x p moment with per-group weights."""
+        return np.einsum("md,mpq->dpq", scale, moment)
+
+    bread = np.linalg.pinv(_weighted(group_w, gram))
+    trace = lambda moment: np.einsum("dpq,dqp->d", bread, moment)  # noqa: E731
+    scaled = group_w / sizes
+    within = trace(_weighted(scaled, gram))
+    across = trace(_weighted(scaled, outer))
+
+    beta = weighted_least_squares(y, v, X, w=row_w)
+    q_e = (row_w * np.square(y - X.dot(beta))).sum(0)
+
+    numerator = q_e - n_groups + within + rho * (across - within)
+    denominator = (sizes * group_w).sum(0) - trace(_weighted(np.square(group_w), outer))
+    return np.maximum(0.0, numerator / denominator)
 
 
 def collapse_groups(y, v, X, groups, rho=DEFAULT_RHO):
@@ -325,7 +468,7 @@ def collapse_groups(y, v, X, groups, rho=DEFAULT_RHO):
     --------
     collapse_groups_by_n : The same reduction for models parameterized by
         sample size rather than by sampling variance.
-    group_weights : Reweights the rows in place instead of collapsing them,
+    correlated_effects_weights : Reweights the rows in place instead of collapsing them,
         which keeps within-group predictor variation available.
 
     Notes
@@ -596,9 +739,10 @@ def undo_centering_shrinkage(corr, groups):
             f"got {groups.shape[0]}."
         )
 
-    _, group_codes = np.unique(groups, return_inverse=True)
-    group_codes = np.ravel(group_codes)
-    members = [np.flatnonzero(group_codes == g) for g in range(group_codes.max() + 1)]
+    # encode_groups, not np.unique: the docstring promises any hashable label,
+    # and np.unique additionally requires them to be sortable.
+    group_codes, group_labels = encode_groups(groups, n_observations=n_estimates)
+    members = [np.flatnonzero(group_codes == g) for g in range(group_labels.size)]
     sizes = np.array([m.size for m in members], dtype=float)
 
     # Mean observed within-group correlation, used only to drive the shared term.
@@ -687,8 +831,9 @@ def weighted_least_squares(y, v, X, tau2=0.0, return_cov=False, w=None):
         them. Default = False.
     w : None or :obj:`numpy.ndarray`, optional
         Precomputed weights of the same shape as ``y``, overriding the default
-        ``1 / (v + tau2)``. Use :func:`~pymare.stats.group_weights` to obtain
-        weights that do not reward replication within a group.
+        ``1 / (v + tau2)``. Use
+        :func:`~pymare.stats.correlated_effects_weights` to obtain weights that
+        do not reward replication within a group.
         Default = None.
 
     Returns
@@ -1388,7 +1533,7 @@ def cluster_robust_cov(
     See Also
     --------
     satterthwaite_dof : The reference distribution these standard errors need.
-    group_weights : Levels weight across groups, which reduces the bias this
+    correlated_effects_weights : Levels weight across groups, which reduces the bias this
         estimator is subject to more effectively than any choice of ``method``.
 
     Notes
@@ -1401,7 +1546,7 @@ def cluster_robust_cov(
     across groups. When one group carries much of the total weight, the sandwich
     is estimating that group's variance from what is effectively a single
     residual, and no residual adjustment fully rescues it. Weighting the
-    estimates with :func:`~pymare.stats.group_weights` levels the weight across
+    estimates with :func:`~pymare.stats.correlated_effects_weights` levels the weight across
     groups and is far more effective than any choice of ``method``.
 
     For the same reason, a comfortable group count is *not* evidence that the
@@ -1465,7 +1610,7 @@ def cluster_robust_cov(
             f"anti-conservative at or below about {MIN_CLUSTERS_FOR_RVE}; the "
             "residual adjustment only partly compensates, so p-values may "
             "still be too small. If weight is spread unevenly across groups, "
-            "consider pymare.stats.group_weights.",
+            "consider pymare.stats.correlated_effects_weights.",
             UserWarning,
             stacklevel=2,
         )
@@ -1554,7 +1699,7 @@ def ensure_2d(arr):
     return arr
 
 
-def q_profile(y, v, X, alpha=0.05):
+def q_profile(y, v, X, alpha=0.05, groups=None):
     """Get the CI for tau^2 via the Q-Profile method.
 
     Parameters
@@ -1570,6 +1715,11 @@ def q_profile(y, v, X, alpha=0.05):
     alpha : :obj:`float`, optional
         alpha value defining the coverage of the CIs,
         where width(CI) = 1 - alpha. Default = 0.05.
+    groups : None or :obj:`numpy.ndarray` of shape (K,), optional
+        Group labels marking dependent estimates. When supplied, ``Q`` is the
+        correlated-effects statistic of :func:`q_gen` and is referred to the
+        number of independent groups rather than the number of rows.
+        Default = None.
 
     Returns
     -------
@@ -1584,29 +1734,42 @@ def q_profile(y, v, X, alpha=0.05):
     (i.e., ``P(tau^2 <= lower_bound)  == P(tau^2 >= upper_bound) == alpha/2``),
     and *not* the smallest possible range of tau^2 values that provides the desired coverage.
 
+    With ``groups``, the same inversion is applied to the correlated-effects
+    ``Q``, whose expectation is matched at ``m - p`` by the moment estimator of
+    :func:`~pymare.stats.correlated_effects_tau2`. The interval is therefore an
+    approximation of the same order as that estimator, and keeps the point
+    estimate and its interval describing one quantity.
+
     References
     ----------
     .. footbibliography::
     """
     k, p = X.shape
+    if groups is not None:
+        k = encode_groups(groups, n_observations=X.shape[0])[1].size
     df = k - p
     l_crit = ss.chi2.ppf(1 - alpha / 2, df)
     u_crit = ss.chi2.ppf(alpha / 2, df)
     args = (ensure_2d(y), ensure_2d(v), X)
     bds = Bounds([0], [np.inf], keep_feasible=True)
 
-    # Use the D-L estimate of tau^2 as a starting point; when using a fixed
-    # value, minimize() sometimes fails to stay in bounds.
-    from .estimators import DerSimonianLaird
+    # Use a point estimate of tau^2 as a starting point; when using a fixed
+    # value, minimize() sometimes fails to stay in bounds. It has to be the
+    # estimator that matches the Q being inverted, or the search can start on
+    # the wrong side of the upper root.
+    if groups is None:
+        from .estimators import DerSimonianLaird
 
-    ub_start = 2 * DerSimonianLaird().fit(y, v, X).params_["tau2"]
+        ub_start = 2 * DerSimonianLaird().fit(y, v, X).params_["tau2"]
+    else:
+        ub_start = 2 * correlated_effects_tau2(*args, groups)
 
-    lb = minimize(lambda x: (q_gen(*args, x) - l_crit) ** 2, [0], bounds=bds).x[0]
-    ub = minimize(lambda x: (q_gen(*args, x) - u_crit) ** 2, ub_start, bounds=bds).x[0]
+    lb = minimize(lambda x: (q_gen(*args, x, groups) - l_crit) ** 2, [0], bounds=bds).x[0]
+    ub = minimize(lambda x: (q_gen(*args, x, groups) - u_crit) ** 2, ub_start, bounds=bds).x[0]
     return {"ci_l": lb, "ci_u": ub}
 
 
-def q_gen(y, v, X, tau2):
+def q_gen(y, v, X, tau2, groups=None):
     """Calculate a generalized form of Cochran's Q-statistic.
 
     This version of the Q statistic is described in :footcite:t:`veroniki2016methods`.
@@ -1623,6 +1786,13 @@ def q_gen(y, v, X, tau2):
         of observations and P is the number of predictor variables.
     tau2 : :obj:`float`
         Between-unit variance. Must be >= 0.
+    groups : None or :obj:`numpy.ndarray` of shape (K,), optional
+        Group labels marking dependent estimates. When supplied, the
+        correlated-effects weights of
+        :func:`~pymare.stats.correlated_effects_weights` are used in place of
+        ``1 / (v + tau2)``, so that a group's contribution does not grow with
+        the number of rows it supplied. This is ``Q_E`` in the notation of
+        :footcite:t:`fisher2015robumeta`. Default = None.
 
     Returns
     -------
@@ -1636,8 +1806,8 @@ def q_gen(y, v, X, tau2):
     if np.any(tau2 < 0):
         raise ValueError("Value of tau^2 must be >= 0.")
 
-    beta = weighted_least_squares(y, v, X, tau2)
-    w = 1.0 / (v + tau2)
+    w = 1.0 / (v + tau2) if groups is None else correlated_effects_weights(v, groups, tau2)
+    beta = weighted_least_squares(y, v, X, tau2, w=w)
     return (w * (y - X.dot(beta)) ** 2).sum(0)
 
 
