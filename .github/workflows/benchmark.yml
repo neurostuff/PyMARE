@@ -13,7 +13,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 concurrency:
   group: benchmark-${{ github.ref }}
@@ -64,7 +63,12 @@ jobs:
           echo "status=${status}" >> "$GITHUB_OUTPUT"
 
       - name: "Report what changed"
-        id: report
+        # The job summary rather than a pull request comment: a pull request from
+        # a fork gets a read-only GITHUB_TOKEN, which no permissions block can
+        # elevate, so commenting would 403 on every PyMARE pull request that
+        # follows CONTRIBUTING and works from a fork. The summary is written by
+        # the runner itself, so it works either way, and the check below is what
+        # actually raises the alarm.
         run: |
           {
               echo "## Benchmark: this branch vs \`${BASE_REF}\`"
@@ -75,36 +79,7 @@ jobs:
               echo '```'
               cat benchmark.log
               echo '```'
-          } > comment.md
-          cat comment.md >> "$GITHUB_STEP_SUMMARY"
-
-      - name: "Comment on the pull request"
-        # A pull request from a fork gets a read-only token, so the comment can
-        # fail while the check itself still reports the regression.
-        if: ${{ github.event_name == 'pull_request' }}
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          marker="<!-- pymare-benchmark -->"
-          printf '%s\n\n' "${marker}" | cat - comment.md > body.md
-          existing=$(
-              gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-                  --paginate \
-                  --jq "map(select(.body | startswith(\"${marker}\"))) | .[0].id // empty"
-          )
-          if [ -n "${existing}" ]; then
-              # Update in place, so a long-running pull request collects one
-              # comment rather than one per push.
-              gh api --method PATCH \
-                  "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" \
-                  --field body=@body.md > /dev/null
-          else
-              gh api --method POST \
-                  "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-                  --field body=@body.md > /dev/null
-          fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: "Fail if a benchmark regressed"
         if: ${{ steps.compare.outputs.status != '0' }}
