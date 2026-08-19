@@ -86,19 +86,31 @@ def cmdstan_is_available():
 #: against the pinned ``data/stan_validation.json``, and
 #: ``validation/stan/simulate.py --check`` asserts them against a fresh run.
 #:
-#: ``min_coverage`` is the floor for the fraction of 95% credible intervals for
-#: beta that contain the planted value. It sits below the nominal 0.95 because
-#: the estimate is a Monte Carlo one: at 100 replications its standard error is
-#: about 0.02, so a correct estimator lands below nominal routinely. 0.90 is
-#: roughly nominal minus two standard errors, which the first prior tried here
-#: violated outright at 0.810 -- so the floor is loose enough not to fire on
-#: noise and tight enough to have caught the defect it was written for.
+#: ``min_coverage`` is the floor for the *worst* coefficient's share of 95%
+#: credible intervals containing the true value. Both halves of that sentence
+#: were chosen by measurement rather than taste.
 #:
-#: ``max_beta_bias`` is generous for the same reason: beta is unbiased in theory,
-#: and the largest bias measured across the grid is 0.019 against coefficients of
-#: order 1.
+#: Reporting the worst coefficient rather than the average matters because
+#: averaging lets a well-estimated intercept mask a badly estimated moderator:
+#: the prior scale this model originally shipped with measures 0.810 pooled but
+#: 0.710 on its worst coefficient, so pooling understated the defect.
+#:
+#: The floor is 0.85 rather than something nearer the nominal 0.95 because a
+#: minimum over coefficients is biased downward -- each coefficient's coverage is
+#: a Monte Carlo estimate with a standard error near 0.022 at 100 replications,
+#: and the smallest of two or three such estimates sits below nominal routinely.
+#: The correct model's tightest cell measures 0.900, and the rejected prior
+#: measures 0.710 and 0.830 in two cells, so 0.85 sits between them: about two
+#: standard errors below the worst honest result, and far enough above the
+#: failures to catch a regression of that kind.
+#:
+#: ``max_beta_bias`` applies to the largest absolute bias across coefficients.
+#: The largest measured anywhere in the grid is 0.045, against coefficients of
+#: order 1. It is only meaningful because the harness holds the true
+#: coefficients fixed; when it redrew them from a symmetric normal, an estimator
+#: that always returned zero cleared this ceiling about 85% of the time.
 STAN_VALIDATION_THRESHOLDS = {
-    "min_coverage": 0.90,
+    "min_coverage": 0.85,
     "max_beta_bias": 0.10,
 }
 

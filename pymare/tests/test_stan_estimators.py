@@ -8,6 +8,7 @@ where the defects this file now pins would have been caught years earlier.
 """
 
 import os.path as op
+import sys
 import warnings
 
 import numpy as np
@@ -15,8 +16,17 @@ import pytest
 
 from pymare import meta_regression
 from pymare.estimators import StanMetaRegression, VarianceBasedLikelihoodEstimator
-from pymare.estimators.estimators import _build_stan_data
-from pymare.results import BayesianMetaRegressionResults
+from pymare.estimators.estimators import (
+    STAN_MODEL_PATH,
+    _build_stan_data,
+    _import_cmdstanpy,
+)
+from pymare.results import (
+    BayesianMetaRegressionResults,
+    _accepts_var_names,
+    _arviz_credible_interval_kwargs,
+)
+from pymare.tests import conftest
 from pymare.tests.utils import (
     STAN_VALIDATION_CELLS,
     STAN_VALIDATION_THRESHOLDS,
@@ -28,6 +38,78 @@ requires_cmdstan = pytest.mark.skipif(
     not cmdstan_is_available(),
     reason="requires cmdstanpy and a CmdStan installation",
 )
+
+
+# -----------------------------------------------------------------------------
+# Detecting a missing dependency. No CmdStan needed -- the point is its absence.
+# -----------------------------------------------------------------------------
+
+
+def test_import_cmdstanpy_reports_a_missing_package(monkeypatch):
+    """The message must name the install command, not just the module."""
+    monkeypatch.setitem(sys.modules, "cmdstanpy", None)
+
+    with pytest.raises(ImportError, match=r"pip install pymare\[stan\]"):
+        _import_cmdstanpy()
+
+
+def test_import_cmdstanpy_reports_a_missing_cmdstan(monkeypatch):
+    """Installed cmdstanpy with no CmdStan is a different problem with a different fix.
+
+    Reporting them separately matters because `pip install` cannot solve the
+    second one: CmdStan is a C++ build, not a Python package.
+    """
+    cmdstanpy = pytest.importorskip("cmdstanpy")
+
+    def no_cmdstan():
+        raise ValueError("No CmdStan directory")
+
+    monkeypatch.setattr(cmdstanpy, "cmdstan_path", no_cmdstan)
+
+    with pytest.raises(ImportError, match="install_cmdstan") as exc:
+        _import_cmdstanpy()
+    assert "No CmdStan directory" in str(exc.value), "the underlying reason should survive"
+
+
+def test_cmdstan_is_available_is_false_without_the_package(monkeypatch):
+    """The gate must answer False, not raise, when cmdstanpy is absent."""
+    monkeypatch.setitem(sys.modules, "cmdstanpy", None)
+
+    assert cmdstan_is_available() is False
+
+
+def test_cmdstan_is_available_is_false_without_an_installation(monkeypatch):
+    """Installing cmdstanpy from PyPI does not install CmdStan, so both are checked.
+
+    Checking only the import would reproduce the original defect in a new
+    costume: a gate that reports ready for an environment that can only fail.
+    """
+    cmdstanpy = pytest.importorskip("cmdstanpy")
+
+    def no_cmdstan():
+        raise ValueError("No CmdStan directory")
+
+    monkeypatch.setattr(cmdstanpy, "cmdstan_path", no_cmdstan)
+
+    assert cmdstan_is_available() is False
+
+
+def test_collection_hook_fails_only_when_cmdstan_is_declared_present(monkeypatch):
+    """The skip-versus-fail asymmetry that keeps a green CI log honest."""
+    monkeypatch.setattr(conftest, "cmdstan_is_available", lambda: False)
+
+    # Unset: a contributor without CmdStan sees skips, not failures.
+    monkeypatch.delenv("PYMARE_REQUIRE_CMDSTAN", raising=False)
+    assert conftest.pytest_collection_modifyitems(None, []) is None
+
+    # Set: the environment claims it can run them, so their absence is an error.
+    monkeypatch.setenv("PYMARE_REQUIRE_CMDSTAN", "1")
+    with pytest.raises(pytest.UsageError, match="install_cmdstan"):
+        conftest.pytest_collection_modifyitems(None, [])
+
+    # Set, and genuinely available: nothing to complain about.
+    monkeypatch.setattr(conftest, "cmdstan_is_available", lambda: True)
+    assert conftest.pytest_collection_modifyitems(None, []) is None
 
 
 # -----------------------------------------------------------------------------
@@ -195,22 +277,26 @@ def test_fit_is_quiet_when_there_are_no_divergences():
 def test_compile_falls_back_when_the_package_directory_is_read_only(monkeypatch, tmp_path):
     """An unwritable site-packages must not make the estimator unusable.
 
-    CmdStanPy compiles beside the .stan source, which is inside the installed
-    package. That directory is read-only in plenty of ordinary installations,
-    and the resulting error would otherwise surface from the middle of fit().
+    CmdStanPy compiles beside the .stan source, which lives inside the installed
+    package, and that directory is read-only in plenty of ordinary
+    installations.
+
+    The failure is raised as ValueError, not PermissionError: CmdStanPy reports
+    every failed ``make`` the same way, whatever went wrong. An earlier version
+    of this test asserted PermissionError because that is what a read-only
+    filesystem sounds like, and it passed while the fallback it was meant to
+    cover could never fire.
     """
     cmdstanpy = pytest.importorskip("cmdstanpy")
     monkeypatch.setenv("HOME", str(tmp_path))
-    attempts = []
+    compiled_from = []
 
     def fake_model(stan_file=None, exe_file=None, force_compile=False):
-        attempts.append(exe_file)
-        if exe_file is None:
-            raise PermissionError("read-only file system")
+        compiled_from.append(stan_file)
+        if stan_file == STAN_MODEL_PATH:
+            raise ValueError(f"Failed to compile Stan model '{stan_file}'.")
         return "compiled"
 
-    # Stub the CmdStan lookup as well as the compiler, so this exercises the
-    # fallback itself rather than requiring a real CmdStan to get that far.
     monkeypatch.setattr(cmdstanpy, "cmdstan_path", lambda: str(tmp_path))
     monkeypatch.setattr(cmdstanpy, "CmdStanModel", fake_model)
 
@@ -219,8 +305,37 @@ def test_compile_falls_back_when_the_package_directory_is_read_only(monkeypatch,
         est.compile()
 
     assert est.model == "compiled"
-    assert attempts[0] is None
-    assert attempts[1] == op.join(str(tmp_path), ".pymare", "stan", "meta_regression")
+    # The second attempt compiles a *copy*, not the packaged file: exe_file
+    # names an executable to reuse rather than a destination to build into.
+    assert compiled_from[0] == STAN_MODEL_PATH
+    assert compiled_from[1] == op.join(str(tmp_path), ".pymare", "stan", "meta_regression.stan")
+    assert op.exists(compiled_from[1]), "the fallback must copy the model somewhere writable"
+    assert op.getmtime(compiled_from[1]) == op.getmtime(
+        STAN_MODEL_PATH
+    ), "copy2 preserves the mtime so the cached build is not invalidated every run"
+
+
+def test_compile_reports_the_original_error_when_the_fallback_also_fails(monkeypatch, tmp_path):
+    """A broken model must not be reported as a permissions problem.
+
+    Both compiles fail for a model that does not parse, and it is the first
+    error that names the real cause.
+    """
+    cmdstanpy = pytest.importorskip("cmdstanpy")
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    def always_fails(stan_file=None, exe_file=None, force_compile=False):
+        raise ValueError(f"Syntax error in '{stan_file}'")
+
+    monkeypatch.setattr(cmdstanpy, "cmdstan_path", lambda: str(tmp_path))
+    monkeypatch.setattr(cmdstanpy, "CmdStanModel", always_fails)
+
+    est = StanMetaRegression()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # no misleading "not writable" warning
+        with pytest.raises(ValueError, match="Syntax error") as exc:
+            est.compile()
+    assert STAN_MODEL_PATH in str(exc.value), "the packaged path is the one that failed first"
 
 
 class _StubModel:
@@ -347,12 +462,61 @@ def test_results_reject_an_impossible_credible_interval(bad_ci):
         BayesianMetaRegressionResults(None, None, ci=bad_ci)
 
 
+@pytest.mark.parametrize("major", [0, 1])
+def test_credible_interval_kwargs_track_the_installed_arviz(monkeypatch, major):
+    """Both ArviZ generations must be asked for the same interval.
+
+    1.x renamed hdi_prob to ci_prob, defaults to an equal-tailed interval rather
+    than a highest-density one, and formats summaries as strings unless told not
+    to. Only one branch is reachable on any given install, so the other is
+    exercised by pinning the reported version.
+    """
+    az = pytest.importorskip("arviz")
+    monkeypatch.setattr(az, "__version__", f"{major}.3.0")
+
+    kwargs = _arviz_credible_interval_kwargs(95.0)
+
+    if major >= 1:
+        assert kwargs == {"ci_prob": 0.95, "ci_kind": "hdi", "round_to": "none"}
+    else:
+        assert kwargs == {"hdi_prob": 0.95}
+
+
+def test_accepts_var_names_handles_an_unreadable_signature():
+    """Anything whose signature cannot be read must be treated as not taking var_names.
+
+    inspect.signature raises rather than answering for some objects, and plot()
+    calls this before deciding what to pass, so an exception here would surface
+    as a broken plot rather than as a missing default.
+    """
+    pytest.importorskip("arviz")
+
+    assert _accepts_var_names(lambda data, var_names=None: None) is True
+    # Reads fine, simply has no such parameter.
+    assert _accepts_var_names(lambda data: None) is False
+    # Cannot be read at all: inspect raises TypeError for a non-callable.
+    assert _accepts_var_names(object()) is False
+
+
+def test_results_accept_a_converted_object_without_cmdstanpy(monkeypatch):
+    """The container must work when cmdstanpy is absent but the data is already converted.
+
+    A caller who has their own InferenceData should not need the sampler
+    installed to summarize it, so the import is lazy and its failure is not one.
+    """
+    pytest.importorskip("arviz")
+    monkeypatch.setitem(sys.modules, "cmdstanpy", None)
+
+    results = BayesianMetaRegressionResults("already-converted", None, ci=90.0)
+
+    assert results.data == "already-converted"
+    assert results.ci == 90.0
+
+
 @pytest.mark.parametrize("ci", [50.0, 95.0])
 def test_summary_requests_the_configured_credible_interval(ci):
     """The ci argument must reach ArviZ. It was previously stored and never used."""
     az = pytest.importorskip("arviz")
-    from pymare.results import _arviz_credible_interval_kwargs
-
     kwargs = _arviz_credible_interval_kwargs(ci)
     probability = kwargs.get("ci_prob", kwargs.get("hdi_prob"))
 
@@ -413,6 +577,45 @@ def test_recorded_validation_meets_its_thresholds():
         if abs(cell["beta_bias"]) > ceiling
     ]
     assert not biased, f"cells with |beta bias| above {ceiling}: {biased}"
+
+
+def test_recorded_validation_summarizes_the_worst_coefficient():
+    """The reported figures must be the worst coefficient, not an average of them.
+
+    Averaging across coefficients lets a well-estimated intercept mask a badly
+    estimated moderator, which is exactly the failure the unbalanced-covariate
+    cells exist to detect. The thresholds are therefore applied to the minimum
+    coverage and the largest absolute bias across coefficients, and this pins
+    that so the summary cannot quietly become a mean.
+    """
+    recorded = load_stan_validation()
+
+    for cell in recorded["cells"]:
+        per_coverage = cell["beta_coverage_per_coefficient"]
+        per_bias = cell["beta_bias_per_coefficient"]
+
+        assert len(per_coverage) == len(per_bias) == len(cell["true_beta"])
+        assert cell["beta_coverage"] == pytest.approx(min(per_coverage))
+        assert cell["beta_bias"] == pytest.approx(max(per_bias, key=abs))
+
+
+def test_recorded_validation_used_a_fixed_truth():
+    """Bias is only meaningful if the coefficients being recovered are held fixed.
+
+    An earlier version of the harness redrew beta from a symmetric normal on
+    every replication. The signed errors then averaged to zero for *any*
+    estimator -- one that always returned zero cleared the bias ceiling about
+    85% of the time -- so the threshold certified nothing.
+    """
+    recorded = load_stan_validation()
+    truths = {tuple(cell["true_beta"]) for cell in recorded["cells"]}
+
+    # Every cell draws its coefficients from the same fixed vector, truncated to
+    # however many predictors that cell uses.
+    longest = max(truths, key=len)
+    for truth in truths:
+        assert truth == longest[: len(truth)]
+        assert all(value != 0 for value in truth), "a zero coefficient cannot show bias"
 
 
 # -----------------------------------------------------------------------------
@@ -537,3 +740,49 @@ def test_summary_and_plot_round_trip(planted_hierarchical_dataset):
     assert len(with_theta) == len(without_theta) + 30
 
     assert results.plot(kind="trace") is not None
+
+
+@pytest.mark.parametrize(
+    ("field", "bad"),
+    [
+        ("v", np.array([1.0, np.nan, 1.0, 1.0])),
+        ("v", np.array([1.0, np.inf, 1.0, 1.0])),
+        ("y", np.array([1.0, np.nan, 1.0, 1.0])),
+        ("X", np.array([[1.0], [np.nan], [1.0], [1.0]])),
+    ],
+)
+def test_stan_data_rejects_non_finite_inputs(field, bad):
+    """Reject NaN here, rather than leaving CmdStan to refuse it while reading data.
+
+    NaN fails every comparison, so a positivity check alone lets it through:
+    ``np.nan <= 0`` is False. It then flows into sqrt() and into the prior
+    scale, and only surfaces when CmdStan refuses to load the data -- an error
+    that names a Stan variable rather than the input that caused it.
+    """
+    call = {"y": np.arange(4.0), "v": np.ones(4), "X": np.ones((4, 1))}
+    call[field] = bad
+
+    with pytest.raises(ValueError, match="must all be finite"):
+        _build_stan_data(**call)
+
+
+def test_stan_data_still_rejects_non_positive_variances():
+    """The finiteness check must not have displaced the positivity one."""
+    with pytest.raises(ValueError, match="must all be positive"):
+        _build_stan_data(np.arange(4.0), np.array([1.0, 0.0, 1.0, 1.0]), np.ones((4, 1)))
+
+
+def test_stan_data_rejects_composite_group_labels():
+    """The documented contract is scalar labels, and this is why.
+
+    Numpy reads a sequence of tuples as a 2-dimensional array, so a tuple label
+    is not a label at all by the time encode_groups sees it. The docstring says
+    scalar rather than hashable for this reason.
+    """
+    with pytest.raises(ValueError, match="one-dimensional"):
+        _build_stan_data(
+            np.arange(3.0),
+            np.ones(3),
+            np.ones((3, 1)),
+            groups=[("a", 1), ("a", 1), ("b", 2)],
+        )

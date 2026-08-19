@@ -25,6 +25,7 @@ measured.
 """
 
 import argparse
+import collections
 import json
 import logging
 import os
@@ -91,6 +92,14 @@ BASE = {
 }
 
 
+#: True coefficients, held fixed across replications rather than redrawn.
+#: Redrawing them from a symmetric distribution makes the pooled bias
+#: uninformative: the error of an estimator that always returned zero would be
+#: -beta, whose mean over replications is zero, so it would clear any bias
+#: threshold. Fixing the truth means a bias estimate measures the estimator.
+TRUE_BETA = np.array([0.5, -0.8, 0.3])
+
+
 def simulate(rng, n_groups, group_size, tau2, sigma_scale, n_predictors, unbalanced):
     """Draw one dataset from the model the Stan program encodes."""
     if group_size == "unequal":
@@ -114,7 +123,7 @@ def simulate(rng, n_groups, group_size, tau2, sigma_scale, n_predictors, unbalan
         if moderators.size
         else np.ones((n_observations, 1))
     )
-    beta = rng.normal(size=X.shape[1])
+    beta = TRUE_BETA[: X.shape[1]]
 
     theta = rng.normal(0, np.sqrt(tau2), size=n_groups)
     sigma = rng.uniform(0.1, 0.4, size=n_observations) * sigma_scale
@@ -131,7 +140,12 @@ def run_cell(cell, replications, seed):
     config.update({k: v for k, v in cell.items() if k != "name"})
     rng = np.random.default_rng(seed)
 
-    beta_errors, covered, tau2_errors, tau2_truth, divergent = [], [], [], [], 0
+    # Per coefficient, not pooled. Pooling hides the case this grid exists to
+    # probe: in the unbalanced cells the sparse moderator is the coefficient at
+    # risk, and good intercept coverage would mask bad coverage for it.
+    beta_errors = collections.defaultdict(list)
+    covered = collections.defaultdict(list)
+    tau2_errors, tau2_truth, divergent = [], [], 0
 
     for replication in range(replications):
         dataset, beta, tau2 = simulate(rng, **config)
@@ -151,9 +165,9 @@ def run_cell(cell, replications, seed):
 
         for i, true_value in enumerate(beta):
             row = summary.loc[f"beta[{i}]"]
-            beta_errors.append(float(row["mean"]) - true_value)
+            beta_errors[i].append(float(row["mean"]) - true_value)
             lower, upper = _interval(row)
-            covered.append(bool(lower <= true_value <= upper))
+            covered[i].append(bool(lower <= true_value <= upper))
 
         tau2_errors.append(float(summary.loc["tau2", "mean"]) - tau2)
         tau2_truth.append(tau2)
@@ -163,14 +177,34 @@ def run_cell(cell, replications, seed):
         "name": cell["name"],
         "config": {k: str(v) for k, v in config.items()},
         "replications": replications,
-        "beta_bias": float(np.mean(beta_errors)),
-        "beta_rmse": float(np.sqrt(np.mean(np.square(beta_errors)))),
-        "beta_coverage": float(np.mean(covered)),
-        "coverage_se": float(np.sqrt(np.mean(covered) * (1 - np.mean(covered)) / len(covered))),
+        "true_beta": [float(b) for b in TRUE_BETA[: len(_coefficients(covered))]],
+        "beta_bias_per_coefficient": _per_coefficient(beta_errors),
+        "beta_coverage_per_coefficient": _per_coefficient(covered),
+        # The figures the thresholds are applied to summarize the *worst*
+        # coefficient rather than the average of them.
+        "beta_bias": max(_per_coefficient(beta_errors), key=abs),
+        "beta_coverage": min(_per_coefficient(covered)),
+        "coverage_se": float(
+            np.sqrt(
+                min(_per_coefficient(covered))
+                * (1 - min(_per_coefficient(covered)))
+                / len(covered[_coefficients(covered)[0]])
+            )
+        ),
         "tau2_bias": float(np.mean(tau2_errors)),
         "tau2_truth": float(np.mean(tau2_truth)),
         "fits_with_divergences": int(divergent),
     }
+
+
+def _coefficients(per_coefficient):
+    """Return the coefficient indices present, in order."""
+    return sorted(per_coefficient)
+
+
+def _per_coefficient(per_coefficient):
+    """Reduce a per-coefficient mapping of samples to a list of means."""
+    return [float(np.mean(per_coefficient[i])) for i in _coefficients(per_coefficient)]
 
 
 def _interval(row):
@@ -211,6 +245,14 @@ def main():
     )
     args = parser.parse_args()
 
+    # Compile before any worker starts. CmdStanPy builds in place, and parallel
+    # make invocations on the same source collide: with a cold cache and four
+    # workers, one of them reliably fails with "Failed to compile Stan model"
+    # before a single cell runs. One compile up front makes every worker a
+    # cache hit.
+    print("compiling the model", flush=True)
+    StanMetaRegression().compile()
+
     started = time.time()
     if args.jobs == 1:
         results = []
@@ -239,7 +281,7 @@ def main():
     with open(args.out, "w") as fobj:
         json.dump(payload, fobj, indent=2)
 
-    print(f"\n{'cell':<32}{'beta bias':>11}{'coverage':>10}{'tau2 bias':>11}{'diverg.':>9}")
+    print(f"\n{'cell':<32}{'worst bias':>11}{'worst cov':>10}{'tau2 bias':>11}{'diverg.':>9}")
     for cell in results:
         print(
             f"{cell['name']:<32}{cell['beta_bias']:>11.4f}"

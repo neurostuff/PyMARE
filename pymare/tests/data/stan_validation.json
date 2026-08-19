@@ -1,7 +1,7 @@
 {
   "replications": 100,
   "seed": 20260818,
-  "elapsed_seconds": 402.9,
+  "elapsed_seconds": 335.2,
   "thresholds": {
     "min_coverage": 0.9,
     "max_beta_bias": 0.1
@@ -18,13 +18,24 @@
         "unbalanced": "False"
       },
       "replications": 100,
-      "beta_bias": -0.0021201448821405065,
-      "beta_rmse": 0.12639884294523676,
-      "beta_coverage": 0.925,
-      "coverage_se": 0.01862458053218917,
-      "tau2_bias": 0.11401999999999997,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        0.009240000000000003,
+        -0.008429999999999955
+      ],
+      "beta_coverage_per_coefficient": [
+        0.93,
+        0.93
+      ],
+      "beta_bias": 0.009240000000000003,
+      "beta_coverage": 0.93,
+      "coverage_se": 0.02551470164434614,
+      "tau2_bias": 0.12235999999999998,
       "tau2_truth": 0.09999999999999998,
-      "fits_with_divergences": 63
+      "fits_with_divergences": 54
     },
     {
       "name": "groups=20",
@@ -37,11 +48,22 @@
         "unbalanced": "False"
       },
       "replications": 100,
-      "beta_bias": -0.002885654421913514,
-      "beta_rmse": 0.05071385238690838,
-      "beta_coverage": 0.95,
-      "coverage_se": 0.015411035007422448,
-      "tau2_bias": 0.017379999999999993,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.005699999999999999,
+        -0.005239999999999958
+      ],
+      "beta_coverage_per_coefficient": [
+        0.91,
+        0.9
+      ],
+      "beta_bias": -0.005699999999999999,
+      "beta_coverage": 0.9,
+      "coverage_se": 0.03,
+      "tau2_bias": 0.010289999999999995,
       "tau2_truth": 0.09999999999999998,
       "fits_with_divergences": 0
     },
@@ -56,11 +78,22 @@
         "unbalanced": "False"
       },
       "replications": 100,
-      "beta_bias": -0.002236553636109281,
-      "beta_rmse": 0.03725240459012178,
-      "beta_coverage": 0.955,
-      "coverage_se": 0.014658615214269054,
-      "tau2_bias": 0.010019999999999996,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.004449999999999992,
+        -0.004719999999999964
+      ],
+      "beta_coverage_per_coefficient": [
+        0.99,
+        0.96
+      ],
+      "beta_bias": -0.004719999999999964,
+      "beta_coverage": 0.96,
+      "coverage_se": 0.019595917942265433,
+      "tau2_bias": 0.008279999999999996,
       "tau2_truth": 0.09999999999999998,
       "fits_with_divergences": 0
     },
@@ -75,13 +108,24 @@
         "unbalanced": "False"
       },
       "replications": 100,
-      "beta_bias": 0.000234083355221673,
-      "beta_rmse": 0.02752582425327561,
-      "beta_coverage": 0.965,
-      "coverage_se": 0.012995191418367032,
-      "tau2_bias": 0.004270000000000001,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        0.004770000000000009,
+        -0.0024699999999999622
+      ],
+      "beta_coverage_per_coefficient": [
+        0.97,
+        0.96
+      ],
+      "beta_bias": 0.004770000000000009,
+      "beta_coverage": 0.96,
+      "coverage_se": 0.019595917942265433,
+      "tau2_bias": 0.00402,
       "tau2_truth": 0.0,
-      "fits_with_divergences": 11
+      "fits_with_divergences": 14
     },
     {
       "name": "tau2=0.1",
@@ -94,11 +138,22 @@
         "unbalanced": "False"
       },
       "replications": 100,
-      "beta_bias": -0.00645483896524104,
-      "beta_rmse": 0.0624116445444163,
-      "beta_coverage": 0.94,
-      "coverage_se": 0.01679285562374667,
-      "tau2_bias": 0.020149999999999998,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.0036099999999999995,
+        -0.0014999999999999525
+      ],
+      "beta_coverage_per_coefficient": [
+        0.94,
+        0.93
+      ],
+      "beta_bias": -0.0036099999999999995,
+      "beta_coverage": 0.93,
+      "coverage_se": 0.02551470164434614,
+      "tau2_bias": 0.017839999999999998,
       "tau2_truth": 0.09999999999999998,
       "fits_with_divergences": 0
     },
@@ -113,11 +168,22 @@
         "unbalanced": "False"
       },
       "replications": 100,
-      "beta_bias": 0.015128182286879798,
-      "beta_rmse": 0.1552137746779895,
-      "beta_coverage": 0.935,
-      "coverage_se": 0.01743201078476031,
-      "tau2_bias": 0.08488,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        0.010260000000000005,
+        0.006100000000000039
+      ],
+      "beta_coverage_per_coefficient": [
+        0.96,
+        0.97
+      ],
+      "beta_bias": 0.010260000000000005,
+      "beta_coverage": 0.96,
+      "coverage_se": 0.019595917942265433,
+      "tau2_bias": 0.18483,
       "tau2_truth": 1.0,
       "fits_with_divergences": 0
     },
@@ -132,13 +198,24 @@
         "unbalanced": "False"
       },
       "replications": 100,
-      "beta_bias": 0.006795324568292994,
-      "beta_rmse": 0.08982016398564083,
-      "beta_coverage": 0.96,
-      "coverage_se": 0.013856406460551024,
-      "tau2_bias": 0.015779999999999995,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.013600000000000001,
+        0.0027800000000000524
+      ],
+      "beta_coverage_per_coefficient": [
+        0.98,
+        0.95
+      ],
+      "beta_bias": -0.013600000000000001,
+      "beta_coverage": 0.95,
+      "coverage_se": 0.021794494717703377,
+      "tau2_bias": 0.020919999999999998,
       "tau2_truth": 0.09999999999999998,
-      "fits_with_divergences": 3
+      "fits_with_divergences": 1
     },
     {
       "name": "unequal groups",
@@ -151,11 +228,22 @@
         "unbalanced": "False"
       },
       "replications": 100,
-      "beta_bias": -8.534368402361576e-05,
-      "beta_rmse": 0.06195725104514044,
-      "beta_coverage": 0.935,
-      "coverage_se": 0.01743201078476031,
-      "tau2_bias": 0.022759999999999992,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.0012999999999999956,
+        -0.004179999999999957
+      ],
+      "beta_coverage_per_coefficient": [
+        0.94,
+        0.99
+      ],
+      "beta_bias": -0.004179999999999957,
+      "beta_coverage": 0.94,
+      "coverage_se": 0.023748684174075843,
+      "tau2_bias": 0.02412,
       "tau2_truth": 0.09999999999999998,
       "fits_with_divergences": 0
     },
@@ -170,11 +258,22 @@
         "unbalanced": "False"
       },
       "replications": 100,
-      "beta_bias": 0.0013507767768359108,
-      "beta_rmse": 0.047671429829435605,
-      "beta_coverage": 0.925,
-      "coverage_se": 0.01862458053218917,
-      "tau2_bias": 0.015859999999999996,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        0.0026900000000000014,
+        -0.00048000000000000045
+      ],
+      "beta_coverage_per_coefficient": [
+        0.94,
+        0.95
+      ],
+      "beta_bias": 0.0026900000000000014,
+      "beta_coverage": 0.94,
+      "coverage_se": 0.023748684174075843,
+      "tau2_bias": 0.020710000000000003,
       "tau2_truth": 0.09999999999999998,
       "fits_with_divergences": 0
     },
@@ -189,13 +288,24 @@
         "unbalanced": "False"
       },
       "replications": 100,
-      "beta_bias": -0.018845679375840186,
-      "beta_rmse": 0.29437805323971644,
-      "beta_coverage": 0.955,
-      "coverage_se": 0.014658615214269054,
-      "tau2_bias": 0.38577000000000006,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.04500000000000001,
+        0.017270000000000042
+      ],
+      "beta_coverage_per_coefficient": [
+        0.98,
+        0.94
+      ],
+      "beta_bias": -0.04500000000000001,
+      "beta_coverage": 0.94,
+      "coverage_se": 0.023748684174075843,
+      "tau2_bias": 0.42099,
       "tau2_truth": 0.09999999999999998,
-      "fits_with_divergences": 9
+      "fits_with_divergences": 6
     },
     {
       "name": "1 predictor",
@@ -208,11 +318,19 @@
         "unbalanced": "False"
       },
       "replications": 100,
-      "beta_bias": 0.008909029793187874,
-      "beta_rmse": 0.07746874870350999,
-      "beta_coverage": 0.95,
-      "coverage_se": 0.021794494717703377,
-      "tau2_bias": 0.009759999999999993,
+      "true_beta": [
+        0.5
+      ],
+      "beta_bias_per_coefficient": [
+        -0.0045099999999999975
+      ],
+      "beta_coverage_per_coefficient": [
+        0.94
+      ],
+      "beta_bias": -0.0045099999999999975,
+      "beta_coverage": 0.94,
+      "coverage_se": 0.023748684174075843,
+      "tau2_bias": 0.008289999999999995,
       "tau2_truth": 0.09999999999999998,
       "fits_with_divergences": 0
     },
@@ -227,11 +345,25 @@
         "unbalanced": "False"
       },
       "replications": 100,
-      "beta_bias": 6.009360521037991e-06,
-      "beta_rmse": 0.052885373073410256,
-      "beta_coverage": 0.94,
-      "coverage_se": 0.013711309200802093,
-      "tau2_bias": 0.018249999999999995,
+      "true_beta": [
+        0.5,
+        -0.8,
+        0.3
+      ],
+      "beta_bias_per_coefficient": [
+        -0.009879999999999996,
+        0.0048900000000000375,
+        -0.0016899999999999875
+      ],
+      "beta_coverage_per_coefficient": [
+        0.94,
+        0.92,
+        0.99
+      ],
+      "beta_bias": -0.009879999999999996,
+      "beta_coverage": 0.92,
+      "coverage_se": 0.027129319932501065,
+      "tau2_bias": 0.020689999999999997,
       "tau2_truth": 0.09999999999999998,
       "fits_with_divergences": 0
     },
@@ -246,11 +378,22 @@
         "unbalanced": "True"
       },
       "replications": 100,
-      "beta_bias": 0.008010131782226839,
-      "beta_rmse": 0.15405818433913557,
-      "beta_coverage": 0.965,
-      "coverage_se": 0.012995191418367032,
-      "tau2_bias": 0.02037999999999999,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.00859,
+        0.007870000000000042
+      ],
+      "beta_coverage_per_coefficient": [
+        0.97,
+        0.95
+      ],
+      "beta_bias": -0.00859,
+      "beta_coverage": 0.95,
+      "coverage_se": 0.021794494717703377,
+      "tau2_bias": 0.020329999999999994,
       "tau2_truth": 0.09999999999999998,
       "fits_with_divergences": 0
     },
@@ -265,11 +408,22 @@
         "unbalanced": "True"
       },
       "replications": 100,
-      "beta_bias": -0.00812323831412477,
-      "beta_rmse": 0.4654110785668132,
-      "beta_coverage": 0.945,
-      "coverage_se": 0.016120638945153514,
-      "tau2_bias": 0.15338000000000002,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.018280000000000005,
+        -0.024199999999999958
+      ],
+      "beta_coverage_per_coefficient": [
+        0.98,
+        0.93
+      ],
+      "beta_bias": -0.024199999999999958,
+      "beta_coverage": 0.93,
+      "coverage_se": 0.02551470164434614,
+      "tau2_bias": 0.04930000000000002,
       "tau2_truth": 1.0,
       "fits_with_divergences": 0
     }

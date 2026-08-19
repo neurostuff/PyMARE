@@ -56,9 +56,12 @@ deterministic, so its workflow can require the file not to move. These numbers
 are Monte Carlo estimates with a standard error of 0.015 to 0.030, so a correct
 model produces different numbers every run and an exact pin would fail
 constantly. What is pinned instead is the claim the file exists to support:
-coverage at or above 0.90 and |beta bias| at or below 0.10 in every cell. That
-floor is roughly nominal minus two standard errors — loose enough not to fire on
-noise, and tight enough that it rejects the 0.810 the first prior scale produced.
+worst-coefficient coverage at or above 0.85 and |beta bias| at or below 0.10 in every cell. That
+floor is set from measurement: the correct model's tightest cell reads 0.900 and
+the rejected prior reads 0.710 and 0.830, so 0.85 sits between them — about two
+standard errors below the worst honest result and clear of the failures. A
+minimum over coefficients is biased downward, which is why the floor is not
+nearer the nominal 0.95.
 `--check` refuses to certify a run of fewer than 100 replications, so a short run
 cannot clear the floor by luck.
 
@@ -78,38 +81,48 @@ About 10 minutes on 8 cores.
 Each cell varies one factor away from a base of 20 groups of 3, `tau2 = 0.1`, 2
 predictors, sampling SDs drawn from `uniform(0.1, 0.4)`.
 
-Coverage is the fraction of 95% credible intervals for `beta` containing the
-planted value; nominal is 0.950 and the Monte Carlo standard error is about
-0.015 to 0.030. The two coverage columns are the two candidate defaults for
-`tau_prior_scale` (see below).
+The true coefficients are **fixed** at `[0.5, -0.8, 0.3]`, truncated to the
+number of predictors, rather than redrawn each replication. That matters: with a
+symmetric redrawn truth the signed errors average to zero for any estimator at
+all, so the bias threshold would certify nothing — an estimator that always
+returned zero cleared it about 85% of the time.
 
-| cell | coverage, `sqrt(mean(v))` | coverage, `max(std(y), sqrt(mean(v)))` | tau2 bias, old | tau2 bias, new | true tau2 | beta bias | fits with divergences |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| groups=5 | 0.910 | **0.925** | -0.002 | +0.114 | 0.10 | -0.0021 | 63 |
-| groups=20 | 0.940 | **0.950** | +0.004 | +0.017 | 0.10 | -0.0029 | 0 |
-| groups=50 | 0.960 | **0.955** | +0.006 | +0.010 | 0.10 | -0.0022 | 0 |
-| tau2=0 | 0.970 | **0.965** | +0.004 | +0.004 | 0.00 | +0.0002 | 11 |
-| tau2=0.1 | 0.930 | **0.940** | +0.007 | +0.020 | 0.10 | -0.0065 | 0 |
-| tau2=1 | 0.880 | **0.935** | -0.334 | +0.085 | 1.00 | +0.0151 | 0 |
-| singletons | 0.955 | **0.960** | -0.006 | +0.016 | 0.10 | +0.0068 | 3 |
-| unequal groups | 0.930 | **0.935** | +0.009 | +0.023 | 0.10 | -0.0001 | 0 |
-| sigma x0.1 | 0.810 | **0.925** | -0.070 | +0.016 | 0.10 | +0.0014 | 0 |
-| sigma x10 | 0.935 | **0.955** | +0.379 | +0.386 | 0.10 | -0.0188 | 9 |
-| 1 predictor | 0.950 | **0.950** | +0.002 | +0.010 | 0.10 | +0.0089 | 0 |
-| 3 predictors | 0.943 | **0.940** | +0.004 | +0.018 | 0.10 | +0.0000 | 0 |
-| unbalanced covariate | 0.965 | **0.965** | +0.008 | +0.020 | 0.10 | +0.0080 | 0 |
-| unbalanced covariate, tau2=1 | 0.870 | **0.945** | -0.300 | +0.153 | 1.00 | -0.0081 | 0 |
+Coverage is reported **per coefficient**, and the threshold is applied to the
+**worst** of them rather than the average. Averaging lets a well-estimated
+intercept mask a badly estimated moderator, which is the failure the unbalanced
+cells exist to detect — and it did mask it: the rejected prior scale below reads
+0.810 pooled but 0.710 on its worst coefficient.
 
-`beta` is unbiased throughout: the largest bias in any cell is 0.019, against
-coefficients of order 1.
+The two coverage columns are the two candidate defaults for `tau_prior_scale`,
+both measured under this per-coefficient metric.
+
+| cell | worst cov, `sqrt(mean(v))` | worst cov, `max(std(y), sqrt(mean(v)))` | per coefficient | tau2 bias, old | tau2 bias, new | true tau2 | worst beta bias | divergent fits |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| groups=5 | 0.910 | **0.930** | 0.93, 0.93 | +0.000 | +0.122 | 0.10 | +0.0092 | 54 |
+| groups=20 | 0.900 | **0.900** | 0.91, 0.90 | -0.002 | +0.010 | 0.10 | -0.0057 | 0 |
+| groups=50 | 0.960 | **0.960** | 0.99, 0.96 | +0.004 | +0.008 | 0.10 | -0.0047 | 0 |
+| tau2=0 | 0.960 | **0.960** | 0.97, 0.96 | +0.004 | +0.004 | 0.00 | +0.0048 | 14 |
+| tau2=0.1 | 0.930 | **0.930** | 0.94, 0.93 | +0.003 | +0.018 | 0.10 | -0.0036 | 0 |
+| tau2=1 | 0.910 | **0.960** | 0.96, 0.97 | -0.285 | +0.185 | 1.00 | +0.0103 | 0 |
+| singletons | 0.940 | **0.950** | 0.98, 0.95 | -0.003 | +0.021 | 0.10 | -0.0136 | 1 |
+| unequal groups | 0.930 | **0.940** | 0.94, 0.99 | +0.008 | +0.024 | 0.10 | -0.0042 | 0 |
+| sigma x0.1 | 0.710 | **0.940** | 0.94, 0.95 | -0.069 | +0.021 | 0.10 | +0.0027 | 0 |
+| sigma x10 | 0.940 | **0.940** | 0.98, 0.94 | +0.416 | +0.421 | 0.10 | -0.0450 | 6 |
+| 1 predictor | 0.940 | **0.940** | 0.94 | +0.000 | +0.008 | 0.10 | -0.0045 | 0 |
+| 3 predictors | 0.920 | **0.920** | 0.94, 0.92, 0.99 | +0.005 | +0.021 | 0.10 | -0.0099 | 0 |
+| unbalanced covariate | 0.960 | **0.950** | 0.97, 0.95 | +0.008 | +0.020 | 0.10 | -0.0086 | 0 |
+| unbalanced covariate, tau2=1 | 0.830 | **0.930** | 0.98, 0.93 | -0.346 | +0.049 | 1.00 | -0.0242 | 0 |
+
+`beta` is unbiased throughout: the largest bias on any coefficient in any cell
+is 0.045, against coefficients of order 1.
 
 ## The choice of `tau_prior_scale`, decided by measurement
 
 The first default tried was `sqrt(mean(v))`, the typical sampling standard
-deviation. The grid rejected it. Coverage fell to **0.810** when the sampling
-SDs were small relative to the between-group spread (`sigma x0.1`), to 0.880 at
-`tau2=1`, and to 0.870 in the unbalanced-covariate cell at `tau2=1`. In each,
-`tau2` was badly *under*-estimated: -70%, -33% and -30% respectively.
+deviation. The grid rejected it. Worst-coefficient coverage fell to **0.710**
+when the sampling SDs were small relative to the between-group spread
+(`sigma x0.1`) and to **0.830** in the unbalanced-covariate cell at `tau2=1`. In
+each, `tau2` was badly *under*-estimated: -69% and -35% respectively.
 
 The cause is that `sqrt(mean(v))` measures sampling noise, which is not the
 quantity `tau` describes. When heterogeneity is much larger than sampling error

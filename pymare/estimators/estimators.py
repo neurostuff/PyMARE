@@ -2,6 +2,7 @@
 
 import os
 import os.path as op
+import shutil
 from abc import ABCMeta, abstractmethod
 from inspect import getfullargspec, signature
 from warnings import warn
@@ -1543,8 +1544,11 @@ def _build_stan_data(y, v, X, groups=None, tau_prior_scale=None):
     X : :obj:`numpy.ndarray` of shape (K,) or (K, P)
         Observation-level predictors, including the intercept.
     groups : None or array-like of shape (K,) or (K, 1), optional
-        One hashable label per observation. When None (default), every
-        observation is its own group.
+        One scalar label per observation -- a string, integer or any other
+        hashable that numpy stores as a single element. Composite labels such
+        as tuples are not accepted, because numpy reads a sequence of them as a
+        second dimension. When None (default), every observation is its own
+        group.
     tau_prior_scale : None or :obj:`float`, optional
         Scale of the half-normal prior on tau. When None (default), it is set to
         ``max(std(y), sqrt(mean(v)))``: the larger of the observed spread of the
@@ -1585,8 +1589,10 @@ def _build_stan_data(y, v, X, groups=None, tau_prior_scale=None):
             "not support 2-dimensional inputs. Passed y has "
             "shape {}.".format(y.shape)
         )
-    y = y.reshape(-1)
+    y = np.asarray(y, dtype=float).reshape(-1)
     n_observations = y.shape[0]
+    if not np.all(np.isfinite(y)):
+        raise ValueError("Estimates (y) must all be finite.")
 
     v = np.asarray(v, dtype=float).reshape(-1)
     if v.shape[0] != n_observations:
@@ -1594,6 +1600,11 @@ def _build_stan_data(y, v, X, groups=None, tau_prior_scale=None):
             f"v must contain one sampling variance per observation: expected "
             f"{n_observations}, got {v.shape[0]}."
         )
+    # Order matters: NaN fails every comparison, so `v <= 0` alone would pass it
+    # through to sqrt() and on to CmdStan, which rejects it while reading the
+    # data -- a long way from the input that caused it.
+    if not np.all(np.isfinite(v)):
+        raise ValueError("Sampling variances (v) must all be finite.")
     if np.any(v <= 0):
         raise ValueError("Sampling variances (v) must all be positive.")
 
@@ -1605,6 +1616,8 @@ def _build_stan_data(y, v, X, groups=None, tau_prior_scale=None):
             f"X must contain one row per observation: expected {n_observations}, "
             f"got {X.shape[0]}."
         )
+    if not np.all(np.isfinite(X)):
+        raise ValueError("Predictors (X) must all be finite.")
 
     codes, labels = encode_groups(groups, n_observations=n_observations)
 
@@ -1778,20 +1791,37 @@ class StanMetaRegression(BaseEstimator):
 
         try:
             self.model = cmdstanpy.CmdStanModel(stan_file=STAN_MODEL_PATH, force_compile=force)
-        except (PermissionError, OSError):
-            fallback_dir = op.join(op.expanduser("~"), ".pymare", "stan")
-            os.makedirs(fallback_dir, exist_ok=True)
-            warn(
-                f"Could not compile the Stan model beside {STAN_MODEL_PATH}, most likely "
-                f"because it is not writable. Compiling into {fallback_dir} instead.",
-                stacklevel=2,
-            )
-            self.model = cmdstanpy.CmdStanModel(
-                stan_file=STAN_MODEL_PATH,
-                exe_file=op.join(fallback_dir, "meta_regression"),
-                force_compile=force,
-            )
+            return self
+        except Exception as unwritable:
+            # Deliberately broad. CmdStanPy reports *any* failed make invocation
+            # as ValueError, including for the read-only package directory this
+            # fallback exists for, so catching OSError would never fire.
+            first_failure = unwritable
 
+        # Compile a copy instead. Passing exe_file= would not work: that names an
+        # executable to reuse, not a destination to build into, so a read-only
+        # source directory fails there too -- make writes its intermediates
+        # beside the source. copy2 preserves the modification time, so the copy
+        # is not perpetually newer than its own executable and CmdStanPy's
+        # timestamp check keeps the cached build across processes.
+        fallback_dir = op.join(op.expanduser("~"), ".pymare", "stan")
+        try:
+            os.makedirs(fallback_dir, exist_ok=True)
+            fallback_source = op.join(fallback_dir, op.basename(STAN_MODEL_PATH))
+            shutil.copy2(STAN_MODEL_PATH, fallback_source)
+            model = cmdstanpy.CmdStanModel(stan_file=fallback_source, force_compile=force)
+        except Exception:
+            # Compiling somewhere writable failed too, so the first failure was
+            # not about writing. Report that one: it names the real problem,
+            # usually an error in the model or the C++ toolchain.
+            raise first_failure
+
+        warn(
+            f"Could not compile the Stan model beside {STAN_MODEL_PATH}, most likely because "
+            f"that directory is not writable. Compiled into {fallback_dir} instead.",
+            stacklevel=2,
+        )
+        self.model = model
         return self
 
     def fit(self, y, v, X, groups=None):
@@ -1808,12 +1838,14 @@ class StanMetaRegression(BaseEstimator):
             (including intercept); has dimensions K x P, where K is the
             number of observations and P is the number of predictor variables.
         groups : None or array-like of shape (K,), optional
-            One hashable label per observation, identifying the groups of
-            observations in the y/v/X inputs. Labels may be of any hashable
-            type and need not be consecutive; they are encoded internally in
-            order of first occurrence by
-            :func:`~pymare.stats.encode_groups`. When None (default), each
-            observation in the inputs is treated as a separate group.
+            One scalar label per observation, identifying the groups of
+            observations in the y/v/X inputs. Labels may be strings, integers
+            or any other hashable that numpy stores as a single element, and
+            need not be consecutive; they are encoded internally in order of
+            first occurrence by :func:`~pymare.stats.encode_groups`. Composite
+            labels such as tuples are not accepted, because numpy reads a
+            sequence of them as a 2-dimensional array. When None (default),
+            each observation in the inputs is treated as a separate group.
 
         Returns
         -------
