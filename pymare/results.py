@@ -4,7 +4,7 @@ import copy
 import itertools
 import math
 from functools import lru_cache
-from inspect import getfullargspec
+from inspect import getfullargspec, signature
 from warnings import warn
 
 import numpy as np
@@ -929,17 +929,77 @@ class PermutationTestResults:
         return df
 
 
+def _arviz_credible_interval_kwargs(ci):
+    """Return the ArviZ ``summary()`` arguments that request a `ci`% HDI.
+
+    Parameters
+    ----------
+    ci : :obj:`float`
+        Desired width of the credible interval, as a percentage.
+
+    Returns
+    -------
+    :obj:`dict`
+        Keyword arguments for the installed ArviZ version's ``summary()``.
+
+    Notes
+    -----
+    ArviZ 1.0 renamed ``hdi_prob`` to ``ci_prob`` and paired it with a
+    ``ci_kind`` defaulting to an equal-tailed rather than a highest-density
+    interval, so ``ci_kind="hdi"`` is needed to keep ``ci`` meaning the same
+    thing across both versions.
+
+    ``round_to="none"`` is not cosmetic: ArviZ 1.x otherwise formats the summary
+    for display by converting the floats to strings, so arithmetic on the
+    returned DataFrame would silently concatenate. ArviZ 0.x has no such
+    argument.
+    """
+    if int(az.__version__.split(".")[0]) >= 1:
+        return {"ci_prob": ci / 100.0, "ci_kind": "hdi", "round_to": "none"}
+    return {"hdi_prob": ci / 100.0}
+
+
+def _accepts_var_names(plotter):
+    """Report whether an ArviZ plotting function takes a ``var_names`` argument.
+
+    Parameters
+    ----------
+    plotter : callable
+        A function from the ArviZ namespace.
+
+    Returns
+    -------
+    :obj:`bool`
+        True when ``var_names`` can be passed to it.
+    """
+    try:
+        return "var_names" in signature(plotter).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 class BayesianMetaRegressionResults:
     """Container for MCMC sampling-based PyMARE meta-regression estimators.
 
     Parameters
     ----------
-    data : :obj:`pystan.StanFit4Model` or :obj:`arviz.InferenceData`
-        Either a StanFit4Model instance returned from PyStan or an ArviZ InferenceData instance.
+    data : :obj:`cmdstanpy.CmdStanMCMC` or :obj:`arviz.InferenceData`
+        Either a CmdStanMCMC instance returned from CmdStanPy or an object ArviZ
+        already understands (an InferenceData under ArviZ 0.x, a DataTree under 1.x).
     dataset : :obj:`~pymare.core.Dataset`
         A Dataset instance containing the inputs to the estimator.
     ci : :obj:`float`, optional
-        Desired width of highest posterior density (HPD) interval. Default = 95.0 (95%).
+        Desired width of the credible interval, as a percentage, used as the
+        default for :meth:`summary`. Default = 95.0 (95%).
+
+    Notes
+    -----
+    .. versionchanged:: 0.0.5
+
+        - Accepts a :obj:`cmdstanpy.CmdStanMCMC` rather than a PyStan fit.
+        - ``ci`` now sets the width of the interval :meth:`summary` reports. It
+          was previously stored and never used, so the interval was whatever
+          ArviZ defaulted to.
     """
 
     def __init__(self, data, dataset, ci=95.0):
@@ -948,8 +1008,20 @@ class BayesianMetaRegressionResults:
                 "ArviZ package must be installed in order to work "
                 "with the BayesianMetaRegressionResults class."
             )
-        if data.__class__.__name__ == "StanFit4Model":
-            data = az.from_pystan(data)
+        if not 0 < ci < 100:
+            raise ValueError(f"Invalid ci {ci!r}; must lie in (0, 100).")
+
+        # Convert here, not on use: ArviZ 1.x removed the automatic dispatch that
+        # let summary() accept a sampler fit, so a raw fit would fail at every
+        # call site instead of this one. The import is lazy because a caller
+        # passing an already-converted object should not need cmdstanpy.
+        try:
+            from cmdstanpy import CmdStanMCMC
+        except ImportError:
+            CmdStanMCMC = ()
+        if isinstance(data, CmdStanMCMC):
+            data = az.from_cmdstanpy(data)
+
         self.data = data
         self.dataset = dataset
         self.ci = ci
@@ -963,21 +1035,29 @@ class BayesianMetaRegressionResults:
             Whether or not to include the estimated group-level means in the summary.
             Default = False.
         **kwargs
-            Optional keyword arguments to pass onto ArviZ's summary().
+            Optional keyword arguments to pass onto ArviZ's summary(). Anything
+            passed here wins over the defaults derived from ``ci``.
 
         Returns
         -------
         :obj:`pandas.DataFrame`
             A pandas DataFrame, unless the `fmt="xarray"` argument is passed in
             kwargs, in which case an xarray Dataset is returned.
+
+        Notes
+        -----
+        The columns follow whichever ArviZ version is installed; 1.x renamed
+        several of them. Index by label rather than by position.
         """
         var_names = ["beta", "tau2"]
         if include_theta:
             var_names.append("theta")
         var_names = kwargs.pop("var_names", var_names)
+        for key, value in _arviz_credible_interval_kwargs(self.ci).items():
+            kwargs.setdefault(key, value)
         return az.summary(self.data, var_names, **kwargs)
 
-    def plot(self, kind="trace", **kwargs):
+    def plot(self, kind="trace", include_theta=False, **kwargs):
         """Generate various plots of the posterior estimates via ArviZ.
 
         Parameters
@@ -986,16 +1066,41 @@ class BayesianMetaRegressionResults:
             The type of ArviZ plot to generate. Can be any named function of the form "plot_{}" in
             the ArviZ namespace (e.g., 'trace', 'forest', 'posterior', etc.).
             Default = 'trace'.
+        include_theta : :obj:`bool`, optional
+            Whether or not to include the estimated group-level means in the plot.
+            Default = False.
         **kwargs
             Optional keyword arguments passed onto the corresponding
-            ArviZ plotting function (see ArviZ docs for details).
+            ArviZ plotting function (see ArviZ docs for details). Passing
+            ``var_names`` overrides the selection ``include_theta`` implies.
 
         Returns
         -------
         A matplotlib or bokeh object, depending on plot kind and kwargs.
+
+        Raises
+        ------
+        ValueError
+            If ArviZ has no plotting function of the requested kind.
+
+        Notes
+        -----
+        The plotted variables default to the ones :meth:`summary` reports rather
+        than everything recorded. A fitted model has one ``theta`` per group, so
+        plotting everything gives one panel per group -- illegible, and a hard
+        error under ArviZ 1.x, which caps panels at
+        ``rcParams["plot.max_subplots"]``.
         """
         name = "plot_{}".format(kind)
-        plotter = getattr(az, name)
+        # Three-argument getattr: the two-argument form raises AttributeError
+        # before the check below can turn it into the documented ValueError.
+        plotter = getattr(az, name, None)
         if plotter is None:
             raise ValueError("ArviZ has no plotting function '{}'.".format(name))
-        plotter(self.data, **kwargs)
+
+        # Not every ArviZ plot takes var_names -- plot_energy, for one, takes
+        # only the data -- so only offer the default to those that do.
+        if "var_names" not in kwargs and _accepts_var_names(plotter):
+            kwargs["var_names"] = ["beta", "tau2", "theta"] if include_theta else ["beta", "tau2"]
+
+        return plotter(self.data, **kwargs)

@@ -1,6 +1,8 @@
 """Meta-regression estimator classes."""
 
-import sys
+import os
+import os.path as op
+import shutil
 from abc import ABCMeta, abstractmethod
 from inspect import getfullargspec
 from warnings import warn
@@ -46,18 +48,52 @@ class Options:
 
 
 class Interval:
-    """Constrain a parameter to a closed numeric interval."""
+    """Constrain a parameter to a numeric interval.
 
-    def __init__(self, low, high):
+    Parameters
+    ----------
+    low, high : :obj:`float`
+        The endpoints. Use ``np.inf`` for an unbounded side.
+    closed : {"both", "left", "right", "neither"}, optional
+        Which endpoints are themselves allowed. Default = "both".
+    allow_none : :obj:`bool`, optional
+        Whether ``None`` passes the check, for a parameter whose default is
+        resolved from the data at fit time. Default = False.
+    """
+
+    #: Bracket characters per ``closed`` value, so the error message shows the
+    #: same interval notation the constraint was declared with.
+    _BRACKETS = {
+        "both": ("[", "]"),
+        "left": ("[", ")"),
+        "right": ("(", "]"),
+        "neither": ("(", ")"),
+    }
+
+    def __init__(self, low, high, closed="both", allow_none=False):
+        if closed not in self._BRACKETS:
+            raise ValueError(f"Invalid closed {closed!r}; must be one of {list(self._BRACKETS)}.")
         self.low = low
         self.high = high
+        self.closed = closed
+        self.allow_none = allow_none
 
     def check(self, name, value):
         """Raise if ``value`` is not a real number inside the interval."""
+        if value is None:
+            if self.allow_none:
+                return
+            raise ValueError(f"Invalid {name} None; must be a number.")
         if not isinstance(value, (int, float, np.integer, np.floating)) or isinstance(value, bool):
             raise ValueError(f"Invalid {name} {value!r}; must be a number.")
-        if not self.low <= float(value) <= self.high:
-            raise ValueError(f"Invalid {name} {value!r}; must lie in [{self.low}, {self.high}].")
+        value = float(value)
+        low_ok = self.low <= value if self.closed in ("both", "left") else self.low < value
+        high_ok = value <= self.high if self.closed in ("both", "right") else value < self.high
+        if not (low_ok and high_ok):
+            left, right = self._BRACKETS[self.closed]
+            raise ValueError(
+                f"Invalid {name} {value!r}; must lie in {left}{self.low}, {self.high}{right}."
+            )
 
 
 #: Constraints shared by the estimators that accept group labels. Assigned to
@@ -631,11 +667,12 @@ class BaseEstimator(metaclass=ABCMeta):
         for name, constraint in self._parameter_constraints.items():
             constraint.check(name, getattr(self, name))
 
-    # A class-level mapping from Dataset attributes to fit() arguments. Used by
+    # A class-level mapping from fit() arguments to Dataset attributes. Used by
     # fit_dataset() for estimators that take non-standard arguments (e.g., 'z'
-    # instead of 'y'). Keys are default Dataset attribute names (e.g., 'y') and
-    # values are the target arg names in the estimator class's fit() method
-    # (e.g., 'z').
+    # instead of 'y'). Keys are the argument names in the estimator class's
+    # fit() method and values are the Dataset attributes they are filled from,
+    # so {'z': 'y'} reads "fit()'s z argument takes dataset.y". An argument
+    # absent from the mapping is filled from the attribute of the same name.
     _dataset_attr_map = {}
 
     @abstractmethod
@@ -1646,79 +1683,329 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         )
 
 
-class StanMetaRegression(BaseEstimator):
-    """Bayesian meta-regression estimator using Stan.
+#: Location of the Stan program compiled by :obj:`~pymare.estimators.StanMetaRegression`.
+#: CmdStanPy needs a real filesystem path -- it hands the file to ``make`` -- so this
+#: is a plain join rather than ``importlib.resources``, which would need ``as_file``
+#: to materialize a path PyMARE never needs because it is not zip-imported.
+STAN_MODEL_PATH = op.join(op.dirname(__file__), "stan", "meta_regression.stan")
 
-    Parameters
-    ----------
-    **sampling_kwargs
-        Optional keyword arguments to pass on to the MCMC sampler
-        (e.g., `iter` for number of iterations).
+#: Sampler arguments that PyStan named differently from CmdStanPy. Mapped rather
+#: than silently ignored: passing ``num_samples`` to CmdStanPy's ``sample()``
+#: raises a bare ``TypeError`` naming no alternative, and every PyMARE example
+#: and test written against the old backend used these names.
+PYSTAN_SAMPLING_KWARGS = {
+    "num_samples": "iter_sampling",
+    "num_warmup": "iter_warmup",
+    "num_chains": "chains",
+    "num_thin": "thin",
+}
+
+
+def _import_cmdstanpy():
+    """Return the ``cmdstanpy`` module, or raise naming the step that is missing.
+
+    Returns
+    -------
+    module
+        The imported ``cmdstanpy`` module.
+
+    Raises
+    ------
+    ImportError
+        If ``cmdstanpy`` is not installed, or if it is installed but no CmdStan
+        installation can be found.
 
     Notes
     -----
-    For most uses, this class should be ignored in favor of the functional
-    stan() estimator. The object-oriented interface is useful primarily
-    when fitting the meta-regression model repeatedly to different data;
-    the separation of .compile() and .fit() steps allows one to compile
-    the model only once.
+    The two failures are reported separately because their fixes are different
+    and neither implies the other: ``pip install cmdstanpy`` succeeds without
+    installing CmdStan itself, which is a C++ toolchain build rather than a
+    Python package.
+    """
+    try:
+        import cmdstanpy
+    except ImportError:
+        raise ImportError(
+            "StanMetaRegression requires cmdstanpy, which is an optional dependency. "
+            "Install it with `pip install pymare[stan]`."
+        )
 
-    Warning
+    try:
+        cmdstanpy.cmdstan_path()
+    except Exception as exc:
+        raise ImportError(
+            "cmdstanpy is installed, but no CmdStan installation was found. Install one "
+            "with `python -m cmdstanpy.install_cmdstan` (this downloads and builds CmdStan, "
+            "and needs a C++ toolchain), or point the CMDSTAN environment variable at an "
+            f"existing installation. cmdstanpy reported: {exc}"
+        )
+
+    return cmdstanpy
+
+
+def _build_stan_data(y, v, X, groups=None, tau_prior_scale=None):
+    """Canonicalize the estimator's inputs into the data block of the Stan program.
+
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
+        Observation-level estimates.
+    v : :obj:`numpy.ndarray` of shape (K,) or (K, 1)
+        Observation-level sampling *variances*.
+    X : :obj:`numpy.ndarray` of shape (K,) or (K, P)
+        Observation-level predictors, including the intercept.
+    groups : None or array-like of shape (K,) or (K, 1), optional
+        One scalar label per observation -- a string, integer or any other
+        hashable that numpy stores as a single element. Composite labels such
+        as tuples are not accepted, because numpy reads a sequence of them as a
+        second dimension. When None (default), every observation is its own
+        group.
+    tau_prior_scale : None or :obj:`float`, optional
+        Scale of the half-normal prior on tau. When None (default), it is set to
+        ``max(std(y), sqrt(mean(v)))``: the larger of the observed spread of the
+        estimates and the typical sampling standard deviation.
+
+    Returns
     -------
-    :obj:`~pymare.estimators.StanMetaRegression` uses Pystan 3, which requires Python 3.7.
-    Pystan 3 should not be used with PyMARE and Python 3.6 or earlier.
+    :obj:`dict`
+        The data block, with every array in the shape and units the Stan program
+        declares.
+
+    Raises
+    ------
+    ValueError
+        If ``y`` is 2-dimensional with more than one column, if ``v`` or ``X``
+        disagree with ``y`` about the number of observations, or if any sampling
+        variance is not positive.
+
+    Notes
+    -----
+    Every shape and unit decision the Stan program depends on is made here and
+    nowhere else, so ``fit`` carries no downstream conditionals and the
+    translation is testable without a CmdStan installation.
+
+    ``sigma`` is ``sqrt(v)``, because Stan's ``normal`` takes a standard
+    deviation and PyMARE stores variances. ``id`` is 1-based consecutive codes from
+    :func:`~pymare.stats.encode_groups`, because the Stan program declares it
+    ``int<lower=1, upper=K>`` -- which is why arbitrary scalar labels are
+    accepted here.
+    """
+    y = np.asarray(y)
+    if y.ndim > 1 and y.shape[1] > 1:
+        raise ValueError(
+            "The StanMetaRegression estimator currently does "
+            "not support 2-dimensional inputs. Passed y has "
+            f"shape {y.shape}."
+        )
+    y = np.asarray(y, dtype=float).reshape(-1)
+    n_observations = y.shape[0]
+    if not np.all(np.isfinite(y)):
+        raise ValueError("Estimates (y) must all be finite.")
+
+    v = np.asarray(v, dtype=float).reshape(-1)
+    if v.shape[0] != n_observations:
+        raise ValueError(
+            f"v must contain one sampling variance per observation: expected "
+            f"{n_observations}, got {v.shape[0]}."
+        )
+    # Order matters: NaN fails every comparison, so `v <= 0` alone would pass it
+    # through to sqrt() and on to CmdStan, which rejects it while reading the
+    # data -- a long way from the input that caused it.
+    if not np.all(np.isfinite(v)):
+        raise ValueError("Sampling variances (v) must all be finite.")
+    if np.any(v <= 0):
+        raise ValueError("Sampling variances (v) must all be positive.")
+
+    X = np.asarray(X, dtype=float)
+    if X.ndim == 1:
+        X = X[:, None]
+    if X.shape[0] != n_observations:
+        raise ValueError(
+            f"X must contain one row per observation: expected {n_observations}, "
+            f"got {X.shape[0]}."
+        )
+    if not np.all(np.isfinite(X)):
+        raise ValueError("Predictors (X) must all be finite.")
+
+    codes, labels = encode_groups(groups, n_observations=n_observations)
+
+    if tau_prior_scale is None:
+        tau_prior_scale = max(np.std(y), np.sqrt(np.mean(v)))
+
+    return {
+        "N": n_observations,
+        "C": X.shape[1],
+        "K": int(labels.size),
+        "y": y,
+        "sigma": np.sqrt(v),
+        "X": X,
+        "id": (codes + 1).astype(int),
+        "tau_prior_scale": float(tau_prior_scale),
+    }
+
+
+class StanMetaRegression(BaseEstimator):
+    r"""Bayesian meta-regression estimator using Stan.
+
+    Parameters
+    ----------
+    tau_prior_scale : None or :obj:`float`, optional
+        Scale of the half-normal prior on tau, the between-group standard
+        deviation. When None (default), it is set to
+        ``max(std(y), sqrt(mean(v)))``, the larger of the observed spread of the
+        estimates and the typical sampling standard deviation.
+    **sampling_kwargs
+        Optional keyword arguments to pass on to CmdStanPy's sampler
+        (e.g., ``iter_sampling`` for the number of post-warmup draws per chain,
+        ``chains``, ``seed``, ``adapt_delta``).
+
+    Notes
+    -----
+    The model is
+
+    .. math::
+
+        y_i &\sim \mathcal{N}(x_i' \beta + \theta_{g(i)}, \sigma_i) \\
+        \theta_g &\sim \mathcal{N}(0, \tau)
+
+    where :math:`\sigma_i = \sqrt{v_i}` is the known sampling standard deviation
+    of observation :math:`i` and :math:`g(i)` is its group. This is the random-effects
+    meta-analysis model of the Stan User's Guide [1]_ with that guide's stated
+    extension to observation-level predictors. The reported ``tau2`` is
+    :math:`\tau^2`, the between-group *variance*, matching what every other
+    PyMARE estimator reports under that name.
+
+    ``theta`` is given a non-centered parameterization (``theta = tau *
+    theta_raw`` with ``theta_raw`` standard normal). The centered form produces
+    the funnel geometry that dominates divergences in hierarchical models with
+    few groups, which is this estimator's principal use case.
+
+    :math:`\tau` gets a half-normal prior, weakly informative per Stan's
+    recommendations [2]_ for models with few groups. Its scale is derived from the
+    data rather than fixed, since a fixed scale would be crushingly informative on
+    data measured in thousands and vacuous on data measured in thousandths.
+
+    The default scale is ``max(std(y), sqrt(mean(v)))``. :math:`\tau` cannot
+    plausibly exceed the spread of the estimates, and should not be presumed
+    smaller than a typical standard error, so the larger of the two never asserts
+    that :math:`\tau` is small when either quantity says otherwise. Erring large
+    is deliberate: too small a scale costs coverage, too large costs only
+    precision in :math:`\tau^2`. ``validation/stan`` records the measurements
+    behind that choice. Pass ``tau_prior_scale`` to override it.
+
+    :math:`\beta` keeps Stan's implicit improper uniform prior, so under a
+    diffuse prior on :math:`\tau` the posterior means agree with
+    :obj:`~pymare.estimators.VarianceBasedLikelihoodEstimator` at ``method="ML"``.
+
+    The Stan program is compiled on first use and cached beside the installed
+    source, so the cost is paid once per installation rather than per fit.
+
+    References
+    ----------
+    .. [1] Stan Development Team. Stan User's Guide, "Measurement Error and
+           Meta-Analysis", section "Meta-Analysis".
+           https://mc-stan.org/docs/stan-users-guide/measurement-error.html
+    .. [2] Stan Development Team. Prior Choice Recommendations.
+           https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations
+
+    .. versionchanged:: 0.0.11
+
+        - The backend moved from PyStan 3 to CmdStanPy. PyStan's sampler argument
+          names (``num_samples``, ``num_warmup``, ``num_chains``, ``num_thin``)
+          are rejected with a message naming their replacements.
+        - ``tau2`` is now the between-group variance rather than its square root,
+          and sampling variances are converted to standard deviations before
+          being passed to Stan. Both were wrong before, so posterior estimates
+          change.
+        - ``groups`` accepts scalar labels of any type, not only integers in
+          ``1..k``, and :meth:`fit_dataset` now passes ``dataset.g`` rather than
+          dropping it.
+        - ``ci`` now sets the width of the reported credible interval. It was
+          previously accepted and ignored.
     """
 
-    _result_cls = BayesianMetaRegressionResults
+    _dataset_attr_map = {"groups": "g"}
 
-    def __init__(self, **sampling_kwargs):
+    _parameter_constraints = {
+        "tau_prior_scale": Interval(0.0, np.inf, closed="neither", allow_none=True),
+    }
+
+    def __init__(self, tau_prior_scale=None, **sampling_kwargs):
+        renamed = {k: v for k, v in PYSTAN_SAMPLING_KWARGS.items() if k in sampling_kwargs}
+        if renamed:
+            raise TypeError(
+                "These are PyStan argument names, which StanMetaRegression no longer accepts: "
+                + ", ".join(
+                    f"{old!r} (CmdStanPy calls it {new!r})" for old, new in renamed.items()
+                )
+                + "."
+            )
+
+        self.tau_prior_scale = tau_prior_scale
         self.sampling_kwargs = sampling_kwargs
         self.model = None
         self.result_ = None
+        self._validate_params()
 
-        if sys.version_info < (3, 7):
-            raise RuntimeError(
-                "StanMetaRegression uses Pystan 3, which requires python 3.7 or higher. "
-                f"You are running Python {sys.version_info.major}.{sys.version_info.minor}. "
-                "Pystan 3 should not be used with PyMARE and Python 3.6 or earlier."
-            )
+    def compile(self, force=False):
+        """Compile the Stan model.
 
-    def compile(self):
-        """Compile the Stan model."""
-        # Note: we deliberately use a centered parameterization for the
-        # thetas at the moment. This is sub-optimal in terms of estimation,
-        # but allows us to avoid having to add extra logic to detect and
-        # handle intercepts in X.
-        spec = """
-        data {
-            int<lower=1> N;
-            int<lower=1> K;
-            vector[N] y;
-            array[N] int<lower=1,upper=K> id;
-            int<lower=1> C;
-            matrix[K, C] X;
-            vector[N] sigma;
-        }
-        parameters {
-            vector[C] beta;
-            vector[K] theta;
-            real<lower=0> tau2;
-        }
-        transformed parameters {
-            vector[N] mu;
-            mu = theta[id] + X * beta;
-        }
-        model {
-            y ~ normal(mu, sigma);
-            theta ~ normal(0, tau2);
-        }
+        Parameters
+        ----------
+        force : :obj:`bool`, optional
+            Whether to recompile even when an up-to-date executable already
+            exists. Default = False.
+
+        Returns
+        -------
+        :obj:`~pymare.estimators.StanMetaRegression`
+            The instance, so that ``compile()`` can be chained.
+
+        Notes
+        -----
+        Called by :meth:`fit` when needed, so it never has to be called
+        directly. Calling it in advance is worthwhile when the same estimator
+        will be fitted to several datasets, because the compiled executable does
+        not depend on the data.
+
+        The executable is written beside the installed ``.stan`` file, where
+        CmdStanPy finds and reuses it on later runs. If that directory is not
+        writable -- a read-only ``site-packages``, for instance -- it falls back
+        to ``~/.pymare/stan`` and warns once.
         """
-        try:
-            import stan
-        except ImportError:
-            raise ImportError("Please install pystan.")
+        cmdstanpy = _import_cmdstanpy()
 
-        self.model = stan.build(spec, data=self.data)
+        try:
+            self.model = cmdstanpy.CmdStanModel(stan_file=STAN_MODEL_PATH, force_compile=force)
+            return self
+        except Exception as unwritable:
+            # Deliberately broad: CmdStanPy reports any failed make invocation
+            # as ValueError, so catching OSError would never fire here.
+            first_failure = unwritable
+
+        # Compile a copy. exe_file= would not help: it names an executable to
+        # reuse rather than a destination to build into, and make writes its
+        # intermediates beside the source either way. copy2 preserves the mtime,
+        # so the copy never looks newer than its own executable and CmdStanPy's
+        # timestamp check keeps the cached build across processes.
+        fallback_dir = op.join(op.expanduser("~"), ".pymare", "stan")
+        try:
+            os.makedirs(fallback_dir, exist_ok=True)
+            fallback_source = op.join(fallback_dir, op.basename(STAN_MODEL_PATH))
+            shutil.copy2(STAN_MODEL_PATH, fallback_source)
+            model = cmdstanpy.CmdStanModel(stan_file=fallback_source, force_compile=force)
+        except Exception:
+            # Somewhere writable failed too, so the first failure was not about
+            # writing. Report that one -- it names the real problem.
+            raise first_failure
+
+        warn(
+            f"Could not compile the Stan model beside {STAN_MODEL_PATH}, most likely because "
+            f"that directory is not writable. Compiled into {fallback_dir} instead.",
+            stacklevel=2,
+        )
+        self.model = model
+        return self
 
     def fit(self, y, v, X, groups=None):
         """Run the Stan sampler and return results.
@@ -1733,17 +2020,28 @@ class StanMetaRegression(BaseEstimator):
             1d or 2d array containing observation-level predictors
             (including intercept); has dimensions K x P, where K is the
             number of observations and P is the number of predictor variables.
-        groups : :obj:`list` of :obj:`int`, optional
-            1d array of integers identifying
-            groups of observations in the y/v/X inputs. If
-            provided, values must consist of integers in the range of 1..k
-            (inclusive), where k is the number of distinct groups. When
-            None (default), it is assumed that each observation in the
-            inputs is a separate group.
+        groups : None or array-like of shape (K,), optional
+            One scalar label per observation, identifying the groups of
+            observations in the y/v/X inputs. Labels may be strings, integers
+            or any other hashable that numpy stores as a single element, and
+            need not be consecutive; they are encoded internally in order of
+            first occurrence by :func:`~pymare.stats.encode_groups`. Composite
+            labels such as tuples are not accepted, because numpy reads a
+            sequence of them as a 2-dimensional array. When None (default),
+            each observation in the inputs is treated as a separate group.
 
         Returns
         -------
-        A StanFit4Model object (see PyStan documentation for details).
+        :obj:`~pymare.estimators.StanMetaRegression`
+            The fitted instance.
+
+        Warns
+        -----
+        UserWarning
+            If the sampler reported divergent transitions. Divergences mean the
+            sampler could not explore part of the posterior, so the reported
+            means and intervals may be biased; refitting with a larger
+            ``adapt_delta`` is the usual remedy.
 
         Notes
         -----
@@ -1751,41 +2049,53 @@ class StanMetaRegression(BaseEstimator):
         observations belong to at least one common sampling unit, the `groups`
         argument can specify the nesting structure (i.e., which rows in `y`,
         `v`, and `X` belong to each group).
+
+        The raw CmdStanPy fit is kept on ``self.result_``, so its diagnostics
+        remain reachable -- ``est.result_.diagnose()`` reports R-hat, effective
+        sample size, E-BFMI and treedepth alongside divergences.
+
+        .. versionchanged:: 0.0.5
+            ``groups`` accepts arbitrary hashable labels, and passing a numpy
+            array no longer raises.
         """
         # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
         self.dataset_ = None
 
-        if y.ndim > 1 and y.shape[1] > 1:
-            raise ValueError(
-                "The StanMetaRegression estimator currently does "
-                "not support 2-dimensional inputs. Passed y has "
-                "shape {}.".format(y.shape)
-            )
-
-        N = y.shape[0]
-        groups = groups or np.arange(1, N + 1, dtype=int)
-        K = encode_groups(np.asarray(groups).ravel())[1].size
-
-        data = {
-            "K": K,
-            "N": N,
-            "id": groups,
-            "C": X.shape[1],
-            "X": X,
-            "y": y.ravel(),
-            "sigma": v.ravel(),
-        }
-
-        self.data = data
+        self.data = _build_stan_data(y, v, X, groups=groups, tau_prior_scale=self.tau_prior_scale)
 
         if self.model is None:
             self.compile()
 
-        self.result_ = self.model.sample(**self.sampling_kwargs)
+        self.result_ = self.model.sample(data=self.data, **self.sampling_kwargs)
+
+        # CmdStanPy logs its own diagnostic warnings. Reraising this one through
+        # the warnings module puts it under the caller's warning filters and
+        # makes it assertable, which a log record is not.
+        divergences = int(np.sum(self.result_.divergences))
+        if divergences:
+            warn(
+                f"The sampler reported {divergences} divergent transition(s). The posterior "
+                "summaries may be biased. Refit with a larger adapt_delta (e.g. "
+                "StanMetaRegression(adapt_delta=0.99)), and see result_.diagnose() for the "
+                "full diagnostic report.",
+                stacklevel=2,
+            )
+
         return self
 
     def summary(self, ci=95):
-        """Generate a BayesianMetaRegressionResults object from the fitted estimator."""
+        """Generate a BayesianMetaRegressionResults object from the fitted estimator.
+
+        Parameters
+        ----------
+        ci : :obj:`float`, optional
+            Desired width of the credible interval, as a percentage.
+            Default = 95.0 (95%).
+
+        Returns
+        -------
+        :obj:`~pymare.results.BayesianMetaRegressionResults`
+        """
         if self.result_ is None:
             name = self.__class__.__name__
             raise ValueError(

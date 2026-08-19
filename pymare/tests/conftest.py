@@ -1,5 +1,6 @@
 """Fixtures for the PyMARE test suite."""
 
+import os
 import os.path as op
 
 import numpy as np
@@ -16,7 +17,34 @@ from pymare.estimators import (
     VarianceBasedLikelihoodEstimator,
     WeightedLeastSquares,
 )
-from pymare.tests.utils import get_test_data_path
+from pymare.tests.utils import cmdstan_is_available, get_test_data_path
+
+
+def pytest_collection_modifyitems(config, items):
+    """Fail the run where CmdStan is declared present but is not.
+
+    The Stan tests skip when CmdStan is missing, so a contributor without it does
+    not see red. In CI that leniency is wrong: a skip is indistinguishable from a
+    pass in a job log, which is how this job once reported success while running
+    none of the tests it existed to run.
+
+    ``PYMARE_REQUIRE_CMDSTAN=1``, which the Stan CI job sets, asserts that the
+    environment should be able to run them. Failing at collection reports that
+    once rather than as a quietly shorter run.
+    """
+    if os.environ.get("PYMARE_REQUIRE_CMDSTAN") != "1":
+        return
+    if cmdstan_is_available():
+        return
+
+    raise pytest.UsageError(
+        "PYMARE_REQUIRE_CMDSTAN=1 says this environment should be able to run the "
+        "Stan tests, but cmdstanpy or its CmdStan installation is missing, so they "
+        "would all skip. Install them with `pip install -e .[stan]` followed by "
+        "`python -m cmdstanpy.install_cmdstan`, or unset PYMARE_REQUIRE_CMDSTAN to "
+        "allow the skip."
+    )
+
 
 # -----------------------------------------------------------------------------
 # Basic data
@@ -353,3 +381,74 @@ def two_samp_data():
         "sd2": np.sqrt(np.array([4, 16])),
         "n2": np.array([12, 16]),
     }
+
+
+# -----------------------------------------------------------------------------
+# Stan estimator
+# -----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_home(tmp_path, monkeypatch):
+    """Point ``os.path.expanduser("~")`` at a temporary directory, on any platform.
+
+    Returns
+    -------
+    :obj:`pathlib.Path`
+        The directory ``~`` now expands to.
+
+    Notes
+    -----
+    Both variables are needed. POSIX ``expanduser`` reads ``HOME``; Windows reads
+    ``USERPROFILE`` and ignores ``HOME`` entirely. Setting only ``HOME``
+    therefore looks portable while silently leaving the real profile in place on
+    Windows, so a test can pass on two platforms and write into the runner's
+    actual home directory on the third.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    return tmp_path
+
+
+@pytest.fixture(scope="package")
+def planted_hierarchical_dataset():
+    """Simulate a Dataset from the model ``meta_regression.stan`` encodes.
+
+    Returns
+    -------
+    :obj:`tuple` of (:obj:`~pymare.core.Dataset`, :obj:`dict`)
+        The simulated Dataset, with one group label per observation in ``g``,
+        and the parameter values it was generated from.
+
+    Notes
+    -----
+    The sampling standard deviations are drawn from ``uniform(0.1, 0.4)``, well
+    away from 1, and that is load-bearing. The ``variables`` fixture has ``v``
+    near 1, where ``v`` and ``sqrt(v)`` differ by a few percent, so a model that
+    confuses them fits it about as well as the correct one. Here ``v`` spans 0.01
+    to 0.16 against ``sqrt(v)`` from 0.1 to 0.4 -- a factor of 2.5 to 10 in one
+    direction -- so the mistake shows up as an inflated tau2. Do not substitute
+    ``variables`` here.
+
+    ``tau2`` and ``tau`` are likewise kept apart (0.25 against 0.5) so reporting
+    one under the other's name fails a tight interval.
+    """
+    rng = np.random.default_rng(20250818)
+
+    n_groups, per_group = 30, 3
+    beta = np.array([0.5, -0.8])
+    tau = 0.5
+
+    groups = np.repeat(np.arange(n_groups), per_group)
+    n_observations = groups.size
+
+    moderator = rng.normal(size=n_observations)
+    # Dataset prepends the intercept itself, so beta[0] is the intercept and
+    # beta[1] the moderator slope in the X the estimator will actually see.
+    X = np.column_stack([np.ones(n_observations), moderator])
+    theta = rng.normal(0, tau, size=n_groups)
+    sigma = rng.uniform(0.1, 0.4, size=n_observations)
+    y = X @ beta + theta[groups] + rng.normal(0, sigma)
+
+    dataset = Dataset(y=y, v=sigma**2, X=moderator, X_names=["moderator"], g=groups)
+    return dataset, {"beta": beta, "tau": tau, "tau2": tau**2}

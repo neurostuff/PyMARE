@@ -1,0 +1,431 @@
+{
+  "replications": 100,
+  "seed": 20260818,
+  "elapsed_seconds": 335.2,
+  "thresholds": {
+    "min_coverage": 0.9,
+    "max_beta_bias": 0.1
+  },
+  "cells": [
+    {
+      "name": "groups=5",
+      "config": {
+        "n_groups": "5",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        0.009240000000000003,
+        -0.008429999999999955
+      ],
+      "beta_coverage_per_coefficient": [
+        0.93,
+        0.93
+      ],
+      "beta_bias": 0.009240000000000003,
+      "beta_coverage": 0.93,
+      "coverage_se": 0.02551470164434614,
+      "tau2_bias": 0.12235999999999998,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 54
+    },
+    {
+      "name": "groups=20",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.005699999999999999,
+        -0.005239999999999958
+      ],
+      "beta_coverage_per_coefficient": [
+        0.91,
+        0.9
+      ],
+      "beta_bias": -0.005699999999999999,
+      "beta_coverage": 0.9,
+      "coverage_se": 0.03,
+      "tau2_bias": 0.010289999999999995,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "groups=50",
+      "config": {
+        "n_groups": "50",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.004449999999999992,
+        -0.004719999999999964
+      ],
+      "beta_coverage_per_coefficient": [
+        0.99,
+        0.96
+      ],
+      "beta_bias": -0.004719999999999964,
+      "beta_coverage": 0.96,
+      "coverage_se": 0.019595917942265433,
+      "tau2_bias": 0.008279999999999996,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "tau2=0",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.0",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        0.004770000000000009,
+        -0.0024699999999999622
+      ],
+      "beta_coverage_per_coefficient": [
+        0.97,
+        0.96
+      ],
+      "beta_bias": 0.004770000000000009,
+      "beta_coverage": 0.96,
+      "coverage_se": 0.019595917942265433,
+      "tau2_bias": 0.00402,
+      "tau2_truth": 0.0,
+      "fits_with_divergences": 14
+    },
+    {
+      "name": "tau2=0.1",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.0036099999999999995,
+        -0.0014999999999999525
+      ],
+      "beta_coverage_per_coefficient": [
+        0.94,
+        0.93
+      ],
+      "beta_bias": -0.0036099999999999995,
+      "beta_coverage": 0.93,
+      "coverage_se": 0.02551470164434614,
+      "tau2_bias": 0.017839999999999998,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "tau2=1",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "1.0",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        0.010260000000000005,
+        0.006100000000000039
+      ],
+      "beta_coverage_per_coefficient": [
+        0.96,
+        0.97
+      ],
+      "beta_bias": 0.010260000000000005,
+      "beta_coverage": 0.96,
+      "coverage_se": 0.019595917942265433,
+      "tau2_bias": 0.18483,
+      "tau2_truth": 1.0,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "singletons",
+      "config": {
+        "n_groups": "20",
+        "group_size": "1",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.013600000000000001,
+        0.0027800000000000524
+      ],
+      "beta_coverage_per_coefficient": [
+        0.98,
+        0.95
+      ],
+      "beta_bias": -0.013600000000000001,
+      "beta_coverage": 0.95,
+      "coverage_se": 0.021794494717703377,
+      "tau2_bias": 0.020919999999999998,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 1
+    },
+    {
+      "name": "unequal groups",
+      "config": {
+        "n_groups": "20",
+        "group_size": "unequal",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.0012999999999999956,
+        -0.004179999999999957
+      ],
+      "beta_coverage_per_coefficient": [
+        0.94,
+        0.99
+      ],
+      "beta_bias": -0.004179999999999957,
+      "beta_coverage": 0.94,
+      "coverage_se": 0.023748684174075843,
+      "tau2_bias": 0.02412,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "sigma x0.1",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "0.1",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        0.0026900000000000014,
+        -0.00048000000000000045
+      ],
+      "beta_coverage_per_coefficient": [
+        0.94,
+        0.95
+      ],
+      "beta_bias": 0.0026900000000000014,
+      "beta_coverage": 0.94,
+      "coverage_se": 0.023748684174075843,
+      "tau2_bias": 0.020710000000000003,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "sigma x10",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "10.0",
+        "n_predictors": "2",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.04500000000000001,
+        0.017270000000000042
+      ],
+      "beta_coverage_per_coefficient": [
+        0.98,
+        0.94
+      ],
+      "beta_bias": -0.04500000000000001,
+      "beta_coverage": 0.94,
+      "coverage_se": 0.023748684174075843,
+      "tau2_bias": 0.42099,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 6
+    },
+    {
+      "name": "1 predictor",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "1",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5
+      ],
+      "beta_bias_per_coefficient": [
+        -0.0045099999999999975
+      ],
+      "beta_coverage_per_coefficient": [
+        0.94
+      ],
+      "beta_bias": -0.0045099999999999975,
+      "beta_coverage": 0.94,
+      "coverage_se": 0.023748684174075843,
+      "tau2_bias": 0.008289999999999995,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "3 predictors",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "3",
+        "unbalanced": "False"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5,
+        -0.8,
+        0.3
+      ],
+      "beta_bias_per_coefficient": [
+        -0.009879999999999996,
+        0.0048900000000000375,
+        -0.0016899999999999875
+      ],
+      "beta_coverage_per_coefficient": [
+        0.94,
+        0.92,
+        0.99
+      ],
+      "beta_bias": -0.009879999999999996,
+      "beta_coverage": 0.92,
+      "coverage_se": 0.027129319932501065,
+      "tau2_bias": 0.020689999999999997,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "unbalanced covariate",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "0.1",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "True"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.00859,
+        0.007870000000000042
+      ],
+      "beta_coverage_per_coefficient": [
+        0.97,
+        0.95
+      ],
+      "beta_bias": -0.00859,
+      "beta_coverage": 0.95,
+      "coverage_se": 0.021794494717703377,
+      "tau2_bias": 0.020329999999999994,
+      "tau2_truth": 0.09999999999999998,
+      "fits_with_divergences": 0
+    },
+    {
+      "name": "unbalanced covariate, tau2=1",
+      "config": {
+        "n_groups": "20",
+        "group_size": "3",
+        "tau2": "1.0",
+        "sigma_scale": "1.0",
+        "n_predictors": "2",
+        "unbalanced": "True"
+      },
+      "replications": 100,
+      "true_beta": [
+        0.5,
+        -0.8
+      ],
+      "beta_bias_per_coefficient": [
+        -0.018280000000000005,
+        -0.024199999999999958
+      ],
+      "beta_coverage_per_coefficient": [
+        0.98,
+        0.93
+      ],
+      "beta_bias": -0.024199999999999958,
+      "beta_coverage": 0.93,
+      "coverage_se": 0.02551470164434614,
+      "tau2_bias": 0.04930000000000002,
+      "tau2_truth": 1.0,
+      "fits_with_divergences": 0
+    }
+  ]
+}

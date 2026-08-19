@@ -13,7 +13,7 @@ from pymare.estimators import (
     VarianceBasedLikelihoodEstimator,
     WeightedLeastSquares,
 )
-from pymare.estimators.estimators import _collapse_n_inputs
+from pymare.estimators.estimators import Interval, Options, _collapse_n_inputs
 from pymare.stats import (
     DEFAULT_RHO,
     collapse_groups,
@@ -894,3 +894,59 @@ def test_near_equal_sample_sizes_warn_rather_than_abort():
 
     with pytest.warns(UserWarning, match="too close"):
         SampleSizeBasedLikelihoodEstimator().fit(y=y, n=n, X=np.ones((20, 1)))
+
+
+# -----------------------------------------------------------------------------
+# Parameter constraints
+# -----------------------------------------------------------------------------
+
+
+def test_interval_rejects_an_unknown_closed_setting():
+    """A typo in a constraint declaration must fail where it is written."""
+    with pytest.raises(ValueError, match="must be one of"):
+        Interval(0.0, 1.0, closed="closed")
+
+
+@pytest.mark.parametrize(
+    ("closed", "accepted", "rejected"),
+    [
+        ("both", (0.0, 0.5, 1.0), ()),
+        ("left", (0.0, 0.5), (1.0,)),
+        ("right", (0.5, 1.0), (0.0,)),
+        ("neither", (0.5,), (0.0, 1.0)),
+    ],
+)
+def test_interval_honours_which_endpoints_are_closed(closed, accepted, rejected):
+    """Each ``closed`` setting admits exactly its own endpoints."""
+    constraint = Interval(0.0, 1.0, closed=closed)
+
+    for value in accepted:
+        constraint.check("rho", value)
+
+    for value in rejected:
+        with pytest.raises(ValueError, match="must lie in"):
+            constraint.check("rho", value)
+
+
+def test_interval_allows_none_only_when_told_to():
+    """None means "derive it from the data" for some parameters, and nothing for others."""
+    Interval(0.0, np.inf, closed="neither", allow_none=True).check("tau_prior_scale", None)
+
+    with pytest.raises(ValueError, match="must be a number"):
+        Interval(0.0, 1.0).check("rho", None)
+
+
+@pytest.mark.parametrize("value", ["0.5", True, None, [0.5]])
+def test_interval_rejects_things_that_are_not_numbers(value):
+    """Booleans are ints in Python, so they need excluding explicitly."""
+    with pytest.raises(ValueError, match="must be a number"):
+        Interval(0.0, 1.0).check("rho", value)
+
+
+def test_options_rejects_a_value_outside_the_set():
+    """The other constraint type, checked here because nothing else covered it."""
+    constraint = Options(("individual", "rescale"))
+    constraint.check("weight_scheme", "rescale")
+
+    with pytest.raises(ValueError, match="must be one of"):
+        constraint.check("weight_scheme", "collapsed")

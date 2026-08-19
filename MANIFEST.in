@@ -1,2 +1,3 @@
 include versioneer.py
 include pymare/_version.py
+recursive-include pymare *.stan

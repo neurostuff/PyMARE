@@ -98,14 +98,41 @@ environment does not have:
 
 | Target | What it runs | Needs |
 | --- | --- | --- |
-| `make unittest` | everything except the Stan tests | nothing extra |
-| `make test_stan` | the Stan estimator tests | `pip install -e .[stan]` |
+| `make unittest` | everything except the Stan sampling tests | nothing extra |
+| `make test_stan` | the Stan sampling tests | `pip install -e .[stan]`, then `make install_cmdstan` |
 | `make test_robumeta` | the robumeta alignment tests | nothing extra |
 | `make check_robumeta_alignment` | regenerates the robumeta reference values | Docker |
+| `make validate_stan` | re-measures the Stan model's bias and coverage (~10 min) | the same as `test_stan` |
 | `make lint` | flake8 over `pymare` and `benchmarks` | nothing extra |
 
 Each of these has a GitHub Actions job behind it, so a target that passes
 locally is the same check that runs on your pull request.
+
+`make test_stan` needs two installation steps rather than one: the `stan` extra
+brings in cmdstanpy, but CmdStan itself is a C++ build rather than a Python
+package, so `make install_cmdstan` fetches and builds it. That takes several
+minutes the first time and nothing thereafter.
+
+**Those tests skip locally when CmdStan is missing, but fail in CI.** The
+asymmetry is deliberate: a contributor without CmdStan should not see red, but a
+skip is indistinguishable from a pass in a CI log, which is how this job once
+reported success while running none of the tests it existed to run. The Stan job
+sets `PYMARE_REQUIRE_CMDSTAN=1`, and the `pytest_collection_modifyitems` hook in
+`pymare/tests/conftest.py` fails the run at collection wherever that is set and
+CmdStan is missing.
+
+Only the tests that sample are marked `stan`. Those that check how PyMARE's
+inputs are translated into Stan's data block need neither cmdstanpy nor CmdStan,
+so they are unmarked and run in the ordinary unit job on every platform.
+
+The model's accuracy is measured separately by `make validate_stan`, which takes
+about ten minutes and so is not run per pull request. It reports bias and
+credible-interval coverage across a grid of designs, records them in
+`pymare/tests/data/stan_validation.json`, and fails if any design cell misses
+`pymare.tests.utils.STAN_VALIDATION_THRESHOLDS`. Two tests hold that recorded
+file to the same thresholds on every run, and the `Validate the Stan model`
+workflow re-measures on a schedule. See `validation/stan/README.md` for the
+arrangement and the measurements.
 
 ### Alignment with robumeta
 
