@@ -13,16 +13,16 @@ _z2 = np.c_[_z1, np.array([-0.6, -1.61, -2.3, -0.8, -4.01])[:, None]]
 _params = [
     (StoufferCombinationTest, _z1, "directed", [4.69574]),
     (StoufferCombinationTest, _z1, "undirected", [4.87462819]),
-    (StoufferCombinationTest, _z1, "concordant", [4.55204117]),
+    (StoufferCombinationTest, _z1, "concordant", [4.69574275]),
     (StoufferCombinationTest, _z2, "directed", [4.69574275, -4.16803071]),
     (StoufferCombinationTest, _z2, "undirected", [4.87462819, 4.16803071]),
-    (StoufferCombinationTest, _z2, "concordant", [4.55204117, -4.00717817]),
+    (StoufferCombinationTest, _z2, "concordant", [4.69574275, -4.16803071]),
     (FisherCombinationTest, _z1, "directed", [5.22413541]),
     (FisherCombinationTest, _z1, "undirected", [5.27449962]),
-    (FisherCombinationTest, _z1, "concordant", [5.09434911]),
+    (FisherCombinationTest, _z1, "concordant", [5.22413541]),
     (FisherCombinationTest, _z2, "directed", [5.22413541, -3.30626405]),
     (FisherCombinationTest, _z2, "undirected", [5.27449962, 4.27572965]),
-    (FisherCombinationTest, _z2, "concordant", [5.09434911, -4.11869468]),
+    (FisherCombinationTest, _z2, "concordant", [5.22413541, -4.27572965]),
 ]
 
 
@@ -238,10 +238,14 @@ def test_combination_permutation_rejects_undirected_mode(combination_estimator):
 
 
 def test_combination_permutation_survives_saturated_p_values():
-    """Concordant p caps at 1, so its z is -inf and cannot be compared.
+    """Concordant p caps at 1, and the permutation test must still rank on it.
 
-    Ranking on z made every permutation tie at -inf, which read as "more
-    extreme than nothing" and returned the smallest achievable p-value.
+    Ranking on z made every permutation tie, which read as "more extreme than
+    nothing" and returned the smallest achievable p-value. The tie is no longer
+    at -inf -- a capped p now reads as a z of exactly zero -- but z is still the
+    wrong thing to rank on, because it is signed: a strongly negative result and
+    a strongly positive one sit at opposite ends of it while carrying the same
+    concordant evidence. The log p-value orders them together.
     """
     # Perfectly balanced z: neither tail wins, so both directed p-values are
     # 0.5 and the doubled minimum is capped at exactly 1.
@@ -249,7 +253,8 @@ def test_combination_permutation_survives_saturated_p_values():
     result = FisherCombinationTest(mode="concordant").fit_dataset(Dataset(y=z)).summary()
 
     assert np.ravel(result.p)[0] == 1.0
-    assert not np.isfinite(result.z).all()  # the condition that used to break it
+    # No evidence reads as zero, not as an infinite magnitude.
+    assert np.ravel(result.z)[0] == 0.0
 
     # Ranking on z gave 1 / n_perm here. This data is as far from significant
     # as it gets, so the permutation p-value should sit at the other end.
@@ -382,6 +387,71 @@ def test_stouffer_does_not_underflow_on_many_moderate_z():
     assert np.all(np.isfinite(fitted["logp"]))
     assert np.allclose(fitted["z"], 60.0)
     assert np.allclose(fitted["logp"], ss.norm.logsf(60.0))
+
+
+#: The tail each mode's p-value describes, as a function mapping the reported z
+#: back onto it. ``"concordant"`` doubles because its p-value carries the
+#: correction for having tested both tails.
+TAIL_OF_MODE = {
+    "directed": lambda z: ss.norm.sf(z),
+    "undirected": lambda z: ss.norm.sf(z),
+    "concordant": lambda z: 2 * ss.norm.sf(np.abs(z)),
+}
+
+
+@pytest.mark.parametrize("Cls", [StoufferCombinationTest, FisherCombinationTest])
+@pytest.mark.parametrize("mode", ["directed", "undirected", "concordant"])
+def test_reported_z_and_p_describe_the_same_tail(Cls, mode):
+    """A statistic and a p-value that disagree about their own tail area.
+
+    This is the invariant the concordant mode broke: it reported ``norm.isf(p)``
+    of an already-doubled p-value, so thresholding on z and thresholding on p
+    selected different results. It is asserted for all three modes because one
+    generic ``norm.isf(p)`` used to serve all three, and it happened to be right
+    for the two whose p-values are right-tailed -- which is why the mismatch went
+    unnoticed.
+    """
+    fitted = Cls(mode).fit(_z2).params_
+
+    assert np.allclose(TAIL_OF_MODE[mode](fitted["z"]), fitted["p"], rtol=1e-9)
+
+
+@pytest.mark.parametrize("Cls", [StoufferCombinationTest, FisherCombinationTest])
+def test_concordant_statistic_is_the_better_directed_combination(Cls):
+    """Winkler's T: ``max`` of the two directed combinations, not a shrunk copy.
+
+    :footcite:t:`winkler2016non` define the concordant statistic as
+    ``T = max(-2 sum ln p_k, -2 sum ln (1 - p_k))`` and apply the correction for
+    two tests to its p-value. So the concordant statistic must equal whichever
+    directed statistic won, exactly -- inverting the corrected p-value directly
+    returns something smaller.
+
+    References
+    ----------
+    .. footbibliography::
+    """
+    directed = Cls("directed")
+    positive = np.ravel(directed.fit(_z2).params_["z"])
+    negative = np.ravel(directed.fit(-_z2).params_["z"])
+    winner = np.where(positive >= negative, positive, -negative)
+
+    concordant = np.ravel(Cls("concordant").fit(_z2).params_["z"])
+
+    assert np.allclose(concordant, winner, rtol=1e-12, atol=1e-14)
+
+
+def test_concordant_statistic_of_one_input_is_that_input():
+    """The plainest case the old form got wrong: k = 1 must be the identity.
+
+    A single z of 3.0 has a two-sided p of 0.0027, which is exactly what the
+    concordant test reports -- so the statistic beside it has to be 3.0. It was
+    2.7822, the normal deviate of 0.0027 read as a one-tailed probability.
+    """
+    for zin in (-3.0, -0.3, 0.3, 3.0):
+        fitted = StoufferCombinationTest("concordant").fit(np.array([[zin]])).params_
+
+        assert np.allclose(np.ravel(fitted["z"])[0], zin)
+        assert np.allclose(np.ravel(fitted["p"])[0], 2 * ss.norm.sf(abs(zin)))
 
 
 def test_public_p_value_survives_the_move_to_log_space():
