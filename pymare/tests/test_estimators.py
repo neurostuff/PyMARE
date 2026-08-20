@@ -13,7 +13,12 @@ from pymare.estimators import (
     VarianceBasedLikelihoodEstimator,
     WeightedLeastSquares,
 )
-from pymare.estimators.estimators import Interval, Options, _collapse_n_inputs
+from pymare.estimators.estimators import (
+    SMALL_SAMPLE_CORRECTIONS,
+    Interval,
+    Options,
+    _collapse_n_inputs,
+)
 from pymare.stats import (
     DEFAULT_RHO,
     collapse_groups,
@@ -107,7 +112,13 @@ def test_hedges_estimator(dataset):
     # ground truth values are from metafor package in R, except that metafor
     # always gives negligibly different values for tau2, likely due to
     # algorithmic differences in the computation.
-    est = Hedges().fit_dataset(dataset)
+    #
+    # "wald" because metafor's own default is test="z", so that is the
+    # configuration the reference values were read off. PyMARE's default is
+    # "knapp-hartung"; the standard errors that produces are checked a few
+    # lines down, and the adjustment itself is pinned against metafor across
+    # 180 cases in test_metafor_alignment.py.
+    est = Hedges(small_sample_correction="wald").fit_dataset(dataset)
     results = est.summary()
     beta, tau2 = results.fe_params, results.tau2
     fe_stats = results.get_fe_stats()
@@ -128,6 +139,15 @@ def test_hedges_estimator(dataset):
     assert np.allclose(fe_stats["se"].ravel(), [3.0479, 1.1335], atol=1e-4)
     # The unweighted fit that produces tau^2 would have given these instead.
     assert not np.allclose(fe_stats["se"].ravel(), [0.8639, 0.3217], atol=1e-4)
+
+    # The default, "knapp-hartung", multiplies those standard errors by sqrt(q) and
+    # refers them to t with K - P degrees of freedom. tau^2 and the coefficients
+    # are untouched by the adjustment, so only the standard errors move.
+    default = Hedges().fit_dataset(dataset).summary()
+    assert np.allclose(np.ravel(default.tau2), tau2, rtol=0, atol=0)
+    assert np.allclose(default.fe_params, beta, rtol=0, atol=0)
+    assert np.allclose(default.get_fe_stats()["se"].ravel(), [3.0213, 1.1236], atol=1e-4)
+    assert np.all(default.fe_dof == 6)
 
 
 def test_2d_hedges(dataset_2d):
@@ -407,7 +427,8 @@ def test_sample_size_based_likelihood_matches_a_search_over_both_variances(datas
     [WeightedLeastSquares, DerSimonianLaird, Hedges, VarianceBasedLikelihoodEstimator],
     ids=["WLS", "DL", "HE", "ML"],
 )
-def test_model_based_cov_matches_the_fitted_weights(dataset, estimator):
+@pytest.mark.parametrize("correction", ["wald", "knapp-hartung", "knapp-hartung-conservative"])
+def test_model_based_cov_matches_the_fitted_weights(dataset, estimator, correction):
     """The reported covariance must be (X'WX)^-1 under the coefficients' own weights.
 
     Every estimator here fits the coefficients with ``1 / (v + tau^2)`` weights, so
@@ -415,13 +436,29 @@ def test_model_based_cov_matches_the_fitted_weights(dataset, estimator):
     Hedges previously reported the covariance of an unweighted fit instead -- the OLS
     fit it uses internally to obtain tau^2 -- which left the standard errors several
     times too small and unrelated to the coefficients beside them.
+
+    Crossed with ``small_sample_correction`` so the same statement is checked on
+    all three
+    inference paths: the Knapp-Hartung scale factor multiplies that matrix and
+    must not replace it, which is what makes a wrong matrix underneath the
+    adjustment still detectable here.
     """
-    results = estimator().fit_dataset(dataset).summary()
+    results = estimator(small_sample_correction=correction).fit_dataset(dataset).summary()
     tau2 = np.ravel(results.tau2)[0]
     w = 1.0 / (dataset.v + tau2)
     expected = np.linalg.pinv(dataset.X.T @ np.diag(w.ravel()) @ dataset.X)
 
-    assert np.allclose(results.fe_se.ravel(), np.sqrt(np.diag(expected)))
+    # q = e'We / (K - P), computed here from the definition rather than read back
+    # off the estimator.
+    resid = dataset.y - dataset.X @ results.fe_params
+    scale = 1.0
+    if correction != "wald":
+        k, p = dataset.X.shape
+        scale = float(np.sum(w * resid**2)) / (k - p)
+        if correction == "knapp-hartung-conservative":
+            scale = max(scale, 1.0)
+
+    assert np.allclose(results.fe_se.ravel(), np.sqrt(scale * np.diag(expected)))
 
 
 # -----------------------------------------------------------------------------
@@ -569,6 +606,133 @@ def test_estimators_groups_widen_standard_errors(grouped_estimator):
     robust = estimator().fit(**kwargs, g=groups).summary()
 
     assert np.all(robust.fe_se > naive.fe_se)
+
+
+def test_n_groups_discriminates_the_two_dof_sources(dataset, dependent_data):
+    """``n_groups_`` must say which correction produced ``fe_dof``.
+
+    The two sources are not distinguishable from the degrees of freedom
+    themselves: balanced groups with an intercept-only model give a *constant*
+    Satterthwaite dof, so a reader cannot conclude ``K - P`` from constancy. The
+    provenance therefore has to be recorded, and ``n_groups_`` is where -- None
+    for the model-based path, the group count for the cluster-robust one.
+    """
+    ungrouped = DerSimonianLaird().fit_dataset(dataset)
+    assert ungrouped.n_groups_ is None
+    assert np.all(ungrouped.summary().fe_dof == dataset.y.shape[0] - dataset.X.shape[1])
+
+    y, v, X, groups = dependent_data(np.random.RandomState(0))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        grouped = DerSimonianLaird().fit(y=y, v=v, X=X, g=groups)
+    assert grouped.n_groups_ == len(np.unique(groups))
+
+
+def test_estimator_rejects_unknown_small_sample_correction(grouped_estimator):
+    """An unrecognised small-sample correction should fail at construction."""
+    with pytest.raises(ValueError, match="Invalid small_sample_correction"):
+        # metafor's spelling, which PyMARE deliberately does not accept.
+        grouped_estimator[0](small_sample_correction="knha")
+
+
+def test_group_labels_take_precedence_over_the_correction_argument(grouped_estimator):
+    """With groups supplied, ``test`` must not reach the covariance at all.
+
+    The cluster-robust CR2 estimator and its Satterthwaite degrees of freedom are
+    the small-sample correction on that path, and stacking the Knapp-Hartung
+    scale factor on top of a sandwich would correct for the same thing twice. All
+    three values of ``small_sample_correction`` must therefore give byte-identical
+    grouped results.
+    """
+    estimator, _, inputs = grouped_estimator
+    kwargs, groups = inputs()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        fits = [
+            estimator(small_sample_correction=correction).fit(**kwargs, g=groups)
+            for correction in SMALL_SAMPLE_CORRECTIONS
+        ]
+
+    for other in fits[1:]:
+        assert np.array_equal(other.params_["inv_cov"], fits[0].params_["inv_cov"])
+        assert np.array_equal(other.params_["dof"], fits[0].params_["dof"])
+
+
+def test_knapp_hartung_leaves_the_coefficients_and_tau2_alone(variance_estimator, dataset):
+    """The adjustment is a statement about uncertainty, not about the estimate.
+
+    Only the covariance and the reference distribution may move; a change in
+    ``fe_params`` or ``tau2`` would mean the scale factor had leaked into the fit.
+    """
+    fits = {
+        correction: variance_estimator(small_sample_correction=correction).fit_dataset(dataset)
+        for correction in ("wald", "knapp-hartung")
+    }
+
+    plain, adjusted = fits["wald"], fits["knapp-hartung"]
+    assert np.array_equal(plain.params_["fe_params"], adjusted.params_["fe_params"])
+    assert np.array_equal(np.ravel(plain.params_["tau2"]), np.ravel(adjusted.params_["tau2"]))
+    assert plain.params_["dof"] is None
+    assert np.all(adjusted.params_["dof"] == dataset.y.shape[0] - dataset.X.shape[1])
+
+
+def test_weighted_least_squares_defaults_to_no_correction(dataset):
+    """tau^2 is given rather than estimated here, so there is no uncertainty to fix.
+
+    Unlike the estimators that estimate tau^2, ``WeightedLeastSquares`` defaults
+    to ``"wald"``. It still accepts the adjustment for a caller who plugged in a
+    tau^2 obtained elsewhere.
+    """
+    default = WeightedLeastSquares(tau2=8.0).fit_dataset(dataset).summary()
+    assert default.fe_dof is None
+    assert np.array_equal(
+        default.fe_se,
+        WeightedLeastSquares(tau2=8.0, small_sample_correction="wald")
+        .fit_dataset(dataset)
+        .summary()
+        .fe_se,
+    )
+
+    adjusted = (
+        WeightedLeastSquares(tau2=8.0, small_sample_correction="knapp-hartung")
+        .fit_dataset(dataset)
+        .summary()
+    )
+    assert np.all(adjusted.fe_dof == dataset.y.shape[0] - dataset.X.shape[1])
+    assert not np.allclose(adjusted.fe_se, default.fe_se)
+
+
+@pytest.mark.parametrize("n_estimates", [2, 3], ids=["K<P", "K==P"])
+def test_estimator_warns_and_falls_back_without_residual_dof(variance_estimator, n_estimates):
+    """A design with no residual degrees of freedom cannot be adjusted.
+
+    ``K - P`` is the divisor of the scale factor, so it has to be at least one.
+    The guard lives in :func:`~pymare.stats.knapp_hartung_cov_and_dof` and has to
+    survive the trip through an estimator: a saturated design must report the
+    uncorrected Wald test rather than raising or dividing by zero, which is why
+    the fallback is compared against ``"wald"`` rather than merely checked for
+    being finite.
+    """
+    rng = np.random.RandomState(4)
+    y = rng.randn(n_estimates, 1)
+    v = np.abs(rng.randn(n_estimates, 1)) + 0.5
+    X = rng.randn(n_estimates, 2)
+    dataset = Dataset(y=y, v=v, X=X, add_intercept=True)
+
+    with pytest.warns(UserWarning, match="residual degree"):
+        results = variance_estimator().fit_dataset(dataset).summary()
+
+    assert results.fe_dof is None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        unadjusted = (
+            variance_estimator(small_sample_correction="wald").fit_dataset(dataset).summary()
+        )
+    # equal_nan, because at K < P the model is under-identified and both paths
+    # report NaN standard errors. That the fallback reproduces ``"wald"`` exactly
+    # is
+    # still the claim; NaN is the right answer for both, not a failure of it.
+    assert np.array_equal(results.fe_se, unadjusted.fe_se, equal_nan=True)
 
 
 def test_estimator_rejects_unknown_weight_scheme(grouped_estimator):

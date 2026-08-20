@@ -24,11 +24,35 @@ from ..stats import (
     correlated_effects_weights,
     encode_groups,
     ensure_2d,
+    knapp_hartung_cov_and_dof,
     satterthwaite_dof,
     weighted_least_squares,
 )
 
 WEIGHT_SCHEMES = ("individual", "rescale", "collapse")
+
+#: How ``est / se`` is turned into a p-value and an interval on the model-based
+#: path, i.e. when no group labels are supplied.
+#:
+#: -   ``"knapp-hartung"`` -- the adjustment itself; see
+#:     :func:`~pymare.stats.knapp_hartung_cov_and_dof`.
+#: -   ``"knapp-hartung-conservative"`` -- the same, with the scale factor floored
+#:     at 1, so it can only widen an interval and never narrow one.
+#: -   ``"wald"`` -- no correction: the model-based covariance against a normal
+#:     reference.
+#:
+#: Named after what each one does rather than after ``metafor``'s spellings, whose
+#: ``"z"`` names a distribution and whose ``"adhoc"`` names a modification's
+#: provenance. ``"wald"`` rather than ``"none"`` because the choice is scoped to
+#: the model-based path: group labels bring their own correction, so ``"none"``
+#: would promise more than it delivers. The ``metafor`` equivalents are recorded
+#: in ``validation/metafor``.
+SMALL_SAMPLE_CORRECTIONS = ("knapp-hartung", "knapp-hartung-conservative", "wald")
+
+#: The correction applied unless the caller asks for another. On by default
+#: because the cost when it is unnecessary is small and the gain when it is
+#: necessary is large; see :class:`~pymare.estimators.DerSimonianLaird`.
+DEFAULT_SMALL_SAMPLE_CORRECTION = "knapp-hartung"
 
 #: Upper end of the bounded search variable that stands in for tau^2: a fraction
 #: just short of 1, which maps to a very large tau^2 rather than an infinite one.
@@ -97,11 +121,12 @@ class Interval:
 
 
 #: Constraints shared by the estimators that accept group labels. Assigned to
-#: each class's ``_parameter_constraints`` so that both parameters are checked
+#: each class's ``_parameter_constraints`` so that every parameter is checked
 #: by the same mechanism, in the same place.
 WEIGHTING_CONSTRAINTS = {
     "weight_scheme": Options(WEIGHT_SCHEMES),
     "rho": Interval(0.0, 1.0),
+    "small_sample_correction": Options(SMALL_SAMPLE_CORRECTIONS),
 }
 
 
@@ -573,63 +598,102 @@ def _dersimonian_laird_tau2(y, v, X):
     return np.maximum(0.0, (Q - (k - p)) / A)
 
 
-def _robust_cov_and_dof(y, v, X, beta, groups, tau2=0.0, model_cov=None, w=None):
-    """Compute the cluster-robust covariance and its degrees of freedom together.
+def _inference_cov_and_dof(
+    y, v, X, beta, model_cov, groups, small_sample_correction, tau2=0.0, w=None
+):
+    """Resolve the covariance and reference distribution fixed-effect inference uses.
 
     Parameters
     ----------
     y : :obj:`numpy.ndarray` of shape (K, D)
         Estimates.
-    v : :obj:`numpy.ndarray` of shape (K, D)
+    v : :obj:`numpy.ndarray` of shape (K, 1) or (K, D)
         Sampling variances.
     X : :obj:`numpy.ndarray` of shape (K, P)
         Fixed effect design matrix.
     beta : :obj:`numpy.ndarray` of shape (P, D)
         The fitted coefficients whose covariance is wanted.
     groups : None or :obj:`numpy.ndarray` of shape (K,)
-        Group labels, or None to leave the model-based covariance untouched.
+        Group labels, or None when no dependence was declared.
+    small_sample_correction : {"knapp-hartung", "knapp-hartung-conservative", "wald"}
+        The correction requested for the model-based path; see
+        :class:`~pymare.estimators.DerSimonianLaird`. Ignored when ``groups`` is
+        supplied.
     tau2 : :obj:`float` or :obj:`numpy.ndarray`, optional
         The tau^2 used for the weights, matching the value that produced ``beta``.
         Default = 0.
-    model_cov : None or :obj:`numpy.ndarray` of shape (P, P, D), optional
-        The model-based covariance, passed through to avoid a redundant
-        pseudo-inverse. Default = None.
-    w : None or :obj:`numpy.ndarray` of shape (K, D), optional
+    model_cov : :obj:`numpy.ndarray` of shape (P, P, D)
+        The model-based covariance ``(X'WX)^-1``, as returned by
+        :func:`~pymare.stats.weighted_least_squares` with ``return_cov=True``.
+        Required rather than optional: the Knapp-Hartung path scales it and has
+        nothing to fall back on, and a default of None would have turned a
+        precondition the docstring states into one the code does not enforce.
+    w : None or :obj:`numpy.ndarray` of shape (K, 1) or (K, D), optional
         The weights that produced ``beta``, so the residuals match the fit.
         Default = None.
 
     Returns
     -------
-    robust_cov : None or :obj:`numpy.ndarray` of shape (P, P, D)
-        The sandwich covariance, or None when ``groups`` is None.
+    cov : :obj:`numpy.ndarray` of shape (P, P, D)
+        The covariance to report, ready to store under ``params_["inv_cov"]``.
     n_groups : None or :obj:`int`
         The number of groups, or None when ``groups`` is None.
     dof : None or :obj:`numpy.ndarray` of shape (P, D)
-        Satterthwaite degrees of freedom, or None when ``groups`` is None.
+        Degrees of freedom for a t reference, or None to use a normal one.
 
     See Also
     --------
     pymare.stats.cluster_robust_cov
     pymare.stats.satterthwaite_dof
+    pymare.stats.knapp_hartung_cov_and_dof
 
     Notes
     -----
-    The degrees of freedom are computed here, alongside the sandwich, so that they
-    are guaranteed to reflect the same weights and the same group structure.
+    One place decides which small-sample correction applies, so the covariance
+    and the reference distribution cannot disagree about it. Dependent
+    observations get the CR2 sandwich with Satterthwaite degrees of freedom;
+    independent ones get the Knapp-Hartung adjustment with ``K - P``. They are
+    alternatives rather than layers -- a sandwich already stops assuming the
+    fitted weights are right, which is the whole content of the Knapp-Hartung
+    scale factor, so applying both would correct for the same thing twice.
+
+    The degrees of freedom are computed here, alongside the covariance, so that
+    they are guaranteed to reflect the same weights and the same group structure.
     Computing them in ``results`` instead would mean reconstructing both, and any
     drift would silently change the reference distribution rather than raising.
 
     ``model_cov`` is only reusable when it is ``(X'WX)^-1`` under these same
-    weights; callers that cannot promise that must pass None, in which case
-    :func:`~pymare.stats.satterthwaite_dof` rebuilds it.
+    weights. A caller that cannot promise that has no business here at all: the
+    grouped path would hand it to :func:`~pymare.stats.satterthwaite_dof` as the
+    bread of a sandwich, and the model-based path would scale it. Both produce a
+    silently wrong answer rather than an error.
 
     The group count is returned separately rather than folded into ``params_``,
     which holds only per-dataset arrays. ``dof`` is an array of shape ``(P, D)``,
     so it does travel in ``params_``.
     """
     if groups is None:
-        return None, None, None
+        if small_sample_correction == "wald":
+            return model_cov, None, None
+        cov, dof = knapp_hartung_cov_and_dof(
+            y,
+            v,
+            X,
+            beta,
+            model_cov,
+            tau2=tau2,
+            w=w,
+            conservative=small_sample_correction == "knapp-hartung-conservative",
+        )
+        return cov, None, dof
 
+    # ``small_sample_correction`` is not consulted from here on. It governs the
+    # model-based path only, and it is deliberately silent rather than a warning
+    # when group labels make that path unreachable: the estimators do not share
+    # one default for it -- WeightedLeastSquares takes tau^2 as given and so
+    # defaults to "wald" -- and a warning keyed on "not the default" would fire on
+    # ordinary use of one estimator while staying quiet on the same request to
+    # another.
     groups = np.asarray(groups).ravel()
     n_groups = encode_groups(groups, n_observations=y.shape[0])[1].size
     robust_cov = cluster_robust_cov(y, v, X, beta, groups, tau2=tau2, model_cov=model_cov, w=w)
@@ -795,6 +859,16 @@ class WeightedLeastSquares(BaseEstimator):
         Assumed within-group correlation, used by the schemes that model a
         group. Must lie in [0, 1]. Setting it under ``"individual"``, which
         models no correlation, warns. Default is None, meaning 0.8.
+    small_sample_correction : {"wald", "knapp-hartung", \
+"knapp-hartung-conservative"}, optional
+        How the standard errors are corrected for a small number of observations;
+        see :func:`~pymare.stats.knapp_hartung_cov_and_dof`. Default is
+        ``"wald"``, no correction, unlike the estimators that *estimate* tau^2:
+        the adjustment exists to account for uncertainty in an estimated tau^2 and
+        this estimator takes tau^2 as given. Accepted anyway, for a caller who
+        plugged in a tau^2 obtained elsewhere.
+
+        .. versionadded:: 0.0.11
 
     Notes
     -----
@@ -817,10 +891,12 @@ class WeightedLeastSquares(BaseEstimator):
         tau2=0.0,
         weight_scheme="individual",
         rho=None,
+        small_sample_correction="wald",
     ):
         self.tau2 = tau2
         self.weight_scheme = weight_scheme
         self.rho = _resolve_rho(rho, weight_scheme)
+        self.small_sample_correction = small_sample_correction
         self._validate_params()
 
     def fit(self, y, X, v=None, g=None):
@@ -857,17 +933,24 @@ class WeightedLeastSquares(BaseEstimator):
         self.tau2_model_ = _tau2_model(fit_groups, X, self.weight_scheme, correlated_effects=True)
         w = _resolve_weights(v, fit_groups, self.tau2, self.weight_scheme)
         beta, model_cov = weighted_least_squares(y, v, X, self.tau2, return_cov=True, w=w)
-        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
-            y, v, X, beta, fit_groups, tau2=self.tau2, model_cov=model_cov, w=w
+        cov, self.n_groups_, dof = _inference_cov_and_dof(
+            y,
+            v,
+            X,
+            beta,
+            model_cov,
+            fit_groups,
+            self.small_sample_correction,
+            tau2=self.tau2,
+            w=w,
         )
         self.params_ = {
             "fe_params": beta,
             "tau2": self.tau2,
             # NB: the key is a legacy misnomer; the value is a covariance.
-            "inv_cov": model_cov if robust_cov is None else robust_cov,
+            "inv_cov": cov,
+            "dof": dof,
         }
-        if dof is not None:
-            self.params_["dof"] = dof
         return self
 
 
@@ -886,6 +969,23 @@ class DerSimonianLaird(BaseEstimator):
         Assumed within-group correlation, used by the schemes that model a
         group. Must lie in [0, 1]. Setting it under ``"individual"``, which
         models no correlation, warns. Default is None, meaning 0.8.
+    small_sample_correction : {"knapp-hartung", "knapp-hartung-conservative", \
+"wald"}, optional
+        How the model-based standard errors are corrected for a small number of
+        observations. ``"knapp-hartung"`` (default) is the adjustment,
+        ``"knapp-hartung-conservative"`` the variant that can only widen an
+        interval, ``"wald"`` no correction; see
+        :func:`~pymare.stats.knapp_hartung_cov_and_dof` for what each does and
+        when to prefer which. Ignored when group labels are supplied, where the
+        cluster-robust CR2 estimator and its Satterthwaite degrees of freedom are
+        the correction instead -- which is why the uncorrected option is called
+        ``"wald"`` rather than ``"none"``.
+
+        .. versionadded:: 0.0.11
+            Defaults to ``"knapp-hartung"``, which changes every standard error,
+            p-value and interval this estimator reports without group labels.
+            ``small_sample_correction="wald"`` returns the values earlier releases
+            gave.
 
     Notes
     -----
@@ -901,9 +1001,15 @@ class DerSimonianLaird(BaseEstimator):
 
     _parameter_constraints = WEIGHTING_CONSTRAINTS
 
-    def __init__(self, weight_scheme="individual", rho=None):
+    def __init__(
+        self,
+        weight_scheme="individual",
+        rho=None,
+        small_sample_correction=DEFAULT_SMALL_SAMPLE_CORRECTION,
+    ):
         self.weight_scheme = weight_scheme
         self.rho = _resolve_rho(rho, weight_scheme)
+        self.small_sample_correction = small_sample_correction
         self._validate_params()
 
     def fit(self, y, v, X, g=None):
@@ -966,24 +1072,24 @@ class DerSimonianLaird(BaseEstimator):
         beta_dl, model_cov = weighted_least_squares(
             model_y, model_v, model_X, tau2=tau_dl, return_cov=True, w=w
         )
-        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
+        cov, self.n_groups_, dof = _inference_cov_and_dof(
             model_y,
             model_v,
             model_X,
             beta_dl,
+            model_cov,
             model_groups,
+            self.small_sample_correction,
             tau2=tau_dl,
-            model_cov=model_cov,
             w=w,
         )
         self.params_ = {
             "fe_params": beta_dl,
             "tau2": tau_dl,
             # NB: the key is a legacy misnomer; the value is a covariance.
-            "inv_cov": model_cov if robust_cov is None else robust_cov,
+            "inv_cov": cov,
+            "dof": dof,
         }
-        if dof is not None:
-            self.params_["dof"] = dof
         return self
 
 
@@ -1002,6 +1108,23 @@ class Hedges(BaseEstimator):
         Assumed within-group correlation, used by the schemes that model a
         group. Must lie in [0, 1]. Setting it under ``"individual"``, which
         models no correlation, warns. Default is None, meaning 0.8.
+    small_sample_correction : {"knapp-hartung", "knapp-hartung-conservative", \
+"wald"}, optional
+        How the model-based standard errors are corrected for a small number of
+        observations. ``"knapp-hartung"`` (default) is the adjustment,
+        ``"knapp-hartung-conservative"`` the variant that can only widen an
+        interval, ``"wald"`` no correction; see
+        :func:`~pymare.stats.knapp_hartung_cov_and_dof` for what each does and
+        when to prefer which. Ignored when group labels are supplied, where the
+        cluster-robust CR2 estimator and its Satterthwaite degrees of freedom are
+        the correction instead -- which is why the uncorrected option is called
+        ``"wald"`` rather than ``"none"``.
+
+        .. versionadded:: 0.0.11
+            Defaults to ``"knapp-hartung"``, which changes every standard error,
+            p-value and interval this estimator reports without group labels.
+            ``small_sample_correction="wald"`` returns the values earlier releases
+            gave.
 
     Notes
     -----
@@ -1031,9 +1154,15 @@ class Hedges(BaseEstimator):
 
     _parameter_constraints = WEIGHTING_CONSTRAINTS
 
-    def __init__(self, weight_scheme="individual", rho=None):
+    def __init__(
+        self,
+        weight_scheme="individual",
+        rho=None,
+        small_sample_correction=DEFAULT_SMALL_SAMPLE_CORRECTION,
+    ):
         self.weight_scheme = weight_scheme
         self.rho = _resolve_rho(rho, weight_scheme)
+        self.small_sample_correction = small_sample_correction
         self._validate_params()
 
     def fit(self, y, v, X, g=None):
@@ -1097,24 +1226,24 @@ class Hedges(BaseEstimator):
         beta_ho, model_cov = weighted_least_squares(
             model_y, model_v, model_X, tau2=tau_ho, return_cov=True, w=w
         )
-        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
+        cov, self.n_groups_, dof = _inference_cov_and_dof(
             model_y,
             model_v,
             model_X,
             beta_ho,
+            model_cov,
             model_groups,
+            self.small_sample_correction,
             tau2=tau_ho,
-            model_cov=model_cov,
             w=w,
         )
         self.params_ = {
             "fe_params": beta_ho,
             "tau2": tau_ho,
             # NB: the key is a legacy misnomer; the value is a covariance.
-            "inv_cov": model_cov if robust_cov is None else robust_cov,
+            "inv_cov": cov,
+            "dof": dof,
         }
-        if dof is not None:
-            self.params_["dof"] = dof
         return self
 
 
@@ -1139,6 +1268,23 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         Assumed within-group correlation, used by the schemes that model a
         group. Must lie in [0, 1]. Setting it under ``"individual"``, which
         models no correlation, warns. Default is None, meaning 0.8.
+    small_sample_correction : {"knapp-hartung", "knapp-hartung-conservative", \
+"wald"}, optional
+        How the model-based standard errors are corrected for a small number of
+        observations. ``"knapp-hartung"`` (default) is the adjustment,
+        ``"knapp-hartung-conservative"`` the variant that can only widen an
+        interval, ``"wald"`` no correction; see
+        :func:`~pymare.stats.knapp_hartung_cov_and_dof` for what each does and
+        when to prefer which. Ignored when group labels are supplied, where the
+        cluster-robust CR2 estimator and its Satterthwaite degrees of freedom are
+        the correction instead -- which is why the uncorrected option is called
+        ``"wald"`` rather than ``"none"``.
+
+        .. versionadded:: 0.0.11
+            Defaults to ``"knapp-hartung"``, which changes every standard error,
+            p-value and interval this estimator reports without group labels.
+            ``small_sample_correction="wald"`` returns the values earlier releases
+            gave.
     **kwargs
         Keyword arguments to pass to :func:`~pymare.stats.bounded_scalar_min`,
         which searches for the variance components (e.g., ``xtol``).
@@ -1157,10 +1303,18 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
 
     _parameter_constraints = WEIGHTING_CONSTRAINTS
 
-    def __init__(self, method="ml", weight_scheme="individual", rho=None, **kwargs):
+    def __init__(
+        self,
+        method="ml",
+        weight_scheme="individual",
+        rho=None,
+        small_sample_correction=DEFAULT_SMALL_SAMPLE_CORRECTION,
+        **kwargs,
+    ):
         self.method = method
         self.weight_scheme = weight_scheme
         self.rho = _resolve_rho(rho, weight_scheme)
+        self.small_sample_correction = small_sample_correction
         self._validate_params()
         nll_func = getattr(self, "_{}_profile_nll".format(method.lower()), None)
         if nll_func is None:
@@ -1233,14 +1387,15 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
         # fitted to, which may have been aggregated. Cluster weighting changes the
         # estimand, so they have to come from these weights in any case.
         beta, model_cov = weighted_least_squares(model_y, model_v, model_X, tau2, True, w=w)
-        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
+        cov, self.n_groups_, dof = _inference_cov_and_dof(
             model_y,
             model_v,
             model_X,
             beta,
+            model_cov,
             model_groups,
+            self.small_sample_correction,
             tau2=tau2,
-            model_cov=model_cov,
             w=w,
         )
         self.params_ = {
@@ -1248,10 +1403,9 @@ class VarianceBasedLikelihoodEstimator(BaseEstimator):
             # Kept 2d, as the per-dataset loop this replaced used to leave it.
             "tau2": np.atleast_2d(tau2),
             # NB: the key is a legacy misnomer; the value is a covariance.
-            "inv_cov": model_cov if robust_cov is None else robust_cov,
+            "inv_cov": cov,
+            "dof": dof,
         }
-        if dof is not None:
-            self.params_["dof"] = dof
         return self
 
     @staticmethod
@@ -1379,6 +1533,28 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         Assumed within-group correlation, used by the schemes that model a
         group. Must lie in [0, 1]. Setting it under ``"individual"``, which
         models no correlation, warns. Default is None, meaning 0.8.
+    small_sample_correction : {"knapp-hartung", "knapp-hartung-conservative", \
+"wald"}, optional
+        How the model-based standard errors are corrected for a small number of
+        observations. ``"knapp-hartung"`` (default) is the adjustment,
+        ``"knapp-hartung-conservative"`` the variant that can only widen an
+        interval, ``"wald"`` no correction; see
+        :func:`~pymare.stats.knapp_hartung_cov_and_dof` for what each does and
+        when to prefer which. Ignored when group labels are supplied, where the
+        cluster-robust CR2 estimator and its Satterthwaite degrees of freedom are
+        the correction instead -- which is why the uncorrected option is called
+        ``"wald"`` rather than ``"none"``.
+
+        .. versionadded:: 0.0.11
+            Defaults to ``"knapp-hartung"``, which changes every standard error,
+            p-value and interval this estimator reports without group labels.
+            ``small_sample_correction="wald"`` returns the values earlier releases
+            gave.
+
+        :footcite:t:`knapp2003improved` assume the sampling variances are known,
+        and here ``v = sigma^2 / n`` is built from an estimated ``sigma^2``. The
+        default follows the same reasoning as for the other estimators rather than
+        a measurement of this case.
     **kwargs
         Keyword arguments to pass to :func:`~pymare.stats.bounded_scalar_min`,
         which searches for the variance components (e.g., ``xtol``).
@@ -1400,10 +1576,18 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
 
     _parameter_constraints = WEIGHTING_CONSTRAINTS
 
-    def __init__(self, method="ml", weight_scheme="individual", rho=None, **kwargs):
+    def __init__(
+        self,
+        method="ml",
+        weight_scheme="individual",
+        rho=None,
+        small_sample_correction=DEFAULT_SMALL_SAMPLE_CORRECTION,
+        **kwargs,
+    ):
         self.method = method
         self.weight_scheme = weight_scheme
         self.rho = _resolve_rho(rho, weight_scheme)
+        self.small_sample_correction = small_sample_correction
         self._validate_params()
         nll_func = getattr(self, "_{}_profile_nll".format(method.lower()), None)
         if nll_func is None:
@@ -1511,14 +1695,15 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
         # weighting changes the estimand, so they have to come from these weights
         # in any case.
         beta, model_cov = weighted_least_squares(model_y, v, model_X, tau2, True, w=w)
-        robust_cov, self.n_groups_, dof = _robust_cov_and_dof(
+        cov, self.n_groups_, dof = _inference_cov_and_dof(
             model_y,
             v,
             model_X,
             beta,
+            model_cov,
             model_groups,
+            self.small_sample_correction,
             tau2=tau2,
-            model_cov=model_cov,
             w=w,
         )
         self.params_ = {
@@ -1527,10 +1712,9 @@ class SampleSizeBasedLikelihoodEstimator(BaseEstimator):
             "sigma2": np.atleast_2d(sigma2),
             "tau2": np.atleast_2d(tau2),
             # NB: the key is a legacy misnomer; the value is a covariance.
-            "inv_cov": model_cov if robust_cov is None else robust_cov,
+            "inv_cov": cov,
+            "dof": dof,
         }
-        if dof is not None:
-            self.params_["dof"] = dof
         return self
 
     def _profile_ddof(self, X):

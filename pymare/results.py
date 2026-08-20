@@ -279,12 +279,22 @@ class MetaRegressionResults:
 
         Notes
         -----
-        When the estimator was fitted with group labels, the standard errors
-        are cluster-robust and the sampling distribution of ``est / se`` is
-        referred to a t distribution with Satterthwaite degrees of freedom
-        :footcite:p:`tipton2015small`, computed separately for each predictor
-        and parallel dataset; see :attr:`fe_dof`. Otherwise a normal reference
-        is used, as before.
+        ``est / se`` is referred to a t distribution whenever the estimator
+        recorded degrees of freedom for it, and to a normal distribution
+        otherwise; :attr:`fe_dof` says which correction supplied them. With group
+        labels the standard errors are cluster-robust and the reference has
+        Satterthwaite degrees of freedom :footcite:p:`tipton2015small`; without
+        them, under the default ``small_sample_correction="knapp-hartung"``, the
+        covariance carries the
+        Knapp-Hartung scale factor :footcite:p:`knapp2003improved` and the
+        reference has ``K - P``. ``small_sample_correction="wald"`` gives a normal
+        reference, as before.
+
+        Under ``"knapp-hartung"`` a standard error of exactly zero reaches this
+        method when the weighted residuals are all zero -- the scale factor
+        correctly reporting that a perfectly fitting dataset says nothing about
+        how uncertain the coefficients are. The ``undefined`` branch below turns
+        that into a NaN p-value rather than a maximally significant one.
 
         References
         ----------
@@ -337,12 +347,26 @@ class MetaRegressionResults:
     def fe_dof(self):
         """Get the degrees of freedom used for fixed-effect inference.
 
+        An array of shape ``(p, d)``, one per predictor and parallel dataset, or
+        None when a normal reference is used instead. Two different corrections
+        can supply them, and they are not interchangeable: with group labels,
         Satterthwaite degrees of freedom for the CR2 cluster-robust standard
-        errors :footcite:p:`tipton2015small`, as an array of shape ``(p, d)``:
-        one per predictor and parallel dataset. None when no group labels were
-        supplied and a normal reference is therefore used.
+        errors :footcite:p:`tipton2015small`; without them, ``K - P``, the
+        residual degrees of freedom of the Knapp-Hartung adjustment
+        :footcite:p:`knapp2003improved`, or None under
+        ``small_sample_correction="wald"``. The
+        Which one produced a given array is recorded rather than inferable from
+        it: ``estimator.n_groups_`` is None for the model-based path and the group
+        count for the cluster-robust one. It is not safe to read the provenance
+        off the values -- balanced groups with an intercept-only model give a
+        constant Satterthwaite dof, so "constant" does not imply ``K - P``.
 
-        These are *not* the naive :math:`m - p` of
+        .. versionchanged:: 0.0.11
+            No longer None for an estimator fitted without group labels, unless
+            ``small_sample_correction="wald"`` was requested.
+
+        The rest of this applies to the cluster-robust case. These are *not* the
+        naive :math:`m - p` of
         :footcite:t:`hedges2010robust`. That count is right only when weight is
         spread evenly across groups; when a predictor is unbalanced at the
         group level it badly overstates the information available, and the
