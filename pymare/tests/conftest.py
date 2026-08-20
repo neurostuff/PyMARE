@@ -344,6 +344,12 @@ def robumeta_dataset():
     return frame, designs
 
 
+@pytest.fixture(scope="package")
+def metafor_dataset():
+    """Load the designs the metafor reference values were computed on."""
+    return pd.read_csv(op.join(get_test_data_path(), "metafor_small_sample.csv"))
+
+
 # -----------------------------------------------------------------------------
 # Fitted estimators and their results
 # -----------------------------------------------------------------------------
