@@ -5,11 +5,10 @@ import warnings
 from abc import abstractmethod
 
 import numpy as np
-import scipy.stats as ss
-from scipy.special import log_ndtr, ndtr
+from scipy.special import log_ndtr, ndtri_exp
 
 from ..results import CombinationTestResults
-from ..stats import encode_groups, normalize_group_weights
+from ..stats import encode_groups, log_chi2_sf, normalize_group_weights
 from .estimators import BaseEstimator
 
 
@@ -85,12 +84,17 @@ class CombinationTest(BaseEstimator):
         self.mode = mode
 
     @abstractmethod
-    def p_value(self, z, *args, **kwargs):
-        """Calculate p-values."""
+    def log_p_value(self, z, *args, **kwargs):
+        """Calculate natural logarithms of the p-values."""
         pass
 
-    def _z_to_p(self, z):
-        return ndtr(-z)
+    def p_value(self, z, *args, **kwargs):
+        """Calculate p-values.
+
+        Underflows to zero where the combined evidence exceeds what a double can
+        represent; :meth:`log_p_value` is the same quantity without that limit.
+        """
+        return np.exp(self.log_p_value(z, *args, **kwargs))
 
     def fit(self, z, *args, **kwargs):
         """Fit the estimator to z-values."""
@@ -102,18 +106,23 @@ class CombinationTest(BaseEstimator):
             # aggregation) while evaluating the two directed tails.
             ose = copy.copy(self)
             ose.mode = "directed"
-            p1 = ose.p_value(z, *args, **kwargs)
-            p2 = ose.p_value(-z, *args, **kwargs)
-            p = np.minimum(1, 2 * np.minimum(p1, p2))
-            z_calc = ss.norm.isf(p)
-            z_calc[p2 < p1] *= -1
+            log_p1 = ose.log_p_value(z, *args, **kwargs)
+            log_p2 = ose.log_p_value(-z, *args, **kwargs)
+            # Doubling the smaller tail and capping at 1, in logs: the
+            # correction for two tests is an added log(2), the cap a minimum
+            # against log(1).
+            log_p = np.minimum(0.0, np.log(2.0) + np.minimum(log_p1, log_p2))
+            z_calc = -ndtri_exp(log_p)
+            z_calc[log_p2 < log_p1] *= -1
         else:
             if self.mode == "undirected":
                 z = np.abs(z)
-            p = self.p_value(z, *args, **kwargs)
-            z_calc = ss.norm.isf(p)
+            log_p = self.log_p_value(z, *args, **kwargs)
+            # ``norm.isf(p)`` instead would saturate to +/-inf the moment p
+            # underflowed or hit 1; the inverse of the log CDF does not.
+            z_calc = -ndtri_exp(log_p)
 
-        self.params_ = {"p": p, "z": z_calc}
+        self.params_ = {"p": np.exp(log_p), "logp": log_p, "z": z_calc}
         return self
 
     def summary(self):
@@ -124,8 +133,12 @@ class CombinationTest(BaseEstimator):
                 "This {} instance hasn't been fitted yet. Please "
                 "call fit() before summary().".format(name)
             )
+        # p is exactly ``exp(logp)``, which the container derives itself, so
+        # passing it would store a second copy of one quantity. z is not
+        # derivable here: in concordant mode it carries the sign of whichever
+        # tail won, which the log p-value alone does not record.
         return CombinationTestResults(
-            self, self.dataset_, z=self.params_["z"], p=self.params_["p"]
+            self, self.dataset_, z=self.params_["z"], logp=self.params_["logp"]
         )
 
 
@@ -345,8 +358,8 @@ class StoufferCombinationTest(CombinationTest):
         self.corr_ = corr
         return super().fit(z, w=w, g=g, corr=corr)
 
-    def p_value(self, z, w=None, g=None, corr=None):
-        """Calculate p-values."""
+    def log_p_value(self, z, w=None, g=None, corr=None):
+        """Calculate natural logarithms of the p-values."""
         if w is None:
             w = np.ones_like(z)
         else:
@@ -370,7 +383,7 @@ class StoufferCombinationTest(CombinationTest):
             group_z, group_w = self._group_statistics(z, w, g, corr=corr)
             variance = np.square(group_w).sum(axis=0)
             cz = (group_z * group_w).sum(axis=0) / np.sqrt(variance)
-            return ss.norm.sf(cz)
+            return log_ndtr(-cz)
 
         if g is None and corr is not None:
             warnings.warn("Correlation matrix provided without groups. Ignoring.")
@@ -385,7 +398,10 @@ class StoufferCombinationTest(CombinationTest):
         variance = (w**2).sum(0) + sigma
 
         cz = (z * w).sum(0) / np.sqrt(variance)
-        return ss.norm.sf(cz)
+        # log_ndtr, not norm.sf: the combined z is a weighted *sum*, so it grows
+        # with the number of observations and passes 38 -- where a double-
+        # precision p-value is exactly zero -- on datasets of very ordinary size.
+        return log_ndtr(-cz)
 
 
 class FisherCombinationTest(CombinationTest):
@@ -649,15 +665,13 @@ class FisherCombinationTest(CombinationTest):
         self.corr_ = corr
         return super().fit(z, g=g, corr=corr, w=w)
 
-    def p_value(self, z, g=None, corr=None, w=None):
-        """Calculate p-values."""
+    def log_p_value(self, z, g=None, corr=None, w=None):
+        """Calculate natural logarithms of the p-values."""
         g, corr = self._validate_dependence_inputs(z, g, corr)
 
-        # Work in log space throughout. Going via p underflows to exactly 0
-        # around z = 38, after which log(p) is -inf and the combined result
-        # collapses to p = 0 with z = inf, no matter how many other inputs
-        # argue otherwise. log_ndtr is accurate far into that tail, so a single
-        # extreme z no longer destroys the statistic.
+        # Work in log space throughout. Going
+        # via p underflows to exactly 0 around z = 38, after which log(p) is
+        # -inf and the combined result collapses to p = 0 with z = inf.
         log_p = log_ndtr(-z)
         weights = self._group_weights(g, z.shape[0], w=w)
         if g is None and w is None:
@@ -682,4 +696,4 @@ class FisherCombinationTest(CombinationTest):
         scale = variance / (2.0 * expectation)
         dof = 2.0 * expectation**2 / variance
 
-        return ss.chi2.sf(chi2 / scale, dof)
+        return log_chi2_sf(chi2 / scale, dof)

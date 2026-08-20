@@ -1,9 +1,11 @@
 """Tests for pymare.stats."""
 
 import warnings
+from unittest import mock
 
 import numpy as np
 import pytest
+import scipy.stats as ss
 
 from pymare import stats
 from pymare.estimators import DerSimonianLaird
@@ -24,6 +26,7 @@ from pymare.stats import (
     estimate_null_correlation,
     group_mean,
     knapp_hartung_cov_and_dof,
+    log_chi2_sf,
     normalize_group_weights,
     one_sample_t_from_sufficient_statistics,
     satterthwaite_dof,
@@ -1073,3 +1076,77 @@ def test_undo_centering_shrinkage_handles_several_blocks(block_correlation, cent
         block = recovered[start : start + size, start : start + size]
         assert np.allclose(block[~np.eye(size, dtype=bool)], rho, atol=1e-6)
         start += size
+
+
+#: Reference values for :func:`~pymare.stats.log_chi2_sf`, computed with mpmath
+#: at 60 decimal digits as ``log(gammainc(df/2, q/2, inf, regularized=True))``.
+#: Pinned rather than recomputed because mpmath is not a dependency, and taken
+#: from mpmath rather than from SciPy because the point of the function is the
+#: range where SciPy returns ``-inf``. The first three are inside that range and
+#: check the function against a working reference; the rest are outside it.
+LOG_CHI2_SF_REFERENCE = [
+    (3.84, 1.0, -2.994862227180027),
+    (10.0, 4.0, -3.208240530771945),
+    (538.0522161241299, 79.0, -158.26903055960412),
+    (3228.313296744782, 478.0, -924.0499398956518),
+    (5380.522161241301, 798.0, -1535.4587062578848),
+    (1e5, 478.0, -48492.943841385284),
+    (1e6, 2.0, -500000.0),
+]
+
+
+@pytest.mark.parametrize("q,df,expected", LOG_CHI2_SF_REFERENCE)
+def test_log_chi2_sf_matches_arbitrary_precision(q, df, expected):
+    """The tail has to stay accurate long after a double-precision p is zero."""
+    assert np.allclose(log_chi2_sf(q, df), expected, rtol=1e-13)
+
+
+def test_log_chi2_sf_defers_to_scipy_wherever_scipy_can_answer():
+    """Nothing is gained by replacing an answer SciPy already gets right."""
+    df = 7.0
+    q = np.linspace(0.1, 700.0, 2000)
+    assert np.all(np.isfinite(ss.chi2.logsf(q, df)))  # the premise of the sweep
+    assert np.array_equal(log_chi2_sf(q, df), ss.chi2.logsf(q, df))
+
+
+def test_log_chi2_sf_converges_far_inside_its_limit():
+    """The iteration cap has to be generous where the fraction is actually used.
+
+    Convergence slows as ``q`` approaches ``df`` from above -- 722 iterations at
+    ``df = 1e6``, ``q = df + 2`` -- which is why the fraction is confined to the
+    region SciPy cannot reach. This pins that the confinement works: across six
+    orders of magnitude of ``df``, the first ``q`` whose tail underflows already
+    needs single-digit iterations.
+    """
+    for df in (2.0, 478.0, 1e4, 1e6):
+        # The smallest q whose double-precision tail is zero, to a few digits.
+        q = np.array([float(x) for x in np.geomspace(df + 2.0, 1e4 * (df + 2.0), 4000)])
+        underflowed = q[ss.chi2.sf(q, df) == 0.0]
+        assert underflowed.size, df
+
+        edge = underflowed[0]
+        # Converged means moving the cap cannot move the answer.
+        with mock.patch.object(stats, "_GAMMA_CF_MAX_ITER", 8):
+            capped = log_chi2_sf(edge, df)
+        assert np.isfinite(capped)
+        assert np.allclose(capped, log_chi2_sf(edge, df), rtol=1e-14)
+
+
+def test_log_chi2_sf_handles_degenerate_inputs():
+    """An infinite statistic has an exactly zero tail; NaN has no tail at all."""
+    result = log_chi2_sf([np.inf, np.nan, 0.0], 4.0)
+
+    assert result[0] == -np.inf
+    assert np.isnan(result[1])
+    assert result[2] == 0.0
+
+
+def test_log_chi2_sf_broadcasts_and_stays_monotone():
+    """One df per column is how get_heterogeneity_stats calls it."""
+    q = np.array([[10.0, 500.0], [3000.0, 1e5]])
+    df = np.array([4.0, 478.0])
+    logp = log_chi2_sf(q, df)
+
+    assert logp.shape == q.shape
+    assert np.all(np.diff(logp, axis=0) < 0)
+    assert np.allclose(logp[0, 0], log_chi2_sf(10.0, 4.0))

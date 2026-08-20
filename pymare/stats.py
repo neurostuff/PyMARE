@@ -20,6 +20,7 @@ from typing import NamedTuple
 import numpy as np
 import scipy.stats as ss
 from scipy.optimize import Bounds, minimize
+from scipy.special import gammaln
 
 # At or below this many clusters, robust variance estimation is known to be
 # anti-conservative; see Hedges, Tipton & Johnson (2010) and Tipton (2015).
@@ -2239,6 +2240,107 @@ def q_profile(y, v, X, alpha=0.05, groups=None):
     lb = minimize(lambda x: (q_gen(*args, x, groups) - l_crit) ** 2, [0], bounds=bds).x[0]
     ub = minimize(lambda x: (q_gen(*args, x, groups) - u_crit) ** 2, ub_start, bounds=bds).x[0]
     return {"ci_l": lb, "ci_u": ub}
+
+
+#: Iterations allowed in the continued fraction of :func:`log_chi2_sf`. A safety
+#: stop rather than a working limit. Convergence slows as ``x`` approaches ``a``
+#: from above -- 722 iterations at ``a = 5e5``, ``x = a + 1`` -- but that is the
+#: regime where the tail is around one half and SciPy is exact, so the fraction
+#: is never used there. Where it *is* used, past the point at which a
+#: double-precision tail underflows, four to six iterations suffice.
+_GAMMA_CF_MAX_ITER = 300
+
+#: Relative change below which the continued fraction is treated as converged.
+#: Set at machine epsilon because each iteration multiplies the running value by
+#: a factor approaching one; stopping earlier costs digits in the log, which is
+#: the quantity this function exists to get right.
+_GAMMA_CF_TOL = np.finfo(np.float64).eps
+
+
+def log_chi2_sf(q, df):
+    r"""Natural logarithm of the chi-squared upper tail, without underflowing.
+
+    Parameters
+    ----------
+    q : :obj:`numpy.ndarray` or :obj:`float`
+        Statistic values, non-negative.
+    df : :obj:`numpy.ndarray` or :obj:`float`
+        Degrees of freedom, positive. Broadcast against ``q``.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray`
+        ``log(P(chi^2_df > q))``.
+
+    Notes
+    -----
+    ``scipy.stats.chi2.logsf`` computes the survival function first and takes
+    its logarithm afterwards, so it returns ``-inf`` for every ``q`` whose tail
+    falls below the smallest positive double -- which Cochran's Q reaches on a
+    few hundred heterogeneous observations, well inside the range of an ordinary
+    meta-analysis.
+
+    The tail is the regularized upper incomplete gamma function
+    :math:`Q(a, x)` at :math:`a = df/2`, :math:`x = q/2`, which factors as
+
+    .. math::
+
+        Q(a, x) = \frac{e^{-x} x^{a}}{\Gamma(a)} \cdot F(a, x),
+
+    where :math:`F` is a continued fraction of order one, evaluated here by the
+    modified Lentz algorithm. Everything that underflows lives in the prefactor,
+    and the prefactor is an exponential, so evaluating the fraction on its own
+    and adding ``-x + a log x - lnGamma(a)`` to its logarithm gives the answer
+    with no intermediate that can flush to zero.
+
+    The fraction is used only where SciPy has already failed, and SciPy is used
+    everywhere else. That is not a preference for one over the other but the
+    split that makes both fast: the fraction's convergence slows as ``x``
+    approaches ``a`` from above, needing hundreds of iterations at ``x = a + 1``
+    with a large ``a``, and that is precisely the region where the tail is
+    around one half, nothing underflows and SciPy is exact. Where the tail is
+    small enough to have underflowed, ``x`` is far enough beyond ``a`` that the
+    fraction converges in a handful of iterations.
+    """
+    q = np.asarray(q, dtype=float)
+    df = np.asarray(df, dtype=float)
+    a, x = np.broadcast_arrays(df / 2.0, q / 2.0)
+
+    with np.errstate(divide="ignore"):
+        out = np.broadcast_to(ss.chi2.logsf(q, df), a.shape).astype(float, copy=True)
+
+    # ``x >= a + 1`` is the fraction's domain and is implied by an underflowed
+    # tail, but it is asserted rather than assumed: a NaN or infinite input
+    # reaches SciPy's answer through the same non-finite test.
+    tail = ~np.isfinite(out) & np.isfinite(x) & (x >= a + 1.0)
+    if not np.any(tail):
+        return out
+
+    a_t, x_t = a[tail], x[tail]
+    tiny = np.finfo(np.float64).tiny
+
+    # Modified Lentz: b, c and d track the fraction's recurrence, h its value.
+    b = x_t + 1.0 - a_t
+    c = np.full(b.shape, 1.0 / tiny)
+    d = 1.0 / b
+    h = d.copy()
+    active = np.ones(b.shape, dtype=bool)
+    for i in range(1, _GAMMA_CF_MAX_ITER + 1):
+        an = -i * (i - a_t)
+        b = b + 2.0
+        d = an * d + b
+        d = np.where(np.abs(d) < tiny, tiny, d)
+        c = b + an / c
+        c = np.where(np.abs(c) < tiny, tiny, c)
+        d = 1.0 / d
+        delta = d * c
+        h = np.where(active, h * delta, h)
+        active &= np.abs(delta - 1.0) > _GAMMA_CF_TOL
+        if not np.any(active):
+            break
+
+    out[tail] = -x_t + a_t * np.log(x_t) - gammaln(a_t) + np.log(h)
+    return out
 
 
 def q_gen(y, v, X, tau2, groups=None):

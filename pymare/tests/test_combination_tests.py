@@ -348,6 +348,49 @@ def test_fisher_does_not_underflow_on_extreme_z():
     assert np.allclose(fitted["p"], 1.035e-244, rtol=1e-3)
 
 
+def test_fisher_does_not_underflow_on_many_moderate_z():
+    """Its own combined tail underflows too, and much sooner than one input can.
+
+    Converting each input in logs, as the test above checks, still leaves
+    ``chi2.sf`` -- and ``chi2.logsf``, which logs it afterwards -- at the end of
+    the statistic. Two hundred inputs at z = 3 put the combined chi-squared
+    where a double-precision tail is exactly zero, which came back as
+    ``logp = -inf`` and ``z = inf``: less informative than any single input.
+    """
+    fitted = FisherCombinationTest().fit(np.full((200, 2), 3.0)).params_
+
+    assert np.all(fitted["p"] == 0.0)  # the representation, not the evidence
+    assert np.allclose(fitted["logp"], -749.1910315, rtol=1e-8)
+    assert np.allclose(fitted["z"], 38.5906313, rtol=1e-7)
+
+
+def test_stouffer_does_not_underflow_on_many_moderate_z():
+    """Fisher had this guard already; Stouffer reaches the same wall sooner.
+
+    The combined statistic is a weighted *sum* divided by the square root of the
+    weight, so it grows like ``sqrt(k)``: four hundred inputs at z = 3 -- not an
+    unusual meta-analysis -- combine to z = 60, whose one-tailed p-value is
+    about 1e-785. Going via ``norm.sf`` returned exactly 0 there, and the z
+    rebuilt from that 0 was ``+inf``, so the answer was less informative than
+    any single one of its inputs.
+    """
+    z = np.full((400, 2), 3.0)
+
+    fitted = StoufferCombinationTest().fit(z).params_
+
+    assert np.all(fitted["p"] == 0.0)  # the representation, not the evidence
+    assert np.all(np.isfinite(fitted["logp"]))
+    assert np.allclose(fitted["z"], 60.0)
+    assert np.allclose(fitted["logp"], ss.norm.logsf(60.0))
+
+
+def test_public_p_value_survives_the_move_to_log_space():
+    """Subclasses now implement log_p_value, but p_value stays part of the API."""
+    est = StoufferCombinationTest()
+
+    assert np.allclose(est.p_value(_z2), np.exp(est.log_p_value(_z2)))
+
+
 def test_constant_estimates_cannot_yield_a_correlation(combination_estimator):
     """A row that never varies has no correlation, so do not return NaN."""
     z = np.full((4, 5), 1.3)

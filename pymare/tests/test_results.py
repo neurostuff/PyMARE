@@ -4,6 +4,7 @@ import copy
 
 import numpy as np
 import pytest
+import scipy.stats as ss
 
 from pymare import Dataset
 from pymare.estimators import (
@@ -133,9 +134,10 @@ def test_mrr_get_fe_stats(results):
     """Test MetaRegressionResults.get_fe_stats."""
     stats = results.get_fe_stats()
     assert isinstance(stats, dict)
-    assert set(stats.keys()) == {"est", "se", "ci_l", "ci_u", "z", "p"}
+    assert set(stats.keys()) == {"est", "se", "ci_l", "ci_u", "z", "p", "logp"}
     assert np.allclose(stats["ci_l"].T, [-7.4651, -1.9693], atol=1e-4)
     assert np.allclose(stats["p"].T, [0.9728, 0.5186], atol=1e-4)
+    assert np.allclose(stats["logp"], np.log(stats["p"]))
     # A t reference with K - P = 6 degrees of freedom, not a normal one.
     assert np.all(results.fe_dof == 6)
 
@@ -160,15 +162,28 @@ def test_mrr_get_heterogeneity_stats(results_2d):
     assert round(stats["I^2"][0], 4) == 88.8487
     assert round(stats["H"][0], 4) == 2.9946
     assert stats["p(Q)"][0] < 1e-5
+    assert np.allclose(stats["logp(Q)"], np.log(stats["p(Q)"]))
 
 
 def test_mrr_to_df(results):
     """Test conversion of MetaRegressionResults to DataFrame."""
     df = results.to_df()
-    assert df.shape == (2, 7)
-    col_names = {"estimate", "p-value", "z-score", "ci_0.025", "ci_0.975", "se", "name"}
+    assert df.shape == (2, 8)
+    col_names = {
+        "estimate",
+        "p-value",
+        "-log10(p)",
+        "z-score",
+        "ci_0.025",
+        "ci_0.975",
+        "se",
+        "name",
+    }
     assert set(df.columns) == col_names
     assert np.allclose(df["p-value"].values, [0.9728, 0.5186], atol=1e-4)
+    # The table reports base 10; get_fe_stats reports natural logs.
+    assert np.allclose(df["-log10(p)"].values, -np.log10(df["p-value"].values))
+    assert np.allclose(results.get_fe_stats()["logp"].ravel(), np.log(df["p-value"].values))
 
 
 def test_small_variance_mrr_to_df(small_variance_results, small_variance_dataset):
@@ -186,10 +201,20 @@ def test_small_variance_mrr_to_df(small_variance_results, small_variance_dataset
     release before the adjustment reported.
     """
     df = small_variance_results.to_df()
-    assert df.shape == (2, 7)
-    col_names = {"estimate", "p-value", "z-score", "ci_0.025", "ci_0.975", "se", "name"}
+    assert df.shape == (2, 8)
+    col_names = {
+        "estimate",
+        "p-value",
+        "-log10(p)",
+        "z-score",
+        "ci_0.025",
+        "ci_0.975",
+        "se",
+        "name",
+    }
     assert set(df.columns) == col_names
     assert np.all(np.isnan(df["p-value"].values))
+    assert np.all(np.isnan(df["-log10(p)"].values))
     assert np.all(small_variance_results.fe_se == 0.0)
 
     unadjusted = (
@@ -197,9 +222,15 @@ def test_small_variance_mrr_to_df(small_variance_results, small_variance_dataset
         .fit_dataset(small_variance_dataset)
         .summary()
     )
-    assert np.allclose(
-        unadjusted.to_df()["p-value"].values, [1, np.finfo(np.float64).eps], atol=1e-4
-    )
+    # 8.2e-23, not the machine epsilon this used to report. Two separate losses
+    # produced that number: ``1 - |0.5 - Phi(z)| * 2`` cancels to exactly 0 by
+    # z = 9.8, and the epsilon floor then presented that 0 as 2.2e-16.
+    unadjusted_df = unadjusted.to_df()
+    assert np.allclose(unadjusted_df["p-value"].values, [1.0, 8.2097e-23], rtol=1e-4)
+    # 22.09 reads as "1e-22" at a glance, which is what the column is for. A
+    # p-value of exactly 1 has to come out at positive zero, not -0.0.
+    assert np.allclose(unadjusted_df["-log10(p)"].values, [0.0, 22.0857], atol=1e-4)
+    assert not np.signbit(unadjusted_df["-log10(p)"].values[0])
 
 
 def test_estimator_summary(dataset):
@@ -352,7 +383,7 @@ def test_heterogeneity_is_undefined_when_the_design_exhausts_the_df():
     results = WeightedLeastSquares().fit_dataset(dataset).summary()
 
     stats = results.get_heterogeneity_stats()
-    assert all(np.all(np.isnan(stats[key])) for key in ("Q", "p(Q)", "I^2", "H"))
+    assert all(np.all(np.isnan(stats[key])) for key in ("Q", "p(Q)", "logp(Q)", "I^2", "H"))
 
 
 def test_undefined_standard_errors_do_not_read_as_significant():
@@ -418,7 +449,7 @@ def test_group_weighted_heterogeneity_matches_collapsed_reference():
         .get_heterogeneity_stats()
     )
 
-    for key in ("Q", "p(Q)", "I^2", "H"):
+    for key in ("Q", "p(Q)", "logp(Q)", "I^2", "H"):
         assert np.allclose(observed[key], expected[key])
 
 
@@ -561,3 +592,117 @@ def test_combination_permutation_freezes_the_correlation_the_estimator_used():
         estimated.permutation_test(n_perm=4).perm_p["fe_p"],
         supplied.permutation_test(n_perm=4).perm_p["fe_p"],
     )
+
+
+# -----------------------------------------------------------------------------
+# The tail, in logs
+# -----------------------------------------------------------------------------
+
+#: The z-score a p-value floored at ``numpy.finfo(float).eps`` maps back to.
+#: Every estimate more significant than 2.2e-16 used to be reported at exactly
+#: this value, whatever its actual evidence.
+EPSILON_CEILING = ss.norm.isf(np.finfo(np.float64).eps / 2)
+
+
+#: Effect sizes spanning the old ceiling: the first two land above p = 2.2e-16,
+#: the last three below it and so used to be reported identically.
+EFFECT_SWEEP = (0.6, 3.0, 100.0, 1e4, 1e40)
+
+
+def test_knapp_hartung_z_climbs_past_the_epsilon_ceiling(extreme_effect_results):
+    """The reported z has to keep separating estimates after p passes 2.2e-16.
+
+    The transform from the t tail to a normal deviate went through a p-value
+    floored at machine epsilon, so it saturated at ``norm.isf(eps / 2) = 8.21``.
+    Estimates whose evidence differed by forty orders of magnitude all came back
+    as 8.21, and a z-map thresholded above that selected nothing.
+    """
+    z = np.array(
+        [np.ravel(extreme_effect_results(e).get_fe_stats()["z"])[0] for e in EFFECT_SWEEP]
+    )
+
+    assert np.all(np.diff(z) > 0)
+    assert (z > EPSILON_CEILING).sum() == 3
+    assert z[-1] > 2 * EPSILON_CEILING
+
+
+def test_z_and_p_describe_the_same_tail(extreme_effect_results):
+    """Consistency between the two is the whole reason z is transformed at all.
+
+    A threshold on z and the corresponding threshold on p must select the same
+    estimates, which makes this a round trip through ``ndtri_exp`` and back. It
+    is checked on the log scale because these p-values are far too small for a
+    relative comparison to survive on the linear one.
+    """
+    for effect in EFFECT_SWEEP:
+        stats = extreme_effect_results(effect).get_fe_stats()
+        assert np.allclose(
+            ss.norm.logsf(np.abs(stats["z"])) + np.log(2), stats["logp"], rtol=1e-12
+        )
+        assert np.allclose(stats["p"], np.exp(stats["logp"]))
+
+
+def test_logp_outlives_p_under_a_normal_reference(extreme_effect_results):
+    """A two-tailed normal p is exactly zero from |z| = 38.5 onwards.
+
+    That is a limit of the representation, not of the evidence, and it is
+    reached on data no more extreme than a well-powered fixed-effects fit.
+    """
+    stats = extreme_effect_results(10.0, correction="wald").get_fe_stats()
+
+    assert np.ravel(stats["p"])[0] == 0.0
+    assert np.allclose(np.ravel(stats["logp"])[0], -9926.1741, rtol=1e-8)
+    # Under a normal reference the statistic needs no transform, so it is
+    # reported as it stands and agrees with metafor's zval exactly.
+    assert np.allclose(stats["z"], stats["est"] / stats["se"])
+
+
+def test_to_df_stays_readable_where_the_p_value_column_is_zero(extreme_effect_results):
+    """The summary table is the only view some callers use, so it needs the log.
+
+    A ``p-value`` of 0.0 beside an ``estimate`` of 10 is the reported bug in its
+    other form: the number is a limit of the column, not of the evidence.
+    """
+    df = extreme_effect_results(10.0, correction="wald").to_df()
+
+    assert df["p-value"].values[0] == 0.0
+    assert np.allclose(df["-log10(p)"].values[0], 4310.8826, rtol=1e-8)
+
+
+def test_heterogeneity_logp_outlives_p_of_q(dataset):
+    """Q grows with the number of observations, so its tail underflows too."""
+    y, v = dataset.y, dataset.y * 0 + 1.0
+    wide = Dataset(y=np.tile(y, (60, 1)), v=np.tile(v, (60, 1)))
+    stats = DerSimonianLaird().fit_dataset(wide).summary().get_heterogeneity_stats()
+
+    assert np.ravel(stats["p(Q)"])[0] == 0.0
+    assert np.allclose(np.ravel(stats["logp(Q)"])[0], -1654.11549, rtol=1e-8)
+
+
+def test_combination_results_rebuild_from_logp_but_not_from_p():
+    """The log is the primitive of the three, and the container has to prefer it.
+
+    A combined z of 60 is unremarkable for a few hundred inputs, and its
+    one-tailed p-value is about 1e-785 -- zero, in a double. Reconstructing from
+    that zero gives an infinite z; reconstructing from the log does not.
+    """
+    z = np.array([[60.0]])
+    logp = ss.norm.logsf(z)
+
+    from_logp = CombinationTestResults(None, None, logp=logp)
+    assert np.allclose(from_logp.z, z)
+    assert np.ravel(from_logp.p)[0] == 0.0
+
+    from_z = CombinationTestResults(None, None, z=z)
+    assert np.allclose(from_z.logp, logp)
+
+    # The lossy direction, asserted so that it stays a documented limit rather
+    # than a surprise: p alone cannot recover what it has already lost.
+    from_p = CombinationTestResults(None, None, p=np.exp(logp))
+    assert not np.isfinite(from_p.z).all()
+
+
+def test_combination_results_still_require_one_array():
+    """Adding a third way to construct one must not make all three optional."""
+    with pytest.raises(ValueError, match="One of 'z', 'p' or 'logp'"):
+        CombinationTestResults(None, None)
