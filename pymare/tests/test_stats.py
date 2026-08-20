@@ -891,6 +891,29 @@ def test_knapp_hartung_matches_explicit_reference(
     assert np.allclose(cov, model_cov * expected, rtol=1e-12, atol=0)
 
 
+def test_knapp_hartung_scale_factor_is_q_gen_over_its_expectation():
+    """``q`` must be Cochran's Q at the fitted tau^2, divided by ``K - P``.
+
+    The docstring says the scale factor *is* that ratio; this makes the claim
+    enforced rather than asserted. Both quantities now go through
+    ``_weighted_rss``, so the test also guards the extraction: if a future change
+    reached one caller and not the other, the two would drift apart here.
+    """
+    rng = np.random.RandomState(17)
+    for n_estimates, n_preds in ((6, 1), (14, 2), (20, 3)):
+        y = rng.randn(n_estimates, 1)
+        v = np.abs(rng.randn(n_estimates, 1)) + 0.5
+        X = np.c_[np.ones(n_estimates), rng.randn(n_estimates, n_preds - 1)]
+        tau2 = 0.35
+        beta, model_cov = _model_fit(y, v, X, tau2)
+
+        cov, _ = knapp_hartung_cov_and_dof(y, v, X, beta, model_cov, tau2=tau2)
+
+        scale = cov[0, 0, 0] / model_cov[0, 0, 0]
+        expected = np.ravel(stats.q_gen(y, v, X, tau2))[0] / (n_estimates - n_preds)
+        assert np.isclose(scale, expected, rtol=1e-13, atol=0)
+
+
 def test_knapp_hartung_honours_supplied_weights():
     """``w`` must be what the residuals are weighted by, not a decoration.
 

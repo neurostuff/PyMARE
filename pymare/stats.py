@@ -321,6 +321,44 @@ def correlated_effects_weights(v, groups, tau2=0.0):
     return (1.0 / (sizes * (group_mean(v, groups) + tau2)))[codes]
 
 
+def _weighted_rss(y, X, beta, w):
+    r"""Return the weighted residual sum of squares, one value per parallel dataset.
+
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        2d array of estimates.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    beta : :obj:`numpy.ndarray` of shape (P, D)
+        Coefficients fitted *under* ``w``. Residuals from any other fit are not
+        the ones this quantity is defined for, and nothing here can detect that.
+    w : :obj:`numpy.ndarray` of shape (K, 1) or (K, D)
+        Weights. A single shared column broadcasts against ``y``.
+
+    Returns
+    -------
+    :obj:`numpy.ndarray` of shape (D,)
+        :math:`e'We` with :math:`e = y - X\beta`.
+
+    Notes
+    -----
+    One definition for a quantity three callers need under three names: it is
+    ``Q_E`` in the notation of :footcite:t:`fisher2015robumeta`, the moment
+    :func:`correlated_effects_tau2` matches, the whole of :func:`q_gen`'s return
+    value, and the numerator of :func:`knapp_hartung_cov_and_dof`'s scale factor.
+    Written out separately in each, it was spelled three ways -- ``np.square``,
+    ``** 2`` and a named intermediate -- so a change to the formulation could
+    reach one and leave the others behind.
+
+    References
+    ----------
+    .. footbibliography::
+
+    """
+    return (w * (y - X.dot(beta)) ** 2).sum(0)
+
+
 def correlated_effects_tau2(y, v, X, groups, rho=DEFAULT_RHO):
     r"""Estimate tau^2 under the correlated-effects working model.
 
@@ -435,7 +473,7 @@ def correlated_effects_tau2(y, v, X, groups, rho=DEFAULT_RHO):
     across = trace(_weighted(scaled, outer))
 
     beta = weighted_least_squares(y, v, X, w=row_w)
-    q_e = (row_w * np.square(y - X.dot(beta))).sum(0)
+    q_e = _weighted_rss(y, X, beta, row_w)
 
     numerator = q_e - n_groups + within + rho * (across - within)
     denominator = (sizes * group_w).sum(0) - trace(_weighted(np.square(group_w), outer))
@@ -2034,6 +2072,9 @@ def knapp_hartung_cov_and_dof(y, v, X, beta, model_cov, tau2=0.0, w=None, conser
         dependent. The two are alternatives, not layers: a sandwich already
         replaces ``(X'WX)^-1`` with an estimate that does not assume the fitted
         weights are right, which is the whole content of ``q``.
+    q_gen : Computes the numerator, ``e'We``, for its own purposes. The scale
+        factor here is exactly ``q_gen(...) / (K - P)`` on the ungrouped path;
+        both go through ``_weighted_rss``.
     pymare.results.MetaRegressionResults.fe_dof : Where ``dof`` is surfaced.
 
     Notes
@@ -2041,9 +2082,12 @@ def knapp_hartung_cov_and_dof(y, v, X, beta, model_cov, tau2=0.0, w=None, conser
     Written to reproduce ``metafor``'s ``rma.uni(..., test="knha")``, whose scale
     factor is ``RSS.knha / (k - p)`` under the inverse-variance weights;
     ``conservative=True`` is its ``test="adhoc"``. ``q`` is Cochran's :math:`Q` at
-    :math:`\hat\tau^2` divided by its expectation, so it is centred on 1 and
-    inflates the covariance exactly when the data are more dispersed than the
-    fitted weights say they should be. Nothing here touches ``beta``.
+    :math:`\hat\tau^2` divided by its expectation -- literally
+    :func:`q_gen` over ``K - P``, which
+    ``test_knapp_hartung_scale_factor_is_q_gen_over_its_expectation`` pins -- so
+    it is centred on 1 and inflates the covariance exactly when the data are more
+    dispersed than the fitted weights say they should be. Nothing here touches
+    ``beta``.
 
     The method is attributed to Knapp and Hartung but was arrived at
     independently by :footcite:t:`hartung1999alternative` and
@@ -2093,8 +2137,7 @@ def knapp_hartung_cov_and_dof(y, v, X, beta, model_cov, tau2=0.0, w=None, conser
     # entry per dataset either way. The grouped path does need
     # broadcast_columns, because satterthwaite_dof indexes weight columns.
     w = 1.0 / (v + tau2) if w is None else w
-    resid = y - X.dot(beta)
-    rss = np.sum(w * resid**2, axis=0)
+    rss = _weighted_rss(y, X, beta, w)
 
     # An all-but-zero residual sum of squares means y lies in the column space of
     # X to numerical precision, so there is no residual dispersion to read a
@@ -2237,7 +2280,7 @@ def q_gen(y, v, X, tau2, groups=None):
 
     w = 1.0 / (v + tau2) if groups is None else correlated_effects_weights(v, groups, tau2)
     beta = weighted_least_squares(y, v, X, tau2, w=w)
-    return (w * (y - X.dot(beta)) ** 2).sum(0)
+    return _weighted_rss(y, X, beta, w)
 
 
 def bonferroni(p_values):
