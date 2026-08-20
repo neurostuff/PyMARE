@@ -112,7 +112,7 @@ def test_meta_regression_2(dataset_n):
     """Test meta_regression function."""
     y, n = dataset_n.y, dataset_n.n
     df = meta_regression(y=y, n=n).to_df()
-    assert df.shape == (1, 7)
+    assert df.shape == (1, 8)
 
 
 # -----------------------------------------------------------------------------

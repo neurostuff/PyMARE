@@ -61,6 +61,26 @@ def variables():
 
 
 @pytest.fixture(scope="package")
+def extreme_effect_results():
+    """Return the results of a fit at a chosen effect size.
+
+    The sampling variances are small and the residuals around the effect are
+    tiny, so the statistic grows in proportion to the effect and can be driven
+    as far into the tail as a caller needs -- including past the point where a
+    double-precision p-value is exactly zero.
+    """
+    v = np.array([[0.02, 0.03, 0.025, 0.04, 0.02]]).T
+    residual = np.array([[0.01, -0.02, 0.015, -0.01, 0.005]]).T
+
+    def fit(effect, correction="knapp-hartung"):
+        dataset = Dataset(y=effect + residual, v=v)
+        estimator = WeightedLeastSquares(tau2=0.0, small_sample_correction=correction)
+        return estimator.fit_dataset(dataset).summary()
+
+    return fit
+
+
+@pytest.fixture(scope="package")
 def small_variance_variables(variables):
     """Make highly correlated variables."""
     y, v, X = variables

@@ -115,6 +115,7 @@ API
    stats.ensure_2d
    stats.q_profile
    stats.q_gen
+   stats.log_chi2_sf
    stats.bonferroni
    stats.fdr
 

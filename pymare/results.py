@@ -10,6 +10,7 @@ from warnings import warn
 import numpy as np
 import pandas as pd
 import scipy.stats as ss
+from scipy.special import log_ndtr, ndtri_exp
 
 try:
     import arviz as az
@@ -25,6 +26,7 @@ from pymare.stats import (
     collapse_groups,
     collapse_groups_by_n,
     encode_groups,
+    log_chi2_sf,
     q_gen,
     q_profile,
 )
@@ -273,7 +275,8 @@ class MetaRegressionResults:
             est         The parameter estimate for the regressor.
             se          The standard error of the estimate.
             z           The z score of the estimate.
-            p           The p value the estimate.
+            p           The two-tailed p value of the estimate.
+            logp        The natural logarithm of ``p``.
             ci_l/ci_u   Lower and upper bounds of the estimate.
             =========== ==========================================================================
 
@@ -296,41 +299,52 @@ class MetaRegressionResults:
         how uncertain the coefficients are. The ``undefined`` branch below turns
         that into a NaN p-value rather than a maximally significant one.
 
+        The tail is computed in logs because ``p`` cannot express the
+        transform's own input: a two-tailed normal p is exactly zero from
+        ``|z| = 38.5`` on, and every deviate past that would come back
+        infinite. Via ``logp``, ``z`` grows like ``sqrt(2 |logp|)`` without
+        bound.
+
+        .. versionchanged:: 0.0.11
+            ``p`` is no longer floored at ``numpy.finfo(float).eps``. The floor
+            read a limit of precision as one of magnitude, truncating ``z`` at
+            ``norm.isf(eps / 2) = 8.21`` for every estimate below 2.2e-16,
+            however far below it fell.
+
         References
         ----------
         .. footbibliography::
 
         """
         beta, se = self.fe_params, self.fe_se
-        epsilon = np.finfo(beta.dtype).eps
-        z = beta / se
 
         # Cluster-robust standard errors are asymptotic in the number of
         # groups, so refer them to a t distribution rather than a normal.
         dof = self.fe_dof
-        if dof is None:
-            crit = ss.norm.ppf(1 - alpha / 2)
-            p = 1 - np.abs(0.5 - ss.norm.cdf(z)) * 2
-        else:
-            crit = ss.t.ppf(1 - alpha / 2, dof)
-            p = 2 * ss.t.sf(np.abs(z), dof)
+        # A zero standard error divides to +-inf, or to NaN if the estimate is
+        # zero too. Both are answered by the ``undefined`` mask below rather
+        # than by a warning, so the arithmetic is allowed to produce them.
+        with np.errstate(invalid="ignore", divide="ignore"):
+            stat = beta / se
+            if dof is None:
+                crit = ss.norm.ppf(1 - alpha / 2)
+                log_tail = ss.norm.logsf(np.abs(stat))
+                z = stat
+            else:
+                crit = ss.t.ppf(1 - alpha / 2, dof)
+                log_tail = ss.t.logsf(np.abs(stat), dof)
+                z = -np.sign(stat) * ndtri_exp(log_tail)
 
-        p = np.asarray(p, dtype=float)
-        p[p == 0] += epsilon
+            # Two tails, so an added log(2). The cap is against log(1), which
+            # the sum can exceed only by rounding at a statistic of essentially
+            # zero; it is not a floor on the tail.
+            logp = np.minimum(log_tail + math.log(2.0), 0.0)
+            p = np.exp(logp)
 
         # A standard error that is zero or non-finite carries no information,
         # but "est / 0" is +-inf and yields p = 0 -- maximally significant. Mark
         # those entries undefined instead of maximally certain.
         undefined = ~np.isfinite(se) | (se <= 0)
-        if np.any(undefined):
-            p = np.where(undefined, np.nan, p)
-
-        if dof is not None:
-            # ``est / se`` is a t statistic here, so reporting it as "z" would
-            # leave the two entries disagreeing: thresholding on the z values
-            # and on the p values would select different results. Report the
-            # z that carries the same tail probability instead.
-            z = np.sign(z) * ss.norm.isf(np.clip(p, epsilon, 1.0) / 2)
 
         stats = {
             "est": beta,
@@ -338,7 +352,8 @@ class MetaRegressionResults:
             "ci_l": np.where(undefined, np.nan, beta - crit * se),
             "ci_u": np.where(undefined, np.nan, beta + crit * se),
             "z": np.where(undefined, np.nan, z),
-            "p": p,
+            "p": np.where(undefined, np.nan, p),
+            "logp": np.where(undefined, np.nan, logp),
         }
 
         return stats
@@ -491,6 +506,8 @@ class MetaRegressionResults:
                     freedom, where n is the number of independent observations and k is the
                     number of regressors.
             p(Q)    P values associated with the Cochran's Q values.
+            logp(Q) Natural logarithms of the ``p(Q)`` values, computed directly and
+                    therefore still finite where ``p(Q)`` has underflowed to zero.
             I^2     The proportion of the variance in input estimates that is due to heterogeneity
                     instead of sampling error :footcite:p:`higgins2002quantifying`.
                     This measure is bounded from 0 to 100.
@@ -518,12 +535,18 @@ class MetaRegressionResults:
             # zero and I^2 / H are 100% / inf from pure rounding noise, which
             # reads as total heterogeneity rather than no information.
             nan = np.full(np.shape(q_fe), np.nan)
-            return {"Q": nan, "p(Q)": nan.copy(), "I^2": nan.copy(), "H": nan.copy()}
+            return {
+                "Q": nan,
+                "p(Q)": nan.copy(),
+                "logp(Q)": nan.copy(),
+                "I^2": nan.copy(),
+                "H": nan.copy(),
+            }
 
         i2 = np.maximum(100.0 * (q_fe - df) / q_fe, 0.0)
         h = np.maximum(np.sqrt(q_fe / df), 1.0)
-        p = ss.chi2.sf(q_fe, df)
-        return {"Q": q_fe, "p(Q)": p, "I^2": i2, "H": h}
+        logp = log_chi2_sf(q_fe, df)
+        return {"Q": q_fe, "p(Q)": np.exp(logp), "logp(Q)": logp, "I^2": i2, "H": h}
 
     def to_df(self, alpha=0.05):
         """Return a pandas DataFrame summarizing fixed effect results.
@@ -554,6 +577,7 @@ class MetaRegressionResults:
             se          The standard error of the estimate.
             z-score     The z score of the estimate.
             p-value     The p value the estimate.
+            -log10(p)   The p value on a base-10 log scale.
             ci_+        Lower and upper bounds of the estimate. There will be two columns, with
                         names based on the ``alpha`` value. For example, if ``alpha = 0.05``,
                         the CI columns will be ``"ci_0.025"`` and ``"ci_0.975"``.
@@ -573,10 +597,11 @@ class MetaRegressionResults:
         fe_stats = self.get_fe_stats(alpha).items()
         df = pd.DataFrame({k: v.ravel() for k, v in fe_stats})
         df["name"] = self.dataset.X_names
-        df = df.loc[:, ["name", "est", "se", "z", "p", "ci_l", "ci_u"]]
+        df["logp"] = np.abs(df["logp"]) / math.log(10.0)
+        df = df.loc[:, ["name", "est", "se", "z", "p", "logp", "ci_l", "ci_u"]]
         ci_l = "ci_{:.6g}".format(alpha / 2)
         ci_u = "ci_{:.6g}".format(1 - alpha / 2)
-        df.columns = ["name", "estimate", "se", "z-score", "p-value", ci_l, ci_u]
+        df.columns = ["name", "estimate", "se", "z-score", "p-value", "-log10(p)", ci_l, ci_u]
         return df
 
     def permutation_test(self, n_perm=1000):
@@ -752,22 +777,34 @@ class CombinationTestResults:
         Array of z-scores. Default = None.
     p : :obj:`numpy.ndarray`, optional
         Array of right-tailed p-values. Default = None.
+    logp : :obj:`numpy.ndarray`, optional
+        Array of natural logarithms of the right-tailed p-values. Default = None.
     """
 
-    def __init__(self, estimator, dataset, z=None, p=None):
+    def __init__(self, estimator, dataset, z=None, p=None, logp=None):
         self.estimator = estimator
         self.dataset = dataset
-        if p is None and z is None:
-            raise ValueError("One of 'z' or 'p' must be provided.")
+        if p is None and z is None and logp is None:
+            raise ValueError("One of 'z', 'p' or 'logp' must be provided.")
         self._z = z
         self._p = p
+        self._logp = logp
+
+    @property
+    @lru_cache(maxsize=1)
+    def logp(self):
+        """Natural logarithms of the p-values."""
+        if self._logp is None:
+            with np.errstate(divide="ignore"):
+                self._logp = log_ndtr(-self._z) if self._z is not None else np.log(self._p)
+        return self._logp
 
     @property
     @lru_cache(maxsize=1)
     def z(self):
         """Z-values."""
         if self._z is None:
-            self._z = ss.norm.isf(self.p)
+            self._z = -ndtri_exp(self.logp)
         return self._z
 
     @property
@@ -775,7 +812,7 @@ class CombinationTestResults:
     def p(self):
         """P-values."""
         if self._p is None:
-            self._p = ss.norm.sf(self.z)
+            self._p = np.exp(self.logp)
         return self._p
 
     def permutation_test(self, n_perm=1000):
@@ -904,14 +941,8 @@ class CombinationTestResults:
                 kwargs["corr"] = permutation_corr
             params = est.fit(**kwargs).params_
 
-            # Compare on p-values, not on z. The reported z is
-            # ``norm.isf(p)``, which saturates to +/-inf as soon as p hits 0
-            # or 1 -- routine for concordant mode, where p is capped at 1.
-            # Every permutation then ties at -inf and the comparison degrades
-            # to "always significant". p is the actual test statistic in every
-            # mode, is monotone in the evidence, and never overflows.
-            observed = np.ravel(self.p)[i]
-            null = np.ravel(params["p"])
+            observed = np.ravel(self.logp)[i]
+            null = np.ravel(params["logp"])
             p_p[i] = (null <= observed).mean()
 
         # p-values can't be smaller than 1/n_perm

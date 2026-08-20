@@ -101,13 +101,12 @@ def assert_matches(results, case):
 
     Notes
     -----
-    The p-value is compared only under the two corrected options. Under
-    ``"wald"`` PyMARE computes it as ``1 - |0.5 - Phi(z)| * 2``, which cancels
-    catastrophically in the far tail and disagrees with metafor's
-    ``2 * pnorm(-|z|)`` by an arbitrarily large *relative* amount once the p-value
-    drops below about 1e-15. That predates this branch and is not what this module
-    measures; the adjustment's own path goes through ``2 * t.sf(...)``, which does
-    not cancel and agrees to 3e-15.
+    The p-value is compared under all three options. It used to be checked only
+    under the two corrected ones, because ``"wald"`` computed it as
+    ``1 - |0.5 - Phi(z)| * 2``, which cancels catastrophically in the far tail
+    and disagreed with metafor's ``2 * pnorm(-|z|)`` by an arbitrarily large
+    *relative* amount below about 1e-15. Both paths now go through a log
+    survival function, so both agree with metafor at the tolerance above.
     """
     stats = results.get_fe_stats()
     for key, expected in (
@@ -117,8 +116,7 @@ def assert_matches(results, case):
         ("ci_u", "ci_ub"),
     ):
         assert np.allclose(np.ravel(stats[key]), case[expected], rtol=RTOL, atol=ATOL), key
-    if case["test"] != "z":
-        assert np.allclose(np.ravel(stats["p"]), case["pval"], rtol=RTOL, atol=ATOL)
+    assert np.allclose(np.ravel(stats["p"]), case["pval"], rtol=RTOL, atol=ATOL)
 
     if case["dof"] is None:
         assert results.fe_dof is None
