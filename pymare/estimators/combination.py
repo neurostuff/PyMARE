@@ -99,14 +99,6 @@ class CombinationTest(BaseEstimator):
     def fit(self, z, *args, **kwargs):
         """Fit the estimator to z-values.
 
-        Notes
-        -----
-        ``params_["z"]`` and ``params_["p"]`` describe the same tail, in every
-        mode: ``norm.sf(z) == p`` under ``"directed"`` and ``"undirected"``,
-        whose p-values are right-tailed, and ``2 * norm.sf(|z|) == p`` under
-        ``"concordant"``, whose p-value carries the correction for testing both
-        tails.
-
         .. versionchanged:: 0.0.11
             The ``"concordant"`` statistic was ``norm.isf(p)`` applied to that
             already-doubled p-value, which is a tail mismatch rather than a

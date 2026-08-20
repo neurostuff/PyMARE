@@ -779,21 +779,6 @@ class CombinationTestResults:
         Array of right-tailed p-values. Default = None.
     logp : :obj:`numpy.ndarray`, optional
         Array of natural logarithms of the right-tailed p-values. Default = None.
-
-    Notes
-    -----
-    Any one of the three determines the other two, but not equally well, so the
-    container rebuilds from the most precise one it was given. ``logp`` is the
-    primitive: over a few hundred inputs a combined p-value falls below the
-    smallest positive double, where ``p`` flushes to zero and the ``z`` rebuilt
-    from that zero is ``+inf``.
-
-    Rebuilding ``z`` assumes the p-value is right-tailed, as the parameter says.
-    A ``"concordant"`` p-value is not -- it carries the correction for having
-    tested both tails, and its statistic needs both ``norm.isf(p / 2)`` and the
-    direction of the tail that won, neither of which the p-value alone
-    determines. Pass ``z`` for that mode, as
-    :meth:`~pymare.estimators.combination.CombinationTest.summary` does.
     """
 
     def __init__(self, estimator, dataset, z=None, p=None, logp=None):
