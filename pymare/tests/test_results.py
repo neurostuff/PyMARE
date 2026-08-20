@@ -10,6 +10,7 @@ from pymare.estimators import (
     DerSimonianLaird,
     SampleSizeBasedLikelihoodEstimator,
     StoufferCombinationTest,
+    VarianceBasedLikelihoodEstimator,
     WeightedLeastSquares,
 )
 from pymare.results import (
@@ -106,13 +107,26 @@ def test_meta_regression_results_init_2d(results_2d):
     assert results_2d.tau2.shape == (1, 3)
 
 
-def test_mrr_fe_se(results, results_2d):
+def test_mrr_fe_se(results, results_2d, dataset, dataset_2d):
     """Test MetaRegressionResults fixed-effect standard error estimates."""
     se_1d, se_2d = results.fe_se, results_2d.fe_se
     assert se_1d.shape == (2, 1)
     assert se_2d.shape == (2, 3)
-    assert np.allclose(se_1d.T, [2.6512, 0.9857], atol=1e-4)
-    assert np.allclose(se_2d[:, 0].T, [2.5656, 0.9538], atol=1e-4)
+    assert np.allclose(se_1d.T, [3.0071, 1.1180], atol=1e-4)
+    assert np.allclose(se_2d[:, 0].T, [3.0031, 1.1165], atol=1e-4)
+
+    # "wald" returns the unadjusted (X'WX)^-1 standard errors, which are what
+    # every PyMARE release before the Knapp-Hartung adjustment reported. Pinned
+    # here so the escape hatch is checked where a reader looking for the previous
+    # numbers will find it.
+    unadjusted = DerSimonianLaird(small_sample_correction="wald").fit_dataset(dataset).summary()
+    unadjusted_2d = (
+        VarianceBasedLikelihoodEstimator(small_sample_correction="wald")
+        .fit_dataset(dataset_2d)
+        .summary()
+    )
+    assert np.allclose(unadjusted.fe_se.T, [2.6512, 0.9857], atol=1e-4)
+    assert np.allclose(unadjusted_2d.fe_se[:, 0].T, [2.5656, 0.9538], atol=1e-4)
 
 
 def test_mrr_get_fe_stats(results):
@@ -120,8 +134,10 @@ def test_mrr_get_fe_stats(results):
     stats = results.get_fe_stats()
     assert isinstance(stats, dict)
     assert set(stats.keys()) == {"est", "se", "ci_l", "ci_u", "z", "p"}
-    assert np.allclose(stats["ci_l"].T, [-5.3033, -1.1655], atol=1e-4)
-    assert np.allclose(stats["p"].T, [0.9678, 0.4369], atol=1e-4)
+    assert np.allclose(stats["ci_l"].T, [-7.4651, -1.9693], atol=1e-4)
+    assert np.allclose(stats["p"].T, [0.9728, 0.5186], atol=1e-4)
+    # A t reference with K - P = 6 degrees of freedom, not a normal one.
+    assert np.all(results.fe_dof == 6)
 
 
 def test_mrr_get_re_stats(results_2d):
@@ -152,16 +168,38 @@ def test_mrr_to_df(results):
     assert df.shape == (2, 7)
     col_names = {"estimate", "p-value", "z-score", "ci_0.025", "ci_0.975", "se", "name"}
     assert set(df.columns) == col_names
-    assert np.allclose(df["p-value"].values, [0.9678, 0.4369], atol=1e-4)
+    assert np.allclose(df["p-value"].values, [0.9728, 0.5186], atol=1e-4)
 
 
-def test_small_variance_mrr_to_df(small_variance_results):
-    """Test conversion of MetaRegressionResults to DataFrame."""
+def test_small_variance_mrr_to_df(small_variance_results, small_variance_dataset):
+    """Test conversion of MetaRegressionResults to DataFrame.
+
+    This fixture sets ``y`` equal to a column of the design, so the weighted
+    residuals are exactly zero and the Knapp-Hartung scale factor is exactly
+    zero with them. The standard errors are then zero, which ``get_fe_stats``
+    reports as an undefined p-value rather than as a maximally significant one --
+    which is the honest answer, since a dataset with no residual variation at all
+    carries no information about how uncertain the coefficients are.
+
+    Under ``"wald"`` the same fixture still reports the tiny standard errors
+    the model-based covariance gives, and hence the near-zero p-value that every
+    release before the adjustment reported.
+    """
     df = small_variance_results.to_df()
     assert df.shape == (2, 7)
     col_names = {"estimate", "p-value", "z-score", "ci_0.025", "ci_0.975", "se", "name"}
     assert set(df.columns) == col_names
-    assert np.allclose(df["p-value"].values, [1, np.finfo(np.float64).eps], atol=1e-4)
+    assert np.all(np.isnan(df["p-value"].values))
+    assert np.all(small_variance_results.fe_se == 0.0)
+
+    unadjusted = (
+        DerSimonianLaird(small_sample_correction="wald")
+        .fit_dataset(small_variance_dataset)
+        .summary()
+    )
+    assert np.allclose(
+        unadjusted.to_df()["p-value"].values, [1, np.finfo(np.float64).eps], atol=1e-4
+    )
 
 
 def test_estimator_summary(dataset):

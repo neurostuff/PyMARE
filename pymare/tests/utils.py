@@ -44,6 +44,29 @@ def load_robumeta_reference():
         return json.load(fobj)
 
 
+def load_metafor_reference():
+    """Load the reference values the R package metafor produced.
+
+    Returns
+    -------
+    :obj:`dict`
+        The parsed contents of ``data/metafor_reference.json``: a ``"source"``
+        record naming the R and metafor versions that produced the numbers, and a
+        ``"cases"`` list holding one entry per (design, model, tau^2 estimator,
+        ``test``) combination.
+
+    Notes
+    -----
+    metafor is not a test dependency, so these numbers are pinned rather than
+    recomputed on every run, in the same arrangement as
+    :func:`load_robumeta_reference`. ``validation/metafor/regenerate.sh`` rewrites
+    the file from the pinned R image, and the ``Check metafor alignment`` workflow
+    runs that script on every pull request and fails if anything moved.
+    """
+    with open(op.join(get_test_data_path(), "metafor_reference.json")) as fobj:
+        return json.load(fobj)
+
+
 def cmdstan_is_available():
     """Report whether the Stan estimator can actually be run here.
 

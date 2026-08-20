@@ -23,6 +23,7 @@ from pymare.stats import (
     encode_groups,
     estimate_null_correlation,
     group_mean,
+    knapp_hartung_cov_and_dof,
     normalize_group_weights,
     one_sample_t_from_sufficient_statistics,
     satterthwaite_dof,
@@ -847,6 +848,145 @@ def test_satterthwaite_dof_is_shared_when_weights_do_not_vary():
 
     assert many.shape == (2, 7)
     assert np.allclose(many, one)
+
+
+# -----------------------------------------------------------------------------
+# The Knapp-Hartung adjustment
+# -----------------------------------------------------------------------------
+
+
+def _model_fit(y, v, X, tau2):
+    """Return the WLS coefficients and (X'WX)^-1 the adjustment is applied to."""
+    return weighted_least_squares(y, v, X, tau2=tau2, return_cov=True)
+
+
+@pytest.mark.parametrize("conservative", [False, True], ids=["knapp-hartung", "conservative"])
+@pytest.mark.parametrize("n_preds", [1, 2, 3])
+@pytest.mark.parametrize("scale", [1e-4, 1.0, 1e4], ids=["tiny", "unit", "huge"])
+def test_knapp_hartung_matches_explicit_reference(
+    conservative, n_preds, scale, explicit_knapp_hartung
+):
+    """The scale factor must reproduce a plain per-row loop over the published formula.
+
+    Crossed with the scale of the data because a scale-dependent bug in a
+    weighted sum of squares reads as correct at one magnitude, and with the
+    number of predictors because ``K - P`` is what the sum is divided by.
+    """
+    rng = np.random.RandomState(11)
+    n_estimates, n_datasets = 14, 4
+    y = rng.randn(n_estimates, n_datasets) * np.sqrt(scale)
+    v = scale * (np.abs(rng.randn(n_estimates, n_datasets)) + 0.5)
+    X = np.c_[np.ones(n_estimates), rng.randn(n_estimates, n_preds - 1)]
+    tau2 = scale * np.abs(rng.randn(n_datasets))
+    beta, model_cov = _model_fit(y, v, X, tau2)
+
+    cov, dof = knapp_hartung_cov_and_dof(
+        y, v, X, beta, model_cov, tau2=tau2, conservative=conservative
+    )
+
+    expected = explicit_knapp_hartung(y, v, X, beta, tau2=tau2, conservative=conservative)
+    assert cov.shape == (n_preds, n_preds, n_datasets)
+    assert dof.shape == (n_preds, n_datasets)
+    assert np.all(dof == n_estimates - n_preds)
+    assert np.allclose(cov, model_cov * expected, rtol=1e-12, atol=0)
+
+
+def test_knapp_hartung_scale_factor_is_q_gen_over_its_expectation():
+    """``q`` must be Cochran's Q at the fitted tau^2, divided by ``K - P``.
+
+    The docstring says the scale factor *is* that ratio; this makes the claim
+    enforced rather than asserted. Both quantities now go through
+    ``_weighted_rss``, so the test also guards the extraction: if a future change
+    reached one caller and not the other, the two would drift apart here.
+    """
+    rng = np.random.RandomState(17)
+    for n_estimates, n_preds in ((6, 1), (14, 2), (20, 3)):
+        y = rng.randn(n_estimates, 1)
+        v = np.abs(rng.randn(n_estimates, 1)) + 0.5
+        X = np.c_[np.ones(n_estimates), rng.randn(n_estimates, n_preds - 1)]
+        tau2 = 0.35
+        beta, model_cov = _model_fit(y, v, X, tau2)
+
+        cov, _ = knapp_hartung_cov_and_dof(y, v, X, beta, model_cov, tau2=tau2)
+
+        scale = cov[0, 0, 0] / model_cov[0, 0, 0]
+        expected = np.ravel(stats.q_gen(y, v, X, tau2))[0] / (n_estimates - n_preds)
+        assert np.isclose(scale, expected, rtol=1e-13, atol=0)
+
+
+def test_knapp_hartung_honours_supplied_weights():
+    """``w`` must be what the residuals are weighted by, not a decoration.
+
+    The scale factor is only the right one when the residuals are weighted by the
+    weights that produced ``beta``, which is why the estimators hand their own
+    ``w`` down rather than letting this recompute one. Supplying the default
+    explicitly must change nothing, and supplying anything else must change the
+    answer -- otherwise the argument could silently be ignored.
+    """
+    rng = np.random.RandomState(8)
+    y = rng.randn(11, 2)
+    v = np.abs(rng.randn(11, 2)) + 0.5
+    X = np.c_[np.ones(11), rng.randn(11)]
+    tau2 = 0.4
+    beta, model_cov = _model_fit(y, v, X, tau2)
+
+    implicit, _ = knapp_hartung_cov_and_dof(y, v, X, beta, model_cov, tau2=tau2)
+    explicit, _ = knapp_hartung_cov_and_dof(
+        y, v, X, beta, model_cov, tau2=tau2, w=1.0 / (v + tau2)
+    )
+    other, _ = knapp_hartung_cov_and_dof(y, v, X, beta, model_cov, tau2=tau2, w=np.ones_like(v))
+
+    assert np.array_equal(implicit, explicit)
+    assert not np.allclose(other, implicit)
+
+
+def test_knapp_hartung_keeps_parallel_datasets_independent():
+    """A shared v column must not let one dataset's residuals reach another's factor.
+
+    The scale factor is a per-dataset reduction, so the failure mode is a shape
+    that silently collapses or mixes columns. Compared against D separate
+    single-column fits, which is the definition it has to meet.
+    """
+    rng = np.random.RandomState(2)
+    y = rng.randn(10, 5)
+    v = np.abs(rng.randn(10, 1)) + 0.5
+    X = np.c_[np.ones(10), rng.randn(10)]
+    tau2 = np.abs(rng.randn(5))
+    beta, model_cov = _model_fit(y, v, X, tau2)
+
+    cov, dof = knapp_hartung_cov_and_dof(y, v, X, beta, model_cov, tau2=tau2)
+
+    assert cov.shape == (2, 2, 5)
+    assert dof.shape == (2, 5)
+    # Every column must equal the fit it would have got on its own, so a shared
+    # column cannot leak one dataset's residuals into another's scale factor.
+    for i_dataset in range(5):
+        alone_beta, alone_cov = _model_fit(y[:, [i_dataset]], v, X, tau2[i_dataset])
+        expected, _ = knapp_hartung_cov_and_dof(
+            y[:, [i_dataset]], v, X, alone_beta, alone_cov, tau2=tau2[i_dataset]
+        )
+        assert np.allclose(cov[:, :, i_dataset], expected[:, :, 0], rtol=1e-12, atol=0)
+
+
+def test_knapp_hartung_zero_residuals_give_a_zero_scale_factor():
+    """A perfectly fitting dataset must not report rounding noise as a variance.
+
+    ``conservative=True`` floors the result at 1 rather than at zero, because the whole
+    point of the modification is that the adjustment can only widen an interval.
+    """
+    rng = np.random.RandomState(0)
+    X = np.c_[np.ones(8), rng.randn(8)]
+    v = np.abs(rng.randn(8, 1)) + 0.5
+    # y exactly in the column space of X, so every weighted residual is zero.
+    y = (X @ np.array([[1.5], [-0.25]])).reshape(8, 1)
+    beta, model_cov = _model_fit(y, v, X, 0.0)
+
+    cov, dof = knapp_hartung_cov_and_dof(y, v, X, beta, model_cov)
+    assert np.all(cov == 0.0)
+    assert np.all(dof == 6)
+
+    floored, _ = knapp_hartung_cov_and_dof(y, v, X, beta, model_cov, conservative=True)
+    assert np.allclose(floored, model_cov, rtol=1e-14, atol=0)
 
 
 # -----------------------------------------------------------------------------
