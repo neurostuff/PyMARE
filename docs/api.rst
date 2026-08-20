@@ -110,6 +110,7 @@ API
    :template: function.rst
 
    stats.weighted_least_squares
+   stats.knapp_hartung_cov_and_dof
    stats.bounded_scalar_min
    stats.ensure_2d
    stats.q_profile

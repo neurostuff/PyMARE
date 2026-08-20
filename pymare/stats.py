@@ -37,6 +37,13 @@ MIN_DOF_FOR_SATTERTHWAITE = 4.0
 # the CR2 adjustment diverges. Floor it rather than emit infinities.
 _MIN_LEVERAGE_COMPLEMENT = 1e-10
 
+# Weighted residual sum of squares at or below which the Knapp-Hartung scale
+# factor is set to zero rather than to rounding noise; see
+# knapp_hartung_cov_and_dof, which explains why an absolute floor is meaningful
+# for this particular quantity. Machine epsilon is the value metafor's rma.uni
+# uses for the same guard.
+_MIN_KNAPP_HARTUNG_RSS = np.finfo(float).eps
+
 # Assumed correlation between estimates within a group, used only to collapse
 # groups before estimating tau^2. Results are very weakly sensitive to it; 0.8
 # is the conventional choice for correlated effects.
@@ -1956,6 +1963,153 @@ def cluster_robust_cov(
 
     # Match the (p, p, i) orientation used for the model-based covariance.
     return robust_cov.T
+
+
+def knapp_hartung_cov_and_dof(y, v, X, beta, model_cov, tau2=0.0, w=None, conservative=False):
+    r"""Apply the Knapp-Hartung adjustment to a model-based covariance.
+
+    A random-effects meta-regression estimates :math:`\tau^2` and then treats it
+    as known, so the model-based covariance :math:`(X'WX)^{-1}` understates the
+    uncertainty in the coefficients and the Wald test built on it rejects too
+    often at small ``K``. The adjustment of :footcite:t:`knapp2003improved`
+    replaces that covariance with
+
+    .. math::
+        q \, (X'WX)^{-1}, \qquad
+        q = \frac{e'We}{K - P}, \qquad e = y - X\hat\beta
+
+    and refers :math:`\hat\beta_j / \mathrm{se}(\hat\beta_j)` to a
+    :math:`t_{K-P}` distribution rather than a normal one.
+
+    Parameters
+    ----------
+    y : :obj:`numpy.ndarray` of shape (K, D)
+        2d array of estimates (observations x parallel datasets).
+    v : :obj:`numpy.ndarray` of shape (K, 1) or (K, D)
+        2d array of sampling variances.
+    X : :obj:`numpy.ndarray` of shape (K, P)
+        Fixed effect design matrix.
+    beta : :obj:`numpy.ndarray` of shape (P, D)
+        Fixed effect coefficients, as returned by
+        :func:`~pymare.stats.weighted_least_squares`.
+    model_cov : :obj:`numpy.ndarray` of shape (P, P, D)
+        The model-based covariance ``(X'WX)^-1``, from
+        :func:`~pymare.stats.weighted_least_squares` with ``return_cov=True``. It
+        must have been computed under the same ``tau2`` and ``w``; a mismatched
+        value is scaled just as silently as a matched one.
+    tau2 : :obj:`float` or :obj:`numpy.ndarray` of shape (D,), optional
+        tau^2 estimate used for the weights, matching the value that produced
+        ``beta``. Default = 0.
+    w : None or :obj:`numpy.ndarray` of shape (K, 1) or (K, D), optional
+        Precomputed weights overriding the default ``1 / (v + tau2)``. Must be the
+        weights that produced ``beta``, or the residuals will not correspond to
+        the fit. Default = None.
+    conservative : :obj:`bool`, optional
+        Whether to floor ``q`` at 1, so the adjustment can only widen the standard
+        errors and never narrow them. This is what
+        ``small_sample_correction="knapp-hartung-conservative"`` selects, and
+        ``metafor``'s ``test="adhoc"``. Default = False.
+
+    Returns
+    -------
+    cov : :obj:`numpy.ndarray` of shape (P, P, D)
+        ``model_cov`` scaled by ``q``, oriented like the covariance returned by
+        :func:`~pymare.stats.weighted_least_squares`. Unchanged when there are no
+        residual degrees of freedom.
+    dof : None or :obj:`numpy.ndarray` of shape (P, D)
+        ``K - P``, repeated for every predictor and parallel dataset so that it
+        lines up with ``beta``. None when ``K - P < 1``, which is the signal to
+        fall back to a normal reference.
+
+    Warns
+    -----
+    UserWarning
+        If ``K - P < 1``, in which case ``q`` is undefined -- the residual sum of
+        squares and its divisor are both zero -- and the inputs are returned
+        unadjusted, leaving the caller with the uncorrected Wald test.
+
+    See Also
+    --------
+    cluster_robust_cov : The corresponding correction when the observations are
+        dependent. The two are alternatives, not layers: a sandwich already
+        replaces ``(X'WX)^-1`` with an estimate that does not assume the fitted
+        weights are right, which is the whole content of ``q``.
+    pymare.results.MetaRegressionResults.fe_dof : Where ``dof`` is surfaced.
+
+    Notes
+    -----
+    Written to reproduce ``metafor``'s ``rma.uni(..., test="knha")``, whose scale
+    factor is ``RSS.knha / (k - p)`` under the inverse-variance weights;
+    ``conservative=True`` is its ``test="adhoc"``. ``q`` is Cochran's :math:`Q` at
+    :math:`\hat\tau^2` divided by its expectation, so it is centred on 1 and
+    inflates the covariance exactly when the data are more dispersed than the
+    fitted weights say they should be. Nothing here touches ``beta``.
+
+    The method is attributed to Knapp and Hartung but was arrived at
+    independently by :footcite:t:`hartung1999alternative` and
+    :footcite:t:`sidik2002simple`, hence its other name, the
+    Hartung-Knapp-Sidik-Jonkman method. :footcite:t:`knapp2003improved` is cited
+    here because it is the one that covers ``P > 1``: the earlier two treat the
+    overall effect, and the extension to a meta-regression coefficient with
+    ``K - P`` degrees of freedom is theirs.
+
+    **Which to use.** :footcite:t:`viechtbauer2015comparison` found ``"knha"`` and
+    a permutation test the only procedures holding their nominal level in every
+    condition they simulated, and recommend ``"knha"`` as the cheaper of the two;
+    it is PyMARE's default for that reason. It degrades when few observations have
+    very unequal precisions, where :footcite:t:`roever2015hartung` and
+    :footcite:t:`inthout2014hartung` recommend ``conservative=True`` instead. That
+    trade-off is measured over a grid of weight ratios and observation counts in
+    ``validation/knapp_hartung``; ``conservative=True`` is not the default because it
+    overcorrects sharply when it is not needed.
+
+    ``q`` is scale-free: multiplying ``y`` by :math:`c` and ``v`` by :math:`c^2`
+    leaves every :math:`w_i e_i^2` unchanged, which is what makes the absolute
+    floor in ``_MIN_KNAPP_HARTUNG_RSS`` meaningful. Reaching it means ``y`` lies
+    in the column space of ``X`` to numerical precision.
+
+    References
+    ----------
+    .. footbibliography::
+
+    """
+    n_obs, n_preds = X.shape
+    dof = n_obs - n_preds
+    if dof < 1:
+        warnings.warn(
+            "The Knapp-Hartung adjustment needs at least one residual degree of "
+            f"freedom, but {n_obs} observation(s) and {n_preds} predictor(s) leave "
+            f"{dof}. Falling back to the Wald test against a normal reference, which "
+            "does not account for the uncertainty in the tau^2 estimate and will "
+            "therefore reject too often. Supply more observations, or drop a "
+            "predictor, to get the correction.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return model_cov, None
+
+    # A single shared v column needs no expansion here: NumPy broadcasts it
+    # against the (K, D) residuals, and the sum over observations then has one
+    # entry per dataset either way. The grouped path does need
+    # broadcast_columns, because satterthwaite_dof indexes weight columns.
+    w = 1.0 / (v + tau2) if w is None else w
+    resid = y - X.dot(beta)
+    rss = np.sum(w * resid**2, axis=0)
+
+    # An all-but-zero residual sum of squares means y lies in the column space of
+    # X to numerical precision, so there is no residual dispersion to read a
+    # variance off. Reporting the rounding noise as one would give a standard
+    # error that is positive only by accident and a p-value of essentially zero;
+    # zero instead reaches get_fe_stats as a non-positive standard error, which it
+    # already reports as undefined.
+    scale = np.where(rss <= _MIN_KNAPP_HARTUNG_RSS, 0.0, rss / dof)
+    if conservative:
+        # After the floor above, not before: the modification exists to keep the
+        # adjustment from ever narrowing an interval, and a zeroed scale factor
+        # is the most extreme narrowing there is.
+        scale = np.maximum(scale, 1.0)
+
+    return model_cov * scale, np.full((n_preds, y.shape[1]), float(dof))
 
 
 def ensure_2d(arr):

@@ -250,6 +250,34 @@ def explicit_cluster_robust_cov():
 
 
 @pytest.fixture(scope="package")
+def explicit_knapp_hartung():
+    """Compute the Knapp-Hartung scale factor as a plain per-dataset, per-row loop.
+
+    Written from the published formula rather than from
+    :func:`~pymare.stats.knapp_hartung_cov_and_dof`, so that a test comparing the
+    two is a check on the implementation rather than a restatement of it.
+    """
+
+    def _reference(y, v, X, beta, tau2=0.0, conservative=False):
+        n_obs, n_preds = X.shape
+        scale = np.empty(y.shape[1])
+        for i_dataset in range(y.shape[1]):
+            column = min(i_dataset, v.shape[1] - 1)
+            tau = tau2[i_dataset] if np.ndim(tau2) else tau2
+            total = 0.0
+            for i_obs in range(n_obs):
+                weight = 1.0 / (v[i_obs, column] + tau)
+                resid = y[i_obs, i_dataset] - X[i_obs] @ beta[:, i_dataset]
+                total += weight * resid**2
+            scale[i_dataset] = total / (n_obs - n_preds)
+            if conservative:
+                scale[i_dataset] = max(scale[i_dataset], 1.0)
+        return scale
+
+    return _reference
+
+
+@pytest.fixture(scope="package")
 def correlated_block_data():
     """Build estimates that share a signal, the first ``block_size`` of which co-vary."""
 
