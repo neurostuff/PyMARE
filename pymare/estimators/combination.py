@@ -97,7 +97,28 @@ class CombinationTest(BaseEstimator):
         return np.exp(self.log_p_value(z, *args, **kwargs))
 
     def fit(self, z, *args, **kwargs):
-        """Fit the estimator to z-values."""
+        """Fit the estimator to z-values.
+
+        .. versionchanged:: 0.0.11
+            The ``"concordant"`` statistic was ``norm.isf(p)`` applied to that
+            already-doubled p-value, which is a tail mismatch rather than a
+            different convention: it shrank the statistic to absorb the
+            multiplicity penalty that :footcite:t:`winkler2016non` place on the
+            p-value alone. Their concordant statistic is
+            ``T = max(-2 sum ln p_k, -2 sum ln (1 - p_k))`` -- the better of the
+            two directed combinations, unshrunk -- which is what
+            ``norm.isf(p / 2)`` returns. The old form also made the reported
+            statistic non-monotone in the evidence: it was negative wherever
+            ``p > 0.5``, carried the opposite sign to the effect there, and was
+            ``-inf`` wherever the cap put ``p`` at exactly 1, which gave the
+            least significant results the largest magnitudes. A single input now
+            combines to its own z, as it should.
+
+        References
+        ----------
+        .. footbibliography::
+
+        """
         # This resets the Estimator's dataset_ attribute. fit_dataset will overwrite if called.
         self.dataset_ = None
 
@@ -112,8 +133,8 @@ class CombinationTest(BaseEstimator):
             # correction for two tests is an added log(2), the cap a minimum
             # against log(1).
             log_p = np.minimum(0.0, np.log(2.0) + np.minimum(log_p1, log_p2))
-            z_calc = -ndtri_exp(log_p)
-            z_calc[log_p2 < log_p1] *= -1
+            z_calc = -ndtri_exp(log_p - np.log(2.0))
+            z_calc = np.where(log_p2 < log_p1, -z_calc, z_calc)
         else:
             if self.mode == "undirected":
                 z = np.abs(z)
