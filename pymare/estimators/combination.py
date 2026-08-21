@@ -272,9 +272,20 @@ class StoufferCombinationTest(CombinationTest):
                 block_corr = np.corrcoef(centered[members], rowvar=True)
                 variance = block_corr.sum() / size**2
 
-            if not np.isfinite(variance) or variance <= 0:
+            # A block sum of zero means the group's members cancel exactly: their
+            # aggregated z is identically zero and carries no information. A
+            # merely tiny sum is worse than useless -- dividing by its square
+            # root inflates the group's z without bound -- so both are refused
+            # here rather than reported. The floor is the sum a group of this
+            # size would have at the smallest correlation an exchangeable block
+            # can hold, scaled by the resolution of the correlations feeding it.
+            floor = 1e-8 / size
+            if not np.isfinite(variance) or variance <= floor:
                 raise ValueError(
-                    "Each group's aggregated z statistic must have positive variance."
+                    f"Group {group_labels[group_idx]!r} pools {size} estimates whose "
+                    f"aggregated z statistic has variance {variance:.3g}, which carries "
+                    "no usable information: its members cancel. Check the correlation "
+                    "matrix supplied for this group, or drop the group."
                 )
             group_z[group_idx] = z[members].mean(axis=0) / np.sqrt(variance)
 

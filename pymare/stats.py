@@ -791,6 +791,20 @@ def undo_centering_shrinkage(corr, groups):
     members = [np.flatnonzero(group_codes == g) for g in range(group_labels.size)]
     sizes = np.array([m.size for m in members], dtype=float)
 
+    # d rho / d r grows like 1 / (1 - size/K)**2, so a group that is most of the
+    # sample leaves almost nothing for the inversion to work with: centring has
+    # already removed what identified its rho. The result is still bounded and
+    # correctly signed, but it is driven by noise rather than by the data.
+    dominant = sizes[sizes > 1] / n_estimates
+    if dominant.size and dominant.max() > 0.5:
+        warnings.warn(
+            f"A group holds {dominant.max():.0%} of the estimates, so centring has "
+            "removed most of the information about its correlation. The de-shrunk "
+            "value is bounded but poorly determined; consider passing groups=None, "
+            "or splitting the group.",
+            stacklevel=2,
+        )
+
     # Mean observed within-group correlation, used only to drive the shared term.
     observed = np.zeros(len(members))
     for index, member in enumerate(members):
@@ -799,8 +813,8 @@ def undo_centering_shrinkage(corr, groups):
         block = corr[np.ix_(member, member)]
         observed[index] = block[~np.eye(member.size, dtype=bool)].mean()
 
-    def solve(r, size, others):
-        """Invert the shrinkage for one group, given the other groups' share.
+    def coefficients(size, others):
+        """Coefficients of the affine forward map ``r(rho)`` for one group.
 
         ``others`` is the grand-mean contribution of every *other* group. The
         group's own contribution stays symbolic, so both sides of the ratio
@@ -812,10 +826,45 @@ def undo_centering_shrinkage(corr, groups):
         offset = -2.0 / n_estimates + (n_estimates + others) / n_estimates**2
         numerator_slope = 1.0 - 2.0 * (size - 1) / n_estimates + own
         denominator_slope = -2.0 * (size - 1) / n_estimates + own
-        denominator = numerator_slope - r * denominator_slope
-        with np.errstate(invalid="ignore", divide="ignore"):
-            rho = (r * (1.0 + offset) - offset) / denominator
-        return np.where(np.abs(denominator) > 1e-12, rho, r)
+        return offset, numerator_slope, denominator_slope
+
+    def forward(rho, offset, numerator_slope, denominator_slope):
+        """Residual correlation an exchangeable block with this rho would show."""
+        return (rho * numerator_slope + offset) / (rho * denominator_slope + 1.0 + offset)
+
+    def solve(r, size, others):
+        """Recover the underlying rho from an observed residual correlation.
+
+        ``r(rho)`` is a ratio of two affine functions, so its inverse has a pole
+        at ``numerator_slope / denominator_slope``. The pole sits far outside
+        [-1, 1] while a group is a small share of the estimates, but it moves
+        into the ordinary data range as the share grows -- at ``size / K`` of
+        about a third it is already near -0.9 -- and inverting across it maps
+        strongly anti-correlated inputs to *positive* rho. Clipping ``r`` to the
+        interval the forward map can actually produce keeps the inversion on the
+        branch the derivation covers, so the pole is unreachable by
+        construction and the result stays monotone in ``r``.
+
+        The lower clip is ``rho = -1/(size - 1)``, not -1: an exchangeable block
+        of that size is only positive semi-definite down to there. Honouring it
+        also keeps the block sum -- the only thing the dependence corrections
+        read off a block -- non-negative, which is what they require.
+        """
+        offset, numerator_slope, denominator_slope = coefficients(size, others)
+
+        # d r / d rho is (numerator_slope + offset) / (rho * denominator_slope +
+        # 1 + offset)**2, so this is the sign of the slope. It vanishes as a
+        # group approaches the whole sample, where centring has removed
+        # everything that identified rho and there is nothing to invert.
+        if numerator_slope + offset <= 0:
+            return np.clip(r, -1.0, 1.0)
+
+        floor = -1.0 / (size - 1)
+        low = forward(floor, offset, numerator_slope, denominator_slope)
+        high = forward(1.0, offset, numerator_slope, denominator_slope)
+        r = np.clip(r, low, high)
+        rho = (r * (1.0 + offset) - offset) / (numerator_slope - r * denominator_slope)
+        return np.clip(rho, floor, 1.0)
 
     # Groups interact only through the grand mean, and each group's own share is
     # handled exactly, so this converges immediately for a single group and in a
@@ -843,16 +892,42 @@ def undo_centering_shrinkage(corr, groups):
     offset = 1.0 / (n_estimates - 1)
     corrected = (corr + offset) / (1.0 + offset)
 
-    # Within-group pairs are inverted exactly, elementwise so that genuine
-    # heterogeneity inside a group survives.
+    # Within-group pairs are inverted through the block *mean*, which is the
+    # only quantity the exchangeable derivation above describes: it assumes
+    # every off-diagonal entry of a block equals the same rho. Sending each
+    # entry through the inverse separately, as though it were its own
+    # exchangeable block, has no such justification -- and because the inverse
+    # amplifies asymmetrically (a group at a third of the estimates stretches
+    # negatives about threefold while compressing positives), it drags the block
+    # mean negative even when the raw residuals are centred on zero.
+    #
+    # Heterogeneity inside a group still survives: the observed spread is
+    # carried over as a deviation about the recovered mean, shrunk just enough
+    # to stay inside [-1, 1]. Scaling a zero-mean deviation leaves the mean
+    # exactly at the recovered rho.
     total = contributions.sum()
     for index, member in enumerate(members):
         if member.size < 2:
             continue
         block = corr[np.ix_(member, member)]
-        corrected[np.ix_(member, member)] = solve(
-            block, sizes[index], total - contributions[index]
-        )
+        off_diagonal = ~np.eye(member.size, dtype=bool)
+        entries = block[off_diagonal]
+        mean = entries.mean()
+        rho = float(solve(mean, sizes[index], total - contributions[index]))
+
+        deviation = entries - mean
+        highest, lowest = deviation.max(), deviation.min()
+        scale = 1.0
+        if highest > 0:
+            scale = min(scale, (1.0 - rho) / highest)
+        if lowest < 0:
+            scale = min(scale, (-1.0 - rho) / lowest)
+        scale = max(scale, 0.0)
+
+        updated_block = np.empty_like(block)
+        updated_block[off_diagonal] = rho + scale * deviation
+        np.fill_diagonal(updated_block, 1.0)
+        corrected[np.ix_(member, member)] = updated_block
 
     np.fill_diagonal(corrected, 1.0)
     return np.clip(corrected, -1.0, 1.0)
