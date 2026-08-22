@@ -273,13 +273,20 @@ class StoufferCombinationTest(CombinationTest):
                 variance = block_corr.sum() / size**2
 
             # A block sum of zero means the group's members cancel exactly: their
-            # aggregated z is identically zero and carries no information. A
-            # merely tiny sum is worse than useless -- dividing by its square
-            # root inflates the group's z without bound -- so both are refused
-            # here rather than reported. The floor is the sum a group of this
-            # size would have at the smallest correlation an exchangeable block
-            # can hold, scaled by the resolution of the correlations feeding it.
-            floor = 1e-8 / size
+            # aggregated z is identically zero and carries no information.
+            #
+            # The floor screens out that case and nothing more. The sum runs over
+            # ``size**2`` entries, so it carries absolute rounding error of about
+            # ``size**2`` machine epsilons, which leaves the variance with an
+            # error near 1e-16 however large the group is -- a constant, not a
+            # size-dependent one. A few orders above that separates a cancelled
+            # block from a real one.
+            #
+            # It is not a statistical safeguard and cannot be one. A variance
+            # just above the floor still inflates the group's z a millionfold,
+            # and only the caller knows whether a block sum that small is
+            # credible for its data.
+            floor = 1e-12
             if not np.isfinite(variance) or variance <= floor:
                 raise ValueError(
                     f"Group {group_labels[group_idx]!r} pools {size} estimates whose "
