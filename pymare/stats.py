@@ -735,6 +735,20 @@ def estimate_null_correlation(y, groups=None, bias_correct=True):
     return corr
 
 
+def _clamp(value, low, high):
+    """Confine one scalar to ``[low, high]``.
+
+    Two comparisons, but ``np.clip`` charges microseconds of NumPy dispatch for
+    them, and the shrinkage inversion below asks a few hundred times per call. A
+    NaN fails both tests and passes straight through, as it does in ``np.clip``.
+    """
+    if value < low:
+        return low
+    if value > high:
+        return high
+    return value
+
+
 def undo_centering_shrinkage(corr, groups):
     r"""Invert the correlation shrinkage induced by centering.
 
@@ -775,6 +789,17 @@ def undo_centering_shrinkage(corr, groups):
     independent, and their entries get the group-agnostic rescaling that maps
     independent estimates to zero.
 
+    The result is not guaranteed to be positive semi-definite. Where ``corr`` is
+    itself estimated from few datasets, its smallest eigenvalue can go a little
+    negative, reaching about -0.17 in testing. That is harmless for the
+    dependence corrections, which read block sums only, but a caller needing a
+    valid correlation matrix should project the result onto the nearest one
+    :footcite:p:`higham2002computing`.
+
+    References
+    ----------
+    .. footbibliography::
+
     """
     corr = np.array(corr, dtype=float, copy=True)
     groups = np.asarray(groups).ravel()
@@ -789,53 +814,117 @@ def undo_centering_shrinkage(corr, groups):
     # and np.unique additionally requires them to be sortable.
     group_codes, group_labels = encode_groups(groups, n_observations=n_estimates)
     members = [np.flatnonzero(group_codes == g) for g in range(group_labels.size)]
-    sizes = np.array([m.size for m in members], dtype=float)
+    # Plain floats, not an array: only the scalar solver below reads them.
+    sizes = [float(m.size) for m in members]
+    # A singleton has no within-group pair, so nothing below touches it. Every
+    # loop from here walks this list rather than re-testing each size.
+    pooled = [index for index in range(len(members)) if members[index].size > 1]
+    # Exact as an integer, so dividing by it is bit-for-bit ``/ n_estimates**2``.
+    squared = n_estimates**2
 
-    # Mean observed within-group correlation, used only to drive the shared term.
-    observed = np.zeros(len(members))
+    # Each block is read twice, once to drive the shared term and once to be
+    # corrected, so pull its off-diagonal entries out once and keep them. The
+    # mask depends only on block size, so equal-sized groups share one.
+    masks = {}
+    selections = [None] * len(members)
+    entries = [None] * len(members)
+    # Mean observed within-group correlation. The shared term is driven by it,
+    # and the correction below is built around it.
+    observed = [0.0] * len(members)
     for index, member in enumerate(members):
         if member.size < 2:
             continue
-        block = corr[np.ix_(member, member)]
-        observed[index] = block[~np.eye(member.size, dtype=bool)].mean()
+        mask = masks.get(member.size)
+        if mask is None:
+            mask = masks[member.size] = ~np.eye(member.size, dtype=bool)
+        selection = np.ix_(member, member)
+        selections[index] = (selection, mask)
+        entries[index] = corr[selection][mask]
+        observed[index] = float(entries[index].mean())
 
-    def solve(r, size, others):
-        """Invert the shrinkage for one group, given the other groups' share.
+    # Coefficients of the affine forward map ``r(rho)``, one set per group. As
+    # the fixed point below iterates, the only thing that moves is the grand-mean
+    # term, and it arrives through ``others``, so every size-dependent part is
+    # settled here.
+    coefficients = [None] * len(members)
+    for index in pooled:
+        size = sizes[index]
+        own = size * (size - 1) / squared
+        outside = n_estimates - size
+        coefficients[index] = (
+            1.0 - 2.0 * (size - 1) / n_estimates + own,  # numerator slope
+            -2.0 * (size - 1) / n_estimates + own,  # denominator slope
+            # Numerator of the forward map's slope, before ``others`` is added
+            # and the divide by ``squared``. Kept in this form because the
+            # equivalent ``numerator_slope + offset`` is a difference of O(1)
+            # terms: they cancel to rounding noise exactly where the true slope
+            # reaches zero, so a ``<= 0`` test on that form never fires. These
+            # are integer differences, so they cancel exactly.
+            outside * (outside + 1.0),
+            # The smallest rho an exchangeable block of this size can hold.
+            -1.0 / (size - 1),
+        )
 
-        ``others`` is the grand-mean contribution of every *other* group. The
-        group's own contribution stays symbolic, so both sides of the ratio
-        remain affine in its rho and the solution is exact. Folding it into
-        ``others`` instead would make the numerator and denominator vanish
-        together whenever the group holds about half the estimates.
+    def solve(r, index, others):
+        """Recover the underlying rho from an observed residual correlation.
+
+        The forward map has a narrow range on the negative side, and clipping
+        ``r`` into it is what keeps the inversion honest. At 100 estimates in 320
+        an exchangeable block can only show ``r`` between -0.008 and 1, so an
+        observed -0.5 matches no block the derivation describes. Inverted anyway
+        it returns a rho far below ``floor``, and the block sum goes negative.
+
+        The bottom of that range is the image of ``floor``, not of -1, because an
+        exchangeable block is only positive semi-definite down to there.
+        Honouring it also keeps the block sum non-negative, which is what the
+        dependence corrections require of a block.
+
+        The same clip disposes of a pole. ``r(rho)`` is a ratio of two affine
+        functions, so its inverse blows up at ``numerator_slope /
+        denominator_slope``, which is near -0.92 in the same example and further
+        out for smaller groups. Past it the sign flips, and strongly
+        anti-correlated input comes back as *positive* rho. That is the rarer of
+        the two faults, covering about 8% of the negative half of [-1, 1] against
+        91% for the floor, but the clip puts it out of reach and leaves the
+        result monotone in ``r``.
+
+        The upper clip is a literal 1, not a computed bound. ``N - D`` is
+        identically 1, so in ``(rho * N + c) / (rho * D + 1 + c)`` the
+        denominator at ``rho = 1`` is ``N + c``, the same as the numerator. Every
+        group maps rho 1 to r 1, whatever its size.
         """
-        own = size * (size - 1) / n_estimates**2
-        offset = -2.0 / n_estimates + (n_estimates + others) / n_estimates**2
-        numerator_slope = 1.0 - 2.0 * (size - 1) / n_estimates + own
-        denominator_slope = -2.0 * (size - 1) / n_estimates + own
-        denominator = numerator_slope - r * denominator_slope
-        with np.errstate(invalid="ignore", divide="ignore"):
-            rho = (r * (1.0 + offset) - offset) / denominator
-        return np.where(np.abs(denominator) > 1e-12, rho, r)
+        numerator_slope, denominator_slope, outside, floor = coefficients[index]
+        offset = -2.0 / n_estimates + (n_estimates + others) / squared
+        identifying = (outside + others) / squared
+
+        # A group spanning the whole sample has no rho to recover. R is then
+        # ``(1 - rho) I + rho J``, centering annihilates J, so
+        # ``CRC = (1 - rho) C`` and the observed correlation is ``-1/(K - 1)``
+        # whatever rho was. ``identifying`` is the slope of the forward map, and
+        # it reaches zero here; inverting a flat map claims the strongest
+        # dependence there is from data that carries none.
+        if identifying <= 0:
+            return _clamp(r, -1.0, 1.0)
+
+        shifted = 1.0 + offset
+        low = (floor * numerator_slope + offset) / (floor * denominator_slope + shifted)
+        r = _clamp(r, low, 1.0)
+        rho = (r * shifted - offset) / (numerator_slope - r * denominator_slope)
+        return _clamp(rho, floor, 1.0)
 
     # Groups interact only through the grand mean, and each group's own share is
     # handled exactly, so this converges immediately for a single group and in a
     # handful of steps otherwise.
-    contributions = np.zeros(len(members))
+    weights = [size * (size - 1) for size in sizes]
+    contributions = [0.0] * len(members)
     for _ in range(50):
-        total = contributions.sum()
-        updated = np.array(
-            [
-                (
-                    sizes[i]
-                    * (sizes[i] - 1)
-                    * float(solve(observed[i], sizes[i], total - contributions[i]))
-                    if sizes[i] > 1
-                    else 0.0
-                )
-                for i in range(len(members))
-            ]
-        )
-        if np.allclose(updated, contributions, atol=1e-12, rtol=0):
+        total = sum(contributions)
+        updated = [0.0] * len(members)
+        for i in pooled:
+            updated[i] = weights[i] * solve(observed[i], i, total - contributions[i])
+        # Both iterates satisfy the tolerance, so stopping on the earlier one is
+        # a free choice; it is the one the array form this replaced made.
+        if all(abs(updated[i] - contributions[i]) <= 1e-12 for i in pooled):
             break
         contributions = updated
 
@@ -843,16 +932,46 @@ def undo_centering_shrinkage(corr, groups):
     offset = 1.0 / (n_estimates - 1)
     corrected = (corr + offset) / (1.0 + offset)
 
-    # Within-group pairs are inverted exactly, elementwise so that genuine
-    # heterogeneity inside a group survives.
-    total = contributions.sum()
-    for index, member in enumerate(members):
-        if member.size < 2:
-            continue
-        block = corr[np.ix_(member, member)]
-        corrected[np.ix_(member, member)] = solve(
-            block, sizes[index], total - contributions[index]
-        )
+    # Within-group pairs are inverted through the block *mean*, the only quantity
+    # the derivation above describes: it assumes every off-diagonal entry of a
+    # block equals the same rho. Putting each entry through the inverse
+    # separately, as though it were its own exchangeable block, has no such
+    # warrant. It is also biased, because the inverse is convex: at a third of
+    # the estimates it stretches a residual correlation of -0.5 about tenfold but
+    # compresses +0.5 to 0.87 of itself. That pulls the block mean negative even
+    # when the raw residuals are centered on zero.
+    #
+    # Heterogeneity inside a group still survives: the observed spread is carried
+    # over as a deviation about the recovered mean, and carried at full size.
+    # That is right to leading order. One pair moves the row sums and the grand
+    # total by only O(1/K), so centering shifts a block's mean by a large,
+    # size-dependent factor while barely touching the deviations about it. The
+    # measured ratio of true spread to observed spread is 1.01 at a tenth of the
+    # estimates, and lies between 0.8 and 1.4 by a half. ``scale`` drops below 1
+    # only where a deviation would otherwise leave [-1, 1].
+    #
+    # The deviations are zero-mean whatever the scale, so the block mean stays
+    # exactly at the recovered rho, and with it the block sum.
+    total = sum(contributions)
+    for index in pooled:
+        selection, off_diagonal = selections[index]
+        entry = entries[index]
+        mean = observed[index]
+        rho = solve(mean, index, total - contributions[index])
+
+        deviation = entry - mean
+        highest, lowest = deviation.max(), deviation.min()
+        scale = 1.0
+        if highest > 0:
+            scale = min(scale, (1.0 - rho) / highest)
+        if lowest < 0:
+            scale = min(scale, (-1.0 - rho) / lowest)
+        scale = max(scale, 0.0)
+
+        updated_block = np.empty(off_diagonal.shape)
+        updated_block[off_diagonal] = rho + scale * deviation
+        np.fill_diagonal(updated_block, 1.0)
+        corrected[selection] = updated_block
 
     np.fill_diagonal(corrected, 1.0)
     return np.clip(corrected, -1.0, 1.0)

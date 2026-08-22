@@ -331,6 +331,25 @@ def centering_shrinkage():
 
 
 @pytest.fixture(scope="package")
+def sampled_centering_shrinkage():
+    """Estimate the centered correlation from data, the way a caller really would.
+
+    The ``centering_shrinkage`` fixture applies the centering map exactly, so
+    every off-diagonal entry of a block comes back equal and a block-mean
+    inversion cannot be told apart from an entrywise one. Drawing ``n_datasets``
+    samples instead gives the block the genuine spread that separates them.
+    """
+
+    def _estimate(corr, n_datasets, seed=0):
+        n_estimates = corr.shape[0]
+        factor = np.linalg.cholesky(corr + 1e-10 * np.eye(n_estimates))
+        y = factor @ np.random.default_rng(seed).standard_normal((n_estimates, n_datasets))
+        return np.corrcoef(y - y.mean(axis=0), rowvar=True)
+
+    return _estimate
+
+
+@pytest.fixture(scope="package")
 def block_correlation():
     """Build an equicorrelated-block correlation matrix and its group labels."""
 

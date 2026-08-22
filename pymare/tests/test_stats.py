@@ -1064,6 +1064,176 @@ def test_undo_centering_shrinkage_is_exact(
     assert np.allclose(recovered[:block_size, :block_size][off_diagonal], rho, atol=1e-8)
 
 
+@pytest.mark.parametrize("n_estimates", [20, 120, 320])
+@pytest.mark.parametrize("block_size", [2, 10, 100])
+@pytest.mark.parametrize("rho_scale", [-1.0, -0.5, 0.0, 0.5, 0.9])
+def test_undo_centering_shrinkage_never_reports_a_negative_block_sum(
+    n_estimates, block_size, rho_scale, block_correlation, centering_shrinkage
+):
+    """The block sum is Var(sum of z) -- a variance, so it cannot be negative.
+
+    The centering map is applied exactly here, so every off-diagonal entry of a
+    block is equal and the sum turns only on the recovered rho. That makes this a
+    clean check on the floor and a weak one on everything else: the entrywise
+    inverse this replaced passes it too. The noisy case below separates them.
+    """
+    if block_size >= n_estimates:
+        pytest.skip("a block cannot be larger than the sample it sits in")
+    # Negative rho is expressed as a share of the floor, because an
+    # equicorrelated block of this size is only positive semi-definite down to
+    # -1/(size - 1). Anything past that is not a correlation matrix.
+    floor = -1.0 / (block_size - 1)
+    rho = rho_scale * abs(floor) if rho_scale < 0 else rho_scale
+    corr, groups = block_correlation(n_estimates, [(block_size, rho)])
+
+    recovered = undo_centering_shrinkage(centering_shrinkage(corr), groups)
+
+    block = recovered[:block_size, :block_size]
+    assert block.sum() >= -1e-9
+    assert np.all(block[~np.eye(block_size, dtype=bool)] >= floor - 1e-12)
+
+
+@pytest.mark.parametrize("block_size", [10, 100])
+def test_undo_centering_shrinkage_clamps_a_block_that_is_not_a_correlation_matrix(
+    block_size, block_correlation, centering_shrinkage
+):
+    """Sampling noise can hand us a block no correlation matrix could produce.
+
+    An equicorrelated block below -1/(size - 1) is indefinite -- at size 10 and
+    rho -0.9 its smallest eigenvalue is -7.1 -- so there is no rho to recover.
+    The floor is returned instead, which is the closest thing that is a
+    correlation matrix, and the block sum lands on zero rather than below it.
+    """
+    corr, groups = block_correlation(320, [(block_size, -0.9)])
+    assert np.linalg.eigvalsh(corr).min() < 0
+
+    recovered = undo_centering_shrinkage(centering_shrinkage(corr), groups)
+
+    floor = -1.0 / (block_size - 1)
+    block = recovered[:block_size, :block_size]
+    assert np.allclose(block[~np.eye(block_size, dtype=bool)], floor)
+    assert abs(block.sum()) < 1e-9
+
+
+def test_undo_centering_shrinkage_is_monotone_and_never_flips_sign(
+    block_correlation, centering_shrinkage
+):
+    """A more anti-correlated block can never come back more positively correlated.
+
+    At a block of 100 in 320 estimates the old pole sat at about -0.92, so a
+    block observed just below it was returned at +1 while one just above it was
+    returned at -1.
+    """
+    n_estimates, block_size = 320, 100
+    recovered = []
+    for rho in np.linspace(-0.99, 0.99, 199):
+        corr, groups = block_correlation(n_estimates, [(block_size, rho)])
+        block = undo_centering_shrinkage(centering_shrinkage(corr), groups)
+        recovered.append(block[0, 1])
+    recovered = np.array(recovered)
+
+    assert np.all(np.diff(recovered) >= -1e-12)
+    assert recovered.min() >= -1.0 / (block_size - 1) - 1e-12
+    assert recovered.max() <= 1.0
+
+
+def test_undo_centering_shrinkage_keeps_the_block_mean_and_its_spread(
+    centering_shrinkage,
+):
+    """A heterogeneous block keeps its mean exactly and its spread in order.
+
+    The exchangeable derivation describes one rho per group, so that is what is
+    inverted; the observed spread rides along as a deviation about it. Only the
+    block sum reaches the dependence corrections, and the mean fixes the sum.
+    """
+    rng = np.random.default_rng(0)
+    n_estimates, block_size = 320, 100
+    noise = rng.normal(scale=0.3, size=(block_size, block_size))
+    block = 0.4 + (noise + noise.T) / 2
+    np.fill_diagonal(block, 1.0)
+    corr = np.eye(n_estimates)
+    corr[:block_size, :block_size] = block
+    groups = np.concatenate(
+        [np.zeros(block_size, dtype=int), np.arange(1, n_estimates - block_size + 1)]
+    )
+
+    recovered = undo_centering_shrinkage(centering_shrinkage(corr), groups)
+
+    off_diagonal = ~np.eye(block_size, dtype=bool)
+    observed = centering_shrinkage(corr)[:block_size, :block_size][off_diagonal]
+    entries = recovered[:block_size, :block_size][off_diagonal]
+
+    # The spread survives, and in the order it arrived in.
+    assert entries.std() > 0
+    assert np.corrcoef(entries, observed)[0, 1] > 0.99
+    assert np.all(entries >= -1.0) and np.all(entries <= 1.0)
+
+
+@pytest.mark.parametrize(
+    ("n_estimates", "block_size", "n_datasets", "rho", "entrywise_sum"),
+    [(120, 40, 30, 0.0, -82.0), (320, 100, 20, 0.0, -791.0), (120, 40, 30, 0.3, 418.0)],
+)
+def test_undo_centering_shrinkage_survives_a_noisily_estimated_block(
+    n_estimates,
+    block_size,
+    n_datasets,
+    rho,
+    entrywise_sum,
+    block_correlation,
+    sampled_centering_shrinkage,
+):
+    """A block estimated from data has spread, and the entrywise inverse ate it.
+
+    Only sampling noise gives a block the spread that separates inverting its
+    mean from inverting each entry. So this is the case that pins the change
+    down. ``entrywise_sum`` is the median the entrywise form used to return: the
+    two rho-0 rows went negative in every replicate, which the dependence
+    corrections can only report as an error or a NaN.
+
+    One draw is far too noisy to settle the sum, so the median carries the
+    accuracy claim. Non-negativity has to hold in every draw.
+    """
+    corr, groups = block_correlation(n_estimates, [(block_size, rho)])
+    truth = block_size + block_size * (block_size - 1) * rho
+
+    sums = []
+    for seed in range(32):
+        observed = sampled_centering_shrinkage(corr, n_datasets, seed=seed)
+        sums.append(undo_centering_shrinkage(observed, groups)[:block_size, :block_size].sum())
+
+    # Var(sum of z) cannot be negative, whatever the draw.
+    assert np.all(np.array(sums) >= 0.0)
+    assert np.median(sums) == pytest.approx(truth, rel=0.2)
+    # And the fix has to be the reason: the median must beat what it replaced.
+    assert abs(np.median(sums) - truth) < abs(entrywise_sum - truth)
+
+
+@pytest.mark.parametrize("rho", [0.0, 0.3, 0.9])
+def test_undo_centering_shrinkage_refuses_a_group_that_is_the_whole_sample(
+    rho, block_correlation, centering_shrinkage
+):
+    """One group spanning everything leaves no rho to recover, so none is claimed.
+
+    Centering wipes out whatever identified rho here, and the first assertion
+    shows it: the observed correlation comes out the same for every true rho.
+    Anything the inversion returned past that would be invented.
+
+    This is the case the guard in ``solve`` exists for, and it earns a test
+    because the guard is easy to write in a form that never fires -- one rounding
+    error away from zero is not ``<= 0``. In that form the identical input
+    returned +0.75, -0.005 and +0.286 for the three rho values below.
+    """
+    n_estimates = 200
+    corr, groups = block_correlation(n_estimates, [(n_estimates, rho)])
+    observed = centering_shrinkage(corr)
+    off_diagonal = ~np.eye(n_estimates, dtype=bool)
+    assert np.allclose(observed[off_diagonal], -1.0 / (n_estimates - 1))
+
+    recovered = undo_centering_shrinkage(observed, groups)
+
+    assert np.allclose(recovered[off_diagonal], observed[off_diagonal])
+
+
 def test_undo_centering_shrinkage_handles_several_blocks(block_correlation, centering_shrinkage):
     """The blocks share a grand mean, which the fixed point has to resolve."""
     blocks = [(6, 0.7), (4, 0.2), (3, 0.9)]
