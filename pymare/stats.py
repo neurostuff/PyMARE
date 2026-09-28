@@ -19,7 +19,7 @@ from typing import NamedTuple
 
 import numpy as np
 import scipy.stats as ss
-from scipy.optimize import Bounds, minimize
+from scipy.optimize import brentq
 from scipy.special import gammaln
 
 # At or below this many clusters, robust variance estimation is known to be
@@ -2291,6 +2291,72 @@ def ensure_2d(arr):
     return arr
 
 
+#: Doublings allowed when widening the bracket for a Q-profile bound. Q(tau^2)
+#: falls to zero as tau^2 grows, so a root exists whenever Q(0) exceeds the
+#: critical value and the search terminates long before this; it is a stop for
+#: the degenerate case of a zero critical value, which no root can reach.
+_Q_PROFILE_MAX_DOUBLINGS = 200
+
+#: Relative tolerance asked of the Q-profile root finder. Four times machine
+#: epsilon is the smallest :func:`scipy.optimize.brentq` accepts, which is what
+#: makes the bounds agree with metafor's ``confint.rma.uni`` to the last few
+#: bits rather than to the third decimal.
+_Q_PROFILE_RTOL = 4 * np.finfo(np.float64).eps
+
+
+def _invert_q(excess, crit, scale):
+    """Solve ``Q(tau^2) = crit`` for tau^2 >= 0.
+
+    Parameters
+    ----------
+    excess : callable
+        ``(tau2, crit) -> Q(tau2) - crit``.
+    crit : :obj:`float`
+        The chi-squared quantile being inverted.
+    scale : :obj:`float`
+        A point estimate of tau^2, used to size the first bracket tried.
+
+    Returns
+    -------
+    :obj:`float`
+        The root, ``0.0`` when ``Q(0) <= crit`` so that no positive root
+        exists, or :obj:`numpy.nan` when the bracket could not be widened far
+        enough to contain one.
+
+    Notes
+    -----
+    Solved as a root rather than as the minimum of ``(Q(tau^2) - crit)**2``,
+    which is what this function replaced. Squaring is what makes the difference:
+    it turns a transversal crossing into a tangential minimum, so the gradient
+    the minimizer follows vanishes as ``crit`` is approached and it stops while
+    still far from the root in the flat upper tail, where ``Q`` changes slowly.
+    The upper bound was wrong by up to 4% relative against
+    ``metafor::confint.rma.uni`` on the designs in
+    ``pymare/tests/data/metafor_small_sample.csv`` for that reason; it now
+    agrees to a few multiples of machine epsilon.
+
+    ``Q`` is monotonically decreasing in tau^2, but Brent's method needs only a
+    sign change over the bracket, so nothing here relies on that.
+    """
+    if excess(0.0, crit) <= 0:
+        # Q at tau^2 = 0 is already at or below the critical value, so the
+        # profile never crosses it. metafor reports the boundary here too.
+        return 0.0
+
+    # Q(tau^2) -> 0 as tau^2 -> infinity, since the weights approach a common
+    # 1 / tau^2 that scales the residual sum of squares away. So a root exists
+    # for any positive crit, and doubling finds it.
+    upper = max(abs(scale), 1.0)
+    for _ in range(_Q_PROFILE_MAX_DOUBLINGS):
+        if excess(upper, crit) <= 0:
+            break
+        upper *= 2.0
+    else:
+        return np.nan
+
+    return brentq(excess, 0.0, upper, args=(crit,), rtol=_Q_PROFILE_RTOL, maxiter=200)
+
+
 def q_profile(y, v, X, alpha=0.05, groups=None):
     """Get the CI for tau^2 via the Q-Profile method.
 
@@ -2343,22 +2409,28 @@ def q_profile(y, v, X, alpha=0.05, groups=None):
     l_crit = ss.chi2.ppf(1 - alpha / 2, df)
     u_crit = ss.chi2.ppf(alpha / 2, df)
     args = (ensure_2d(y), ensure_2d(v), X)
-    bds = Bounds([0], [np.inf], keep_feasible=True)
 
-    # Use a point estimate of tau^2 as a starting point; when using a fixed
-    # value, minimize() sometimes fails to stay in bounds. It has to be the
-    # estimator that matches the Q being inverted, or the search can start on
-    # the wrong side of the upper root.
+    def excess(tau2, crit):
+        """Q(tau^2) - crit, the function whose root is a bound."""
+        return float(np.ravel(q_gen(*args, float(tau2), groups))[0]) - crit
+
+    # A scale for the bracket search, not a starting point: the root finder
+    # below needs an interval that contains the root, and the point estimate
+    # says what order of magnitude tau^2 lives at. It has to be the estimator
+    # that matches the Q being inverted, so that the first bracket tried is
+    # usually already wide enough.
     if groups is None:
         from .estimators import DerSimonianLaird
 
-        ub_start = 2 * DerSimonianLaird().fit(y, v, X).params_["tau2"]
+        scale = DerSimonianLaird().fit(y, v, X).params_["tau2"]
     else:
-        ub_start = 2 * correlated_effects_tau2(*args, groups)
+        scale = correlated_effects_tau2(*args, groups)
 
-    lb = minimize(lambda x: (q_gen(*args, x, groups) - l_crit) ** 2, [0], bounds=bds).x[0]
-    ub = minimize(lambda x: (q_gen(*args, x, groups) - u_crit) ** 2, ub_start, bounds=bds).x[0]
-    return {"ci_l": lb, "ci_u": ub}
+    scale = float(np.ravel(scale)[0])
+    return {
+        "ci_l": _invert_q(excess, l_crit, scale),
+        "ci_u": _invert_q(excess, u_crit, scale),
+    }
 
 
 #: Iterations allowed in the continued fraction of :func:`log_chi2_sf`. A safety
