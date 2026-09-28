@@ -351,7 +351,7 @@ def test_standardized_mean_variances_are_exact_not_asymptotic(one_sample, escalc
         "negative whenever the second group is the more variable one, and "
         "exactly zero for two equally sized, equally variable groups -- which "
         "gives that study infinite weight. The fix is to parenthesize the "
-        "denominator, as PR #144 does for the two-sample Cohen's d"
+        "denominator, as PR #144 did for the two-sample Cohen's d"
     ),
 )
 def test_raw_mean_difference_variance_matches_metafor(two_sample):
@@ -366,24 +366,20 @@ def test_raw_mean_difference_variance_matches_metafor(two_sample):
     assert_exact(v, expected("MD", "vi"), "RMD variance")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "v_d in pymare/effectsize/expressions.json reads "
-        "'v_d - ((n1 + n2)/(n1 * n2) + d**2 / 2 * (n1 + n2 - 2))', so the "
-        "squared-effect term is multiplied by the residual degrees of freedom "
-        "instead of divided by twice them. Fixed by PR #144; remove this "
-        "marker with it. Issue #143"
-    ),
-)
 def test_standardized_mean_difference_variance_matches_metafor(two_sample, escalc_inputs):
     """``SMD``'s variance must agree with metafor's to order ``1 / N``.
 
-    Not exactly, even with the expression corrected: PyMARE scales
-    ``d**2 / (2 (n1 + n2 - 2))`` by ``j**2`` and metafor adds
-    ``g**2 / (2 (n1 + n2))``, two approximations of the same variance that
-    differ at order ``1 / N``. :data:`SMD_VARIANCE_BOUND` is that order,
-    measured at 0.72 of the bound in the worst cell of the grid.
+    Not exactly: PyMARE scales ``d**2 / (2 (n1 + n2 - 2))`` by ``j**2`` and
+    metafor adds ``g**2 / (2 (n1 + n2))``, two approximations of the same
+    variance that differ at order ``1 / N``. :data:`SMD_VARIANCE_BOUND` is that
+    order, measured at 0.72 of the bound in the worst cell of the grid.
+
+    This was a strict xfail until
+    https://github.com/neurostuff/PyMARE/pull/144 corrected the expression:
+    it used to read ``d**2 / 2 * (n1 + n2 - 2)``, multiplying the
+    squared-effect term by the residual degrees of freedom instead of dividing
+    by twice them, which put the variance out by up to three orders of
+    magnitude and made it *grow* with the sample size.
     """
     _, v = measure(two_sample, "SMD")
     want = expected("SMD", "vi")

@@ -209,7 +209,7 @@ bounds by a factor of four rather than a tolerance.
 ## What this check found
 
 Three defects in `pymare/effectsize/expressions.json`, beyond the one
-[PR #144](https://github.com/neurostuff/PyMARE/pull/144) fixes, all of the same
+[PR #144](https://github.com/neurostuff/PyMARE/pull/144) fixed, all of the same
 kind: a missing pair of parentheses changing what the expression solves to.
 
 | Expression | Reads | Solves to | Should be | Effect |
@@ -219,11 +219,20 @@ kind: a missing pair of parentheses changing what the expression solves to.
 | `v_d` (one-sample) | `... - d**2 / j**2 * n` | `A + n d**2 / j**2` | `A - d**2 / j**2` | the variance grows with the sample size |
 
 Each is recorded as an `xfail(strict=True)` naming the expression and what it
-should be, alongside the two-sample `v_d` that PR #144 fixes. `strict` is the
-point: correcting an expression turns the test green, pytest reports XPASS as a
-failure, and the marker has to go in the same change. All four were confirmed to
-flip to XPASS under the corresponding one-line fix, and under all four together
-the rest of the suite still passes -- so nothing currently pins the wrong values.
+should be. `strict` is the point: correcting an expression turns the test green,
+pytest reports XPASS as a failure, and the marker has to go in the same change.
+All three were confirmed to flip to XPASS under the corresponding one-line fix,
+and under all three together the rest of the suite still passes -- so nothing
+currently pins the wrong values.
+
+That mechanism has already been exercised once. A fourth marker covered the
+two-sample `v_d`, which read `d**2 / 2 * (n1 + n2 - 2)` and so multiplied the
+squared-effect term by the residual degrees of freedom instead of dividing by
+twice them. Merging PR #144 turned its test green, the strict marker reported
+XPASS as a failure, and the marker came out with the merge.
+`test_standardized_mean_difference_variance_matches_metafor` is now an ordinary
+passing test, holding PyMARE's SMD variance to within `2 / (n1 + n2)` of
+metafor's -- the order at which the two approximations legitimately differ.
 
 ## What is not compared
 

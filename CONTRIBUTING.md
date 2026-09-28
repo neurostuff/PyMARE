@@ -189,6 +189,9 @@ reports XPASS as a *failure*, and the marker has to be removed in the same
 change. So if a fix of yours makes one of these pass, delete its marker -- do not
 work around it.
 
+That is not hypothetical: it is how the marker covering the two-sample Cohen's d
+variance was retired when [PR #144][link_pr144] landed.
+
 ### Benchmarks
 
 Performance is guarded by [asv][link_asv]. The suite lives in `benchmarks/`, and
@@ -245,4 +248,5 @@ You're awesome.
 [link_robumeta]: https://cran.r-project.org/package=robumeta
 [link_metafor]: https://cran.r-project.org/package=metafor
 [link_clubsandwich]: https://cran.r-project.org/package=clubSandwich
+[link_pr144]: https://github.com/neurostuff/PyMARE/pull/144
 [link_asv]: https://asv.readthedocs.io/en/stable/
