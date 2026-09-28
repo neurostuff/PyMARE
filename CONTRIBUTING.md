@@ -93,17 +93,26 @@ and so on. Fixtures live in `pymare/tests/conftest.py` and helpers that are
 neither fixtures nor tests live in `pymare/tests/utils.py`, so a test file holds
 only tests.
 
-Two groups of tests are marked, because they need something the default
-environment does not have:
+Some tests are marked, because they need something the default environment does
+not have, or because they cost more than a pull request should:
 
 | Target | What it runs | Needs |
 | --- | --- | --- |
 | `make unittest` | everything except the Stan sampling tests | nothing extra |
 | `make test_stan` | the Stan sampling tests | `pip install -e .[stan]`, then `make install_cmdstan` |
 | `make test_robumeta` | the robumeta alignment tests | nothing extra |
+| `make test_metafor` | the metafor alignment tests | nothing extra |
+| `make test_clubsandwich` | the clubSandwich alignment tests | nothing extra |
 | `make check_robumeta_alignment` | regenerates the robumeta reference values | Docker |
+| `make check_metafor_alignment` | regenerates the metafor reference values | Docker |
+| `make check_clubsandwich_alignment` | regenerates the clubSandwich reference values | Docker |
 | `make validate_stan` | re-measures the Stan model's bias and coverage (~10 min) | the same as `test_stan` |
 | `make lint` | flake8 over `pymare` and `benchmarks` | nothing extra |
+
+The three `test_*` alignment targets need nothing extra because they read pinned
+numbers; only regenerating those numbers needs R, and that is what the
+`check_*_alignment` targets do. `make unittest` runs the alignment tests too, so
+you do not have to remember them.
 
 Each of these has a GitHub Actions job behind it, so a target that passes
 locally is the same check that runs on your pull request.
@@ -134,20 +143,51 @@ file to the same thresholds on every run, and the `Validate the Stan model`
 workflow re-measures on a schedule. See `validation/stan/README.md` for the
 arrangement and the measurements.
 
-### Alignment with robumeta
+### Alignment with R packages
 
-`pymare/tests/test_robumeta_alignment.py` pins PyMARE's correlated-effects model
-against the R package [robumeta][link_robumeta], over every combination of model,
-rho and variance column that both implementations can express. robumeta cannot be
-a test dependency, so its output is pinned in
-`pymare/tests/data/robumeta_reference.json`.
+Most of what PyMARE computes has a reference implementation in R, and six test
+modules pin PyMARE against one:
 
-`make check_robumeta_alignment` regenerates that file inside a Docker image with
-pinned R and robumeta versions, and fails if any number moved. The
-`Check robumeta alignment` workflow runs the same script on every pull request,
-so a change to the estimator that breaks agreement shows up as a failing check
-rather than as a stale pin. If you changed the estimator on purpose, rerun the
-script and commit the regenerated file.
+| Module | Pins against | Covers |
+| --- | --- | --- |
+| `test_robumeta_alignment.py` | [robumeta][link_robumeta] | the correlated-effects working model (`weight_scheme="rescale"`) |
+| `test_metafor_alignment.py` | [metafor][link_metafor] `rma.uni` | the Knapp-Hartung adjustment, over the whole inference path |
+| `test_metafor_random_effects.py` | metafor `rma.uni`, `confint` | tau^2, Cochran's Q, `I^2`, `H`, and the Q-profile interval |
+| `test_metafor_escalc.py` | metafor `escalc` | the effect-size converters |
+| `test_metafor_permutest.py` | metafor `permutest` | the exact permutation test |
+| `test_clubsandwich_alignment.py` | [clubSandwich][link_clubsandwich] | the CR2 covariance and its Satterthwaite degrees of freedom |
+
+None of those packages can be a test dependency, so their output is pinned under
+`pymare/tests/data/*_reference.json`. Each `validation/<package>/` directory
+holds the R script that produced its file, a Dockerfile pinning the R and package
+versions, a `regenerate.sh` that runs one against the other, and a README
+recording what agrees, to what tolerance, and what does not and why. **Read the
+README before changing an estimator**: it is where the known divergences are
+written down, and several of them are deliberate.
+
+`make check_<package>_alignment` regenerates the files and fails if any number
+moved. The `Check alignment with R packages` and `Check robumeta alignment`
+workflows run the same scripts on every pull request, so a change that breaks
+agreement shows up as a failing check rather than as a stale pin. If you changed
+an estimator on purpose, rerun the script and commit the regenerated file.
+
+The regenerated file is compared numerically, by
+`validation/compare_reference.py`, rather than with `git diff`. The numbers are
+written at full double precision and R reaches them through linear algebra whose
+last bits depend on which BLAS kernel its image picks for the CPU it runs on, so
+two machines with identical R and package versions produce files that differ in
+the last digits. The tolerances are in that script, set below the ones the
+alignment tests themselves rely on.
+
+#### Divergences recorded as strict xfails
+
+Some alignment tests are marked `xfail(strict=True)`, because measuring a
+quantity against its reference implementation turned up a defect rather than a
+divergence. The marker names the expression or code path and what it should be.
+`strict` is load-bearing: correcting the defect turns the test green, pytest
+reports XPASS as a *failure*, and the marker has to be removed in the same
+change. So if a fix of yours makes one of these pass, delete its marker -- do not
+work around it.
 
 ### Benchmarks
 
@@ -203,4 +243,6 @@ You're awesome.
 [link_stemmrolemodels]: https://github.com/KirstieJane/STEMMRoleModels
 [link_zenodo]: https://github.com/neurostuff/PyMARE/blob/master/.zenodo.json
 [link_robumeta]: https://cran.r-project.org/package=robumeta
+[link_metafor]: https://cran.r-project.org/package=metafor
+[link_clubsandwich]: https://cran.r-project.org/package=clubSandwich
 [link_asv]: https://asv.readthedocs.io/en/stable/
