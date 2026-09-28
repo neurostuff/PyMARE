@@ -41,6 +41,29 @@ def test_EffectSizeConverter_from_df(two_samp_data):
     assert np.allclose(esc.get_smd(), np.array([-0.61065, -0.13707]), atol=1e-5)
 
 
+def test_two_sample_standardized_mean_variance():
+    """Match the documented large-sample variance of Cohen's d and Hedges' g."""
+    n1 = np.array([50.0, 500.0, 50.0])
+    n2 = np.array([50.0, 500.0, 50.0])
+    m1 = np.array([10.0, 10.0, 8.0])
+    m2 = np.array([8.0, 8.0, 8.0])
+    sd1 = np.full(3, 2.0)
+    sd2 = np.full(3, 2.0)
+
+    esc = TwoSampleEffectSizeConverter(m1=m1, m2=m2, sd1=sd1, sd2=sd2, n1=n1, n2=n2)
+    d = esc.get_d()
+    df = n1 + n2 - 2
+    expected_v_d = (n1 + n2) / (n1 * n2) + d**2 / (2 * df)
+    correction = 1 - 3 / (4 * (n1 + n2) - 9)
+
+    assert np.allclose(esc.get_v_d(), expected_v_d)
+    assert np.allclose(esc.get_v_smd(), correction**2 * expected_v_d)
+    # For the same nonzero effect, ten times as many observations must not
+    # increase the sampling variance. A zero effect checks the unchanged term.
+    assert esc.get_v_d()[1] < esc.get_v_d()[0]
+    assert esc.get_v_d()[2] == pytest.approx(1 / 50 + 1 / 50)
+
+
 def test_EffectSizeConverter_to_dataset(two_samp_data):
     """Test conversion of effect-size converter outputs to DataFrame."""
     esc = TwoSampleEffectSizeConverter(**two_samp_data)

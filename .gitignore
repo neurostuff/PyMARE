@@ -1,6 +1,8 @@
 docs/generated/
 docs/modules/
 docs/auto_examples/
+# sphinx-gallery writes per-example timings on every docs build.
+docs/sg_execution_times.rst
 historical/
 
 #
