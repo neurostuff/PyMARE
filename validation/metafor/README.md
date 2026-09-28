@@ -208,31 +208,36 @@ bounds by a factor of four rather than a tolerance.
 
 ## What this check found
 
-Three defects in `pymare/effectsize/expressions.json`, beyond the one
-[PR #144](https://github.com/neurostuff/PyMARE/pull/144) fixed, all of the same
-kind: a missing pair of parentheses changing what the expression solves to.
+Four defects in `pymare/effectsize/expressions.json`, all of the same kind: a
+missing pair of parentheses changing what the expression solves to. One is the
+two-sample Cohen's d that
+[PR #144](https://github.com/neurostuff/PyMARE/pull/144) fixed; the other three
+were found by this check and are fixed here.
 
-| Expression | Reads | Solves to | Should be | Effect |
+| Expression | Read | Solved to | Should be | Effect |
 | --- | --- | --- | --- | --- |
-| `v_rmd` | `v_rmd - (sd1**2 / n1) + (sd2**2 / n2)` | `sd1**2/n1 - sd2**2/n2` | the sum | negative variance whenever the second group is the more variable one, and exactly zero for two equally sized equally variable groups -- which gives that study infinite weight |
-| `v_sm` | `... * (1/n + d**2) - d**2` | `A + d**2` | `A - d**2` | the single-group Hedges' g variance is 9x to 110x too large, and grows with the effect instead of being dominated by `1/n` |
-| `v_d` (one-sample) | `... - d**2 / j**2 * n` | `A + n d**2 / j**2` | `A - d**2 / j**2` | the variance grows with the sample size |
+| `v_rmd` | `v_rmd - (sd1**2 / n1) + (sd2**2 / n2)` | `sd1**2/n1 - sd2**2/n2` | the sum | **negative** variance whenever the second group is the more variable one, and exactly **zero** for two equally sized equally variable groups -- which gives that study infinite weight. Non-positive on five of the eight rows of this grid |
+| `v_sm` | `... * (1/n + d**2) - d**2` | `A + d**2` | `A - d**2` | the single-group Hedges' g variance 1x to 93x too large, growing with the effect instead of being dominated by `1/n` |
+| `v_d` (one-sample) | `... - d**2 / j**2 * n` | `A + n d**2 / j**2` | `A - d**2 / j**2` | up to 6,399x too large on this grid, and *growing* with the sample size |
 
-Each is recorded as an `xfail(strict=True)` naming the expression and what it
-should be. `strict` is the point: correcting an expression turns the test green,
-pytest reports XPASS as a failure, and the marker has to go in the same change.
-All three were confirmed to flip to XPASS under the corresponding one-line fix,
-and under all three together the rest of the suite still passes -- so nothing
-currently pins the wrong values.
+`v_sm` and `v_d` are the exact noncentral-t variances. With `t` noncentral-t on
+`nu = n - 1` degrees of freedom and noncentrality `lambda = delta sqrt(n)`, and
+`d = t / sqrt(n)`, `Var(t) = nu(1 + lambda^2)/(nu - 2) - lambda^2/c^2` gives
 
-That mechanism has already been exercised once. A fourth marker covered the
-two-sample `v_d`, which read `d**2 / 2 * (n1 + n2 - 2)` and so multiplied the
-squared-effect term by the residual degrees of freedom instead of dividing by
-twice them. Merging PR #144 turned its test green, the strict marker reported
-XPASS as a failure, and the marker came out with the merge.
-`test_standardized_mean_difference_variance_matches_metafor` is now an ordinary
-passing test, holding PyMARE's SMD variance to within `2 / (n1 + n2)` of
-metafor's -- the order at which the two approximations legitimately differ.
+```
+Var(d) = (n-1)/(n-3) (1/n + delta^2) - delta^2 / c^2
+Var(g) = c^2 Var(d) = c^2 (n-1)/(n-3) (1/n + delta^2) - delta^2
+```
+
+which is what the two expressions now read. `test_metafor_escalc.py` checks the
+`Var(g) = j^2 Var(d)` identity between them as well as both against metafor.
+
+Each defect was recorded as an `xfail(strict=True)` naming the expression and
+what it should be before being fixed. `strict` is what made that safe: correcting
+an expression turns the test green, pytest reports XPASS as a failure, and the
+marker has to go in the same change. The mechanism was exercised for real when
+PR #144 landed -- the merge turned its test green and the strict marker reported
+the XPASS, so the marker came out with the merge rather than being forgotten.
 
 ## What is not compared
 

@@ -15,7 +15,7 @@
         "description": "Cohen's d (one-sample)"
     },
     {
-        "expression": "v_d - ((n - 1)/(n - 3)) * (1 / n + d**2) - d**2 / j**2 * n",
+        "expression": "v_d - (((n - 1)/(n - 3)) * (1 / n + d**2) - d**2 / j**2)",
         "type": 1,
         "description": "Variance of Cohen's d"
     },
@@ -30,7 +30,7 @@
         "description": "Standardized mean (Hedges's g)"
     },
     {
-        "expression": "v_sm - ((n - 1)/(n - 3)) * j**2 * (1 / n + d**2) - d**2",
+        "expression": "v_sm - (((n - 1)/(n - 3)) * j**2 * (1 / n + d**2) - d**2)",
         "type": 1,
         "description": "Variance of standardized mean"
     },
@@ -60,7 +60,7 @@
         "description": "Raw mean difference"
     },
     {
-        "expression": "v_rmd - (sd1**2 / n1) + (sd2**2 / n2)",
+        "expression": "v_rmd - ((sd1**2 / n1) + (sd2**2 / n2))",
         "type": 2,
         "description": "Variance of raw mean difference"
     },

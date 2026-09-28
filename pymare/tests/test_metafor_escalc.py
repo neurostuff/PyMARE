@@ -27,14 +27,15 @@ cannot be verified against each other, so
 :func:`test_raw_correlation_variance_is_a_different_formula` and
 ``validation/metafor/README.md`` record what each one is instead.
 
-Four comparisons are marked :func:`pytest.mark.xfail` with ``strict=True``,
-because measuring these turned up defects rather than divergences: three
-sampling-variance expressions in ``pymare/effectsize/expressions.json`` have
-misplaced parentheses or a sign error, one of which is the subject of
-https://github.com/neurostuff/PyMARE/pull/144. Each marker names the expression
-and what it should be. ``strict=True`` is the point: when one is corrected the
-test passes, pytest reports XPASS as a failure, and the marker has to be removed
-in the same change.
+Four of these comparisons were strict xfails when this module was written,
+because measuring them turned up defects rather than divergences: four
+sampling-variance expressions in ``pymare/effectsize/expressions.json`` had
+misplaced parentheses or a sign error, which between them made the variance of a
+raw mean difference come out negative, made two standardized-mean variances two
+orders of magnitude too large, and made two of the four *grow* with the sample
+size. All four are now corrected -- the two-sample Cohen's d by
+https://github.com/neurostuff/PyMARE/pull/144 and the rest here -- and every
+comparison in this module passes.
 
 """
 
@@ -342,18 +343,6 @@ def test_standardized_mean_variances_are_exact_not_asymptotic(one_sample, escalc
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "v_rmd in pymare/effectsize/expressions.json reads "
-        "'v_rmd - (sd1**2 / n1) + (sd2**2 / n2)', which solves to "
-        "sd1**2/n1 - sd2**2/n2 rather than the sum. The variance comes out "
-        "negative whenever the second group is the more variable one, and "
-        "exactly zero for two equally sized, equally variable groups -- which "
-        "gives that study infinite weight. The fix is to parenthesize the "
-        "denominator, as PR #144 did for the two-sample Cohen's d"
-    ),
-)
 def test_raw_mean_difference_variance_matches_metafor(two_sample):
     """``RMD``'s variance must be ``escalc(measure="MD")``'s, exactly.
 
@@ -388,17 +377,6 @@ def test_standardized_mean_difference_variance_matches_metafor(two_sample, escal
     assert np.all(error <= SMD_VARIANCE_BOUND / total), list(zip(case_ids(), error))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "v_sm in pymare/effectsize/expressions.json reads "
-        "'v_sm - ((n - 1)/(n - 3)) * j**2 * (1 / n + d**2) - d**2', which "
-        "solves to A + d**2 where the noncentral-t variance is A - d**2. The "
-        "reported variance is two orders of magnitude too large for any "
-        "appreciable effect, and grows with the effect instead of being "
-        "dominated by 1/n"
-    ),
-)
 def test_standardized_mean_variance_is_the_same_order_as_metafor(one_sample):
     """``SM``'s variance must be within a factor of metafor's approximation.
 
@@ -414,16 +392,6 @@ def test_standardized_mean_variance_is_the_same_order_as_metafor(one_sample):
     assert np.all(ratio >= 1 / SAME_ORDER_FACTOR), list(zip(case_ids(), ratio))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "v_d (one-sample) in pymare/effectsize/expressions.json reads "
-        "'v_d - ((n - 1)/(n - 3)) * (1 / n + d**2) - d**2 / j**2 * n', so the "
-        "last term is added and scaled by n where the noncentral-t variance "
-        "subtracts d**2 / j**2. The reported variance therefore grows with the "
-        "sample size, which is backwards"
-    ),
-)
 def test_one_sample_d_variance_is_the_same_order_as_metafor(one_sample):
     """``D``'s variance must be within a factor of metafor's approximation.
 
