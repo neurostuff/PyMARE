@@ -384,6 +384,18 @@ def robumeta_dataset():
 
 
 @pytest.fixture(scope="package")
+def clubsandwich_dataset():
+    """Load the dataset the clubSandwich reference values were computed on.
+
+    The same CSV :func:`robumeta_dataset` reads, and returning only the frame:
+    the clubSandwich alignment builds its designs through
+    :class:`~pymare.core.Dataset` so that the group labels travel with them,
+    rather than assembling a bare design matrix as the robumeta alignment does.
+    """
+    return pd.read_csv(op.join(get_test_data_path(), "robumeta_correlated_effects.csv"))
+
+
+@pytest.fixture(scope="package")
 def metafor_dataset():
     """Load the designs the metafor reference values were computed on."""
     return pd.read_csv(op.join(get_test_data_path(), "metafor_small_sample.csv"))

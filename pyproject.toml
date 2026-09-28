@@ -8,6 +8,7 @@ markers = [
     "stan: tests that sample, needing cmdstanpy and a CmdStan installation (slow: the model is compiled)",
     "robumeta: tests that pin PyMARE against the R package robumeta",
     "metafor: tests that pin PyMARE against the R package metafor",
+    "clubsandwich: tests that pin PyMARE against the R package clubSandwich",
 ]
 
 [tool.black]
