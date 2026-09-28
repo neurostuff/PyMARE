@@ -18,4 +18,5 @@ docker run --rm \
     --user "$(id -u):$(id -g)" \
     -v "${data_dir}:/data" \
     pymare-clubsandwich \
+    /opt/run_clubsandwich.R \
     /data/robumeta_correlated_effects.csv /data/clubsandwich_reference.json

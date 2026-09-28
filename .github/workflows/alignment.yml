@@ -1,0 +1,106 @@
+name: "Check alignment with R packages"
+
+# metafor and clubSandwich, one matrix leg each. robumeta has its own workflow
+# rather than a third leg here: its check is named "Check robumeta alignment /
+# PyMARE vs robumeta" and may be a required check on the repository, which
+# folding it in would silently rename. The two share everything that matters --
+# validation/compare_reference.py and the regenerate.sh contract -- so the
+# duplication is a workflow header, not logic.
+
+on:
+  push:
+    branches:
+      - "master"
+  pull_request:
+    branches:
+      - "*"
+  schedule:
+    # Monthly, to catch the harness rotting rather than PyMARE moving: the R
+    # version and the package versions are pinned, so a failure here on an
+    # unchanged tree means a pinned image can no longer be built.
+    - cron: "0 0 1 * *"
+  # GitHub turns off a workflow with a schedule trigger once the repository has
+  # been quiet for 60 days, and a disabled workflow stops answering push and
+  # pull_request too. Being able to dispatch it means re-enabling is enough to
+  # get a run without pushing a commit to prove it works.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alignment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  alignment:
+    name: PyMARE vs ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Independent references, so a failure in one should still report the
+      # other rather than being masked by it.
+      fail-fast: false
+      matrix:
+        include:
+          - package: metafor
+            label: metafor
+            marker: metafor
+            # rma.uni, escalc and permutest. validation/metafor/regenerate.sh
+            # rewrites all three; each is compared on its own so a failure
+            # names which reference moved.
+            references: >-
+              metafor_reference.json
+              metafor_escalc_reference.json
+              metafor_permutest_reference.json
+          - package: clubsandwich
+            label: clubSandwich
+            marker: clubsandwich
+            references: clubsandwich_reference.json
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Set up python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: "Install PyMARE"
+        run: |
+          python -m pip install --progress-bar off --upgrade pip setuptools wheel
+          python -m pip install -e .[tests]
+
+      # The pinned reference values are only worth anything if they still match
+      # what the R package prints, so regenerate them from the pinned image.
+      - name: "Regenerate the reference values from ${{ matrix.label }}"
+        run: validation/${{ matrix.package }}/regenerate.sh
+
+      # Compared numerically rather than with git diff: the values are written
+      # at full double precision, and which BLAS kernel R's image picks depends
+      # on the runner's CPU, so two runners disagree in the last bits with the R
+      # and package versions identical. See the tolerances in
+      # validation/compare_reference.py.
+      - name: "Require the reference values to still match ${{ matrix.label }}"
+        run: |
+          status=0
+          for reference in ${{ matrix.references }}; do
+              git show "HEAD:pymare/tests/data/${reference}" > "${RUNNER_TEMP}/${reference}"
+              python validation/compare_reference.py \
+                  "${RUNNER_TEMP}/${reference}" \
+                  "pymare/tests/data/${reference}" \
+                  | tee -a "$GITHUB_STEP_SUMMARY" || status=1
+          done
+          exit "$status"
+
+      # Run the alignment tests against the values just regenerated, so this job
+      # checks PyMARE against the R package itself and not only against the pin.
+      - name: "Check PyMARE against the regenerated values"
+        if: always()
+        run: python -m pytest -m ${{ matrix.marker }} -v
+
+      - name: "Upload the regenerated reference values"
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.package }}-reference
+          path: pymare/tests/data/*_reference.json

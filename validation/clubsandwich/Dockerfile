@@ -11,5 +11,7 @@
 # reference images share a base layer.
 FROM r-base:4.4.1
 RUN R -e 'install.packages(c("metafor", "clubSandwich"), repos="https://packagemanager.posit.co/cran/2024-07-01")'
-COPY run_clubsandwich.R /opt/run_clubsandwich.R
-ENTRYPOINT ["Rscript", "/opt/run_clubsandwich.R"]
+# Rscript as the entrypoint rather than the generator, matching
+# validation/metafor, so regenerate.sh names the script it wants.
+COPY run_clubsandwich.R /opt/
+ENTRYPOINT ["Rscript"]
