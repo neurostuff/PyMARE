@@ -16,11 +16,13 @@ Two tests, answering two questions:
     that reach tau^2 in closed form, so nothing but the adjustment sits between
     the two implementations.
 
-Whether PyMARE's ML, REML and Hedges tau^2 match ``metafor``'s is a separate
-question that predates this work -- they differ by up to the tau^2 search
-tolerance, and Hedges by a definitional choice. ``validation/metafor/README.md``
-records the measurements; comparing them here would mix an optimizer's tolerance
-into a check on a closed-form scale factor.
+Whether PyMARE's ML and REML tau^2 match ``metafor``'s is a separate question:
+they differ by up to the tau^2 search tolerance, since both sides reach it by
+numerical search. ``validation/metafor/README.md`` records the measurements, and
+:mod:`pymare.tests.test_metafor_random_effects` compares them directly;
+comparing them here would mix an optimizer's tolerance into a check on a
+closed-form scale factor. Hedges is closed form and does agree exactly, so
+``HE`` is compared end to end there.
 
 The reference values are pinned in ``data/metafor_reference.json`` because metafor
 is an R package and cannot be a test dependency. The pin is kept honest by

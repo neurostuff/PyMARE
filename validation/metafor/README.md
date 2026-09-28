@@ -58,7 +58,7 @@ the 60 distinct design x model x estimator cells:
 | `QEp` in logs | `["logp(Q)"]` | 4.7e-14 |
 | `I2`, `H2` for `FE` and `DL` | `["I^2"]`, `["H"]` | 4.9e-14, 1.5e-14 |
 | `confint` tau^2 bounds | `get_re_stats()["ci_l"]`, `["ci_u"]` | 1.3e-13 |
-| `HE` tau^2, intercept-only models | `Hedges().fit(...)` | 2.2e-16 |
+| `HE` tau^2, every model | `Hedges().fit(...)` | 1.9e-15 |
 | `ML`, `REML` tau^2 | `VarianceBasedLikelihoodEstimator` | 2.7e-5 |
 
 Two notes on that table.
@@ -99,8 +99,15 @@ the *cause* rather than the size of the gap.
 | Divergence | Size | Cause |
 | --- | --- | --- |
 | `I2`, `H2` for `HE`, `ML`, `REML` | unbounded | PyMARE always reports the Q-based Higgins-Thompson pair. metafor reports that pair only for `FE` and `DL`, where it coincides with `tau^2 / (tau^2 + v_t)`, and switches to the tau^2-based pair otherwise -- so metafor's `I2` depends on which tau^2 estimator was asked for and PyMARE's does not. Both are defensible; they are not the same number. |
-| `HE` tau^2, models with moderators | up to 0.14 relative | metafor subtracts `tr(PV) / (K - P)`, PyMARE subtracts `sum(v) / K`. With an intercept as the only predictor `P = I - J/K`, the trace is `sum(v)(K - 1)/K`, and the two are algebraically the same; with a moderator they are not. So the divergence is specific to meta-regression. A previous version of this README recorded it as general. |
 | `ML`, `REML` tau^2 | ~3e-5 relative | PyMARE profiles tau^2 at `xtol=1e-6`; metafor runs its own optimizer to its own tolerance. |
+
+`HE` tau^2 used to be a third row here, out by up to 0.14 relative on models with
+moderators: metafor subtracts `tr(PV) / (K - P)` where PyMARE subtracted
+`sum(v) / K`. With an intercept as the only predictor `P = I - J/K`, the trace is
+`sum(v)(K - 1)/K` and the two are algebraically the same, so the divergence was
+specific to meta-regression -- an earlier version of this README recorded it as
+general. PyMARE now subtracts the trace form and the two agree to 1.9e-15 across
+all twelve design-by-model cells.
 | `ML` on `extreme_k10` with one moderator | 0 vs 0.011 | The two searches land on opposite sides of the tau^2 = 0 boundary, where a profile likelihood is flattest because the weights are most unequal. metafor is the one that stops at zero. A previous version of this README had the direction backwards. |
 
 ## What is compared

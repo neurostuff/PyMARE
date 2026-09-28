@@ -1134,9 +1134,19 @@ class Hedges(BaseEstimator):
     The ``X`` matrix must be identical for all iterates.
 
     Unlike the coefficients, tau^2 is derived from an *unweighted* fit: it is the excess of
-    the ordinary mean squared error over the mean sampling variance. The coefficients are
-    then refitted with ``1 / (v + tau^2)`` weights, and the reported covariance comes from
-    that second fit.
+    the ordinary mean squared error over what that error is expected to be when tau^2 is
+    zero, namely ``tr(PV) / (K - P)`` with ``P`` the ordinary-least-squares residual maker
+    and ``V`` the diagonal matrix of sampling variances. The coefficients are then refitted
+    with ``1 / (v + tau^2)`` weights, and the reported covariance comes from that second
+    fit.
+
+    .. versionchanged:: 0.0.13
+
+        The subtracted term was previously the mean sampling variance ``sum(v) / K``. That
+        is the same quantity when the intercept is the only predictor, but not otherwise,
+        so tau^2 was out by up to 0.14 relative in a meta-regression -- the divergence from
+        ``metafor``'s ``HE`` that ``validation/metafor/README.md`` recorded. Intercept-only
+        models are unaffected.
 
     .. versionchanged:: 0.0.11
 
@@ -1217,7 +1227,21 @@ class Hedges(BaseEstimator):
         # inverse-variance weights below.
         tau_beta = weighted_least_squares(tau_y, np.ones_like(tau_y), tau_X)
         mse = ((tau_y - tau_X.dot(tau_beta)) ** 2).sum(0) / (tau_k - tau_p)
-        tau_ho = np.maximum(0, mse - tau_v.sum(0) / tau_k)
+
+        # What that unweighted mean squared error is expected to be when tau^2
+        # is zero, which is what has to be subtracted off. With P the OLS
+        # residual maker I - X (X'X)^-1 X' and V = diag(v), it is
+        # tr(PV) / (K - P) -- and since only P's diagonal is needed, that is
+        # sum_i (1 - h_i) v_i / (K - P) for the OLS leverages h_i.
+        #
+        # Not the mean sampling variance sum(v) / K, which is the same quantity
+        # only when the intercept is the only predictor: P is then I - J/K, every
+        # h_i is 1/K, and the sum collapses to sum(v) (K - 1) / K / (K - 1). With
+        # a moderator the two part company, and using the intercept-only form
+        # put tau^2 out by up to 0.14 relative against metafor's HE.
+        leverage = np.einsum("ij,jk,ik->i", tau_X, np.linalg.pinv(tau_X.T @ tau_X), tau_X)
+        expected_mse = ((1.0 - leverage)[:, None] * tau_v).sum(0) / (tau_k - tau_p)
+        tau_ho = np.maximum(0, mse - expected_mse)
 
         # Estimate beta with tau^2 estimate. The covariance has to come from
         # this fit rather than the OLS one above: (X'WX)^-1 is only the

@@ -109,9 +109,15 @@ def test_2d_DL_estimator(dataset_2d):
 
 def test_hedges_estimator(dataset):
     """Test Hedges estimator."""
-    # ground truth values are from metafor package in R, except that metafor
-    # always gives negligibly different values for tau2, likely due to
-    # algorithmic differences in the computation.
+    # ground truth values are from metafor package in R.
+    #
+    # tau^2 used to be excluded from that, with a comment saying metafor
+    # "always gives negligibly different values ... likely due to algorithmic
+    # differences". It was not algorithmic and not negligible: PyMARE subtracted
+    # the mean sampling variance where metafor subtracts tr(PV) / (K - P), which
+    # are the same only without moderators. With the trace term the two agree to
+    # every digit metafor prints, so tau^2 is now pinned at metafor's value like
+    # everything else here.
     #
     # "wald" because metafor's own default is test="z", so that is the
     # configuration the reference values were read off. PyMARE's default is
@@ -135,8 +141,8 @@ def test_hedges_estimator(dataset):
 
     # Check output values
     assert np.allclose(beta.ravel(), [-0.1066, 0.7704], atol=1e-4)
-    assert np.allclose(tau2, 11.3881, atol=1e-4)
-    assert np.allclose(fe_stats["se"].ravel(), [3.0479, 1.1335], atol=1e-4)
+    assert np.allclose(tau2, 11.3594, atol=1e-4)
+    assert np.allclose(fe_stats["se"].ravel(), [3.0444, 1.1322], atol=1e-4)
     # The unweighted fit that produces tau^2 would have given these instead.
     assert not np.allclose(fe_stats["se"].ravel(), [0.8639, 0.3217], atol=1e-4)
 
@@ -146,7 +152,7 @@ def test_hedges_estimator(dataset):
     default = Hedges().fit_dataset(dataset).summary()
     assert np.allclose(np.ravel(default.tau2), tau2, rtol=0, atol=0)
     assert np.allclose(default.fe_params, beta, rtol=0, atol=0)
-    assert np.allclose(default.get_fe_stats()["se"].ravel(), [3.0213, 1.1236], atol=1e-4)
+    assert np.allclose(default.get_fe_stats()["se"].ravel(), [3.0212, 1.1236], atol=1e-4)
     assert np.all(default.fe_dof == 6)
 
 
@@ -169,11 +175,11 @@ def test_2d_hedges(dataset_2d):
     # First and third sets are identical to single dim test; second set is
     # randomly different.
     assert np.allclose(beta[:, 0], [-0.1066, 0.7704], atol=1e-4)
-    assert np.allclose(tau2[0], 11.3881, atol=1e-4)
+    assert np.allclose(tau2[0], 11.3594, atol=1e-4)
     assert not np.allclose(beta[:, 1], [-0.1070, 0.7664], atol=1e-4)
-    assert not np.allclose(tau2[1], 11.3881, atol=1e-4)
+    assert not np.allclose(tau2[1], 11.3594, atol=1e-4)
     assert np.allclose(beta[:, 2], [-0.1066, 0.7704], atol=1e-4)
-    assert np.allclose(tau2[2], 11.3881, atol=1e-4)
+    assert np.allclose(tau2[2], 11.3594, atol=1e-4)
 
 
 def test_variance_based_maximum_likelihood_estimator(dataset):

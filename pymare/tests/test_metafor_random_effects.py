@@ -19,18 +19,21 @@ checks rather than assumes before the rest of the module drops down to the 60
 distinct cases.
 
 What agrees, and how exactly, is recorded in ``validation/metafor/README.md``.
-Three divergences are pinned down here rather than merely tolerated, each by a
-test that asserts *why* the two differ instead of how much:
+Two divergences are pinned down here rather than merely tolerated, each by a
+test that asserts *why* the two differ instead of how much, plus one that used
+to be:
 
 -   ``I^2`` and ``H``: PyMARE always reports the Q-based definition of
     :footcite:t:`higgins2002quantifying`. metafor reports that pair only for
     ``FE`` and ``DL`` -- where it coincides with tau^2 / (tau^2 + v_t) -- and
     the tau^2-based pair otherwise. See
     :func:`test_i2_and_h_are_the_q_based_definition`.
--   :class:`~pymare.estimators.Hedges` tau^2: PyMARE subtracts the mean sampling
-    variance, metafor subtracts ``tr(PV) / (K - P)``. The two are equal when the
-    only predictor is the intercept and differ otherwise. See
-    :func:`test_hedges_tau2_divergence_is_the_trace_term`.
+-   :class:`~pymare.estimators.Hedges` tau^2 used to diverge with moderators,
+    PyMARE subtracting the mean sampling variance where metafor subtracts
+    ``tr(PV) / (K - P)``. PyMARE now subtracts the trace form too and the two
+    agree everywhere; see
+    :func:`test_hedges_correction_reduces_to_the_mean_variance_without_moderators`
+    for why the intercept-only cells never differed.
 -   ``ML`` and ``REML`` tau^2: both profile the likelihood numerically, to
     different tolerances, and on one cell of the grid they stop on opposite
     sides of the tau^2 = 0 boundary. See :data:`RTOL_PROFILED` and
@@ -246,55 +249,56 @@ def test_tau2_interval_matches_metafor(case, metafor_dataset):
     assert np.allclose(np.ravel(stats["ci_u"]), case["tau2_ci_ub"], rtol=RTOL_PROFILE)
 
 
-@pytest.mark.parametrize(
-    "case",
-    [case for case in HEDGES_CASES if not MODELS[case["model"]]],
-    ids=[case_id(case) for case in HEDGES_CASES if not MODELS[case["model"]]],
-)
-def test_hedges_tau2_matches_metafor_without_moderators(case, metafor_dataset):
-    """``Hedges`` tau^2 must be metafor's ``HE`` for an intercept-only model.
+@pytest.mark.parametrize("case", HEDGES_CASES, ids=[case_id(case) for case in HEDGES_CASES])
+def test_hedges_tau2_matches_metafor(case, metafor_dataset):
+    """``Hedges`` tau^2 must be metafor's ``HE``, on every model.
 
-    Exactly, not approximately: the two expressions for the correction term are
-    algebraically the same one when the intercept is the only predictor, so this
-    holds to machine precision on all four designs.
-    :func:`test_hedges_tau2_divergence_is_the_trace_term` covers what happens
-    when a moderator is added.
+    Exactly, not approximately: both are the excess of an unweighted mean
+    squared error over what that error is expected to be at tau^2 = 0, and both
+    now compute the second term the same way, so this holds to machine precision
+    on all twelve design-by-model cells.
+
+    It used to hold only for the four intercept-only cells, because PyMARE
+    subtracted the mean sampling variance rather than ``tr(PV) / (K - P)``;
+    :func:`test_hedges_correction_reduces_to_the_mean_variance_without_moderators`
+    is why those four were unaffected.
     """
-    assert np.allclose(np.ravel(fit(metafor_dataset, case).tau2), case["tau2"], rtol=RTOL)
+    assert np.allclose(
+        np.ravel(fit(metafor_dataset, case).tau2), case["tau2"], rtol=RTOL, atol=1e-12
+    )
 
 
 @pytest.mark.parametrize("case", HEDGES_CASES, ids=[case_id(case) for case in HEDGES_CASES])
-def test_hedges_tau2_divergence_is_the_trace_term(case, metafor_dataset):
-    """Locate the ``HE`` divergence in the term each implementation subtracts.
+def test_hedges_correction_reduces_to_the_mean_variance_without_moderators(case, metafor_dataset):
+    """The two forms of the ``HE`` correction term must agree iff ``P`` is one.
 
-    Both estimators are the excess of an unweighted mean squared error over an
-    estimate of the mean sampling variance. They differ in the second term:
-    metafor uses ``tr(PV) / (K - P)`` with ``P = I - X (X'X)^-1 X'``, PyMARE uses
-    ``sum(v) / K``. Those coincide when ``X`` is just an intercept, since ``P``
-    is then ``I - J/K`` and the trace is ``sum(v) (K - 1) / K``; with a moderator
-    they do not, and PyMARE's tau^2 is out by up to 0.14 relative on this grid.
+    The term subtracted from the unweighted mean squared error is
+    ``tr(PV) / (K - P)``, with ``P = I - X (X'X)^-1 X'`` and ``V = diag(v)``.
+    When the intercept is the only predictor ``P`` is ``I - J/K``, every leverage
+    is ``1/K``, and the sum collapses to ``sum(v) / K`` -- the mean sampling
+    variance, which is what PyMARE used to subtract unconditionally.
 
-    Two assertions, which together say that and nothing more: metafor's own
-    definition reimplemented here reproduces every pinned ``HE`` tau^2, and the
-    two correction terms agree exactly when and only when there are no
-    moderators. A test that instead pinned the size of the gap would be a record
-    of PyMARE's current behaviour rather than a statement about either formula.
+    Asserting that identity, and its failure with a moderator, is what says the
+    correction PyMARE now applies is a generalization of the old one rather than
+    a different quantity, and so why intercept-only results did not move when it
+    changed. The reimplementation of metafor's whole definition alongside it
+    keeps this anchored to metafor rather than to PyMARE's own arithmetic.
     """
     y, v, X = design_arrays(metafor_dataset, case)
     n_obs, n_preds = X.shape
     residual_maker = np.eye(n_obs) - X @ np.linalg.pinv(X.T @ X) @ X.T
 
-    metafor_correction = np.trace(residual_maker @ np.diag(v)) / (n_obs - n_preds)
-    pymare_correction = v.sum() / n_obs
+    trace_form = np.trace(residual_maker @ np.diag(v)) / (n_obs - n_preds)
+    mean_variance = v.sum() / n_obs
     metafor_tau2 = max(
         0.0, (y @ residual_maker @ y - np.trace(residual_maker @ np.diag(v))) / (n_obs - n_preds)
     )
 
     assert np.allclose(metafor_tau2, case["tau2"], rtol=RTOL, atol=1e-12)
     if n_preds == 1:
-        assert np.allclose(pymare_correction, metafor_correction, rtol=RTOL)
+        assert np.allclose(mean_variance, trace_form, rtol=RTOL)
     else:
-        assert not np.isclose(pymare_correction, metafor_correction, rtol=1e-6)
+        assert not np.isclose(mean_variance, trace_form, rtol=1e-6)
 
 
 @pytest.mark.parametrize(

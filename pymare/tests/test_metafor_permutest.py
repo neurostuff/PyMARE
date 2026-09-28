@@ -8,25 +8,37 @@ the approximate one draws from each package's own generator -- so the reference
 is ``permutest(exact = TRUE)`` on the designs small enough to enumerate, and
 PyMARE is asked for the same enumeration.
 
-The two disagree. This module locates the disagreement rather than tolerating
-it, in two tests that between them say where every counted permutation goes:
+The two agree exactly, in all ten cases and on both coefficients of the
+moderator models. They did not when this module was written, for two reasons
+that it still isolates rather than merely asserting the totals:
 
 -   :func:`test_metafor_permutest_is_reproduced_by_the_z_statistic` counts the
-    *same* permutations of the *same* PyMARE fits, but on ``|beta / se|``
-    instead of ``|beta|``, and reproduces metafor exactly in all ten cases. So
-    the permutation sets agree, the refits agree, and the tie handling of an
-    inclusive comparison agrees; what differs is which statistic gets counted.
--   :func:`test_permutation_p_value_matches_metafor` is what PyMARE currently
-    reports, and is a strict xfail. Two things break it, and the test's
-    docstring and marker name both.
+    permutations independently of the production path, on ``|beta / se|`` and
+    with the observed statistic read out of the identity permutation in the same
+    batch. It is what established that the permutation sets and the batched
+    refits were already right, and it remains the check that says *why* the
+    totals agree rather than only that they do.
+-   :func:`test_permutation_p_value_matches_metafor` is what PyMARE reports.
 
-Why the statistic matters rather than being a convention: a permutation test
-needs a statistic whose null distribution does not move with the parameters
-being permuted away. ``|beta|`` does move, because refitting a permuted dataset
-changes tau^2 and so changes the weights and the standard error. The two
-coincide exactly when the standard error happens to be invariant -- a
-fixed-effects, intercept-only model under sign flipping, which is why four of
-the ten cases here agree anyway.
+The two defects it used to record, both now fixed in
+:meth:`~pymare.results.MetaRegressionResults.permutation_test`:
+
+**The statistic.** PyMARE counted ``|beta|`` where ``permutest`` counts
+``|beta / se|``. A permutation test needs a statistic whose null distribution
+does not move with the parameters being permuted away, and ``|beta|`` does:
+refitting a permuted dataset re-estimates tau^2, which changes the weights and
+so the standard error. The two coincide only where the standard error is
+invariant under the permutation -- a fixed-effects, intercept-only model under
+sign flipping -- which is why four of the ten cases agreed anyway, and why
+``unequal_k5`` under ``DL`` came out at 0.5625 against ``permutest``'s 0.5.
+
+**The tie.** The observed statistic is computed by a different code path from
+the permuted ones, and the two could disagree by a unit in the last place, so an
+exactly inclusive comparison dropped the identity permutation -- the one that
+reproduces the observed data, and must therefore count -- along with its
+sign-flipped mirror. That understated the p-value by ``2 / 2**K``: 0.033203125
+against ``permutest``'s 0.03515625 on ``extreme_k10``. The comparison now allows
+the same square-root-of-epsilon slack ``permutest`` does.
 
 """
 
@@ -156,36 +168,13 @@ def test_metafor_permutest_is_reproduced_by_the_z_statistic(case, metafor_datase
     assert np.allclose(p_values, case["pval"], rtol=RTOL)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "MetaRegressionResults.permutation_test counts |beta| where permutest "
-        "counts |beta / se|, so the two agree only where the standard error is "
-        "invariant under the permutation -- a fixed-effects intercept-only "
-        "model under sign flipping. Refitting a permuted dataset re-estimates "
-        "tau^2, which moves the weights and hence the standard error, so under "
-        "DerSimonianLaird the statistic being permuted is not pivotal: "
-        "unequal_k5 comes out at 0.5625 against permutest's 0.5. Separately, "
-        "the observed estimate is computed by a different code path from the "
-        "permuted ones, and the two disagree by one unit in the last place, so "
-        "the inclusive comparison can drop the identity permutation and its "
-        "mirror -- always understating the p-value, by 2/1024 on extreme_k10. "
-        "test_metafor_permutest_is_reproduced_by_the_z_statistic shows both go "
-        "away when the statistic is |z| and the observed value is read out of "
-        "the same batch"
-    ),
-)
 @pytest.mark.filterwarnings("ignore:Cluster-robust")
 def test_permutation_p_value_matches_metafor(metafor_dataset):
-    """Report the exact permutation p-values PyMARE gives, against metafor's.
+    """The exact permutation p-values PyMARE reports must be metafor's.
 
-    Asserted over the whole grid in one test rather than parametrized, on
-    purpose. One of the two causes is a one-unit-in-the-last-place difference,
-    which need not reproduce on every platform and BLAS the test matrix covers;
-    the other is structural and does. Asserting all ten cases together means
-    the xfail is driven by the structural cause and cannot flip to an
-    unexpected pass because a rounding difference went the other way on some
-    runner.
+    Asserted over the whole grid in one test rather than parametrized, so that a
+    failure reports every case that moved rather than the first. This was a
+    strict xfail until the two defects in the module docstring were fixed.
     """
     mismatched = []
     for case in CASES:
