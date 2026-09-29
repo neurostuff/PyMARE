@@ -187,11 +187,68 @@ def test_q_gen(vars_with_intercept):
 
 
 def test_q_profile(vars_with_intercept):
-    """Test pymare.stats.q_profile."""
+    """Test pymare.stats.q_profile.
+
+    Both bounds are pinned at eight decimals against ``metafor``'s
+    ``confint.rma.uni`` on the same design, which is the same inversion. The
+    upper one used to be asserted only to two decimals because the bound was
+    computed by minimizing ``(Q - crit)**2`` and landed at 59.6127 rather than
+    59.6160; see :func:`pymare.stats._invert_q`.
+    """
     bounds = stats.q_profile(*vars_with_intercept, 0.05)
     assert set(bounds.keys()) == {"ci_l", "ci_u"}
-    assert round(bounds["ci_l"], 4) == 3.8076
-    assert round(bounds["ci_u"], 2) == 59.61
+    assert round(bounds["ci_l"], 8) == 3.80759937
+    assert round(bounds["ci_u"], 8) == 59.61602529
+
+
+def test_q_profile_inverts_q(vars_with_intercept):
+    """Each bound must put Q exactly on its critical value.
+
+    The property the interval is defined by, checked without a reference
+    implementation: ``ci_l`` and ``ci_u`` are the tau^2 at which Q equals the
+    upper and lower chi-squared quantiles on K - P degrees of freedom.
+    """
+    y, v, X = vars_with_intercept
+    bounds = stats.q_profile(y, v, X, 0.05)
+    df = X.shape[0] - X.shape[1]
+    for key, crit in (("ci_l", ss.chi2.ppf(0.975, df)), ("ci_u", ss.chi2.ppf(0.025, df))):
+        assert np.allclose(stats.q_gen(y, v, X, bounds[key]), crit, rtol=1e-12), key
+
+
+def test_q_profile_is_undefined_without_residual_dof():
+    """A saturated design has no residual to profile, so both bounds are NaN.
+
+    With ``K == P`` the degrees of freedom are zero and
+    :func:`scipy.stats.chi2.ppf` returns NaN for both critical values. Every
+    comparison against NaN is False, so the bracket search runs out and
+    :func:`pymare.stats._invert_q` falls back to NaN -- which is the right
+    answer rather than an accident: there is no dispersion left to bound.
+
+    Pinned because it is the one input that reaches that fallback, and because
+    a saturated design is where several of this module's neighbours have
+    returned ``inf`` from a quotient of rounding residues.
+    """
+    y = np.array([[-1.0, 0.5, 2.0]]).T
+    v = np.array([[1.0, 1.0, 1.5]]).T
+    X = np.array([np.ones(3), [1.0, 2.0, 4.0], [0.5, -1.0, 3.0]]).T
+    assert X.shape[0] == X.shape[1]
+
+    bounds = stats.q_profile(y, v, X, 0.05)
+    assert set(bounds.keys()) == {"ci_l", "ci_u"}
+    assert np.isnan(bounds["ci_l"]) and np.isnan(bounds["ci_u"]), bounds
+
+
+def test_q_profile_returns_zero_when_q_never_crosses():
+    """A bound the profile cannot reach is reported as the boundary, not a root.
+
+    With no excess dispersion, Q at tau^2 = 0 already sits below both critical
+    values, so neither bound exists as a positive root. metafor reports zero
+    here too.
+    """
+    y = np.array([[1.0, 1.0, 1.0, 1.0, 1.0]]).T
+    v = np.ones((5, 1))
+    X = np.ones((5, 1))
+    assert stats.q_profile(y, v, X, 0.05) == {"ci_l": 0.0, "ci_u": 0.0}
 
 
 def test_var_to_ci():

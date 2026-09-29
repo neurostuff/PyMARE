@@ -6,7 +6,7 @@
 # reports their combined coverage rather than only the last one's.
 PYTEST_COV := --cov-append --cov-report=xml --cov=pymare
 
-all_tests: lint unittest test_stan test_robumeta test_metafor
+all_tests: lint unittest test_stan test_robumeta test_metafor test_clubsandwich
 
 help:
 	@echo "Please use 'make <target>' where <target> is one of:"
@@ -16,8 +16,10 @@ help:
 	@echo "  test_stan                  to run the Stan sampling tests (needs the stan extra and CmdStan)"
 	@echo "  test_robumeta              to run the robumeta alignment tests"
 	@echo "  test_metafor               to run the metafor alignment tests"
+	@echo "  test_clubsandwich          to run the clubSandwich alignment tests"
 	@echo "  check_robumeta_alignment   to regenerate the robumeta reference values (needs Docker)"
 	@echo "  check_metafor_alignment    to regenerate the metafor reference values (needs Docker)"
+	@echo "  check_clubsandwich_alignment  to regenerate the clubSandwich reference values (needs Docker)"
 	@echo "  validate_stan              to re-measure the Stan model's bias and coverage (~10 min)"
 	@echo "  validate_knapp_hartung     to re-measure the small-sample corrections (~20 min)"
 	@echo "  benchmark                  to run the asv suite once in the current environment"
@@ -45,6 +47,9 @@ test_robumeta:
 test_metafor:
 	@python -m pytest -m "metafor" $(PYTEST_COV)
 
+test_clubsandwich:
+	@python -m pytest -m "clubsandwich" $(PYTEST_COV)
+
 # Re-measures the Type I error of the small-sample corrections and fails if any cell
 # misses the thresholds the default rests on. Not wired into CI and nothing is
 # pinned from it: these are Monte Carlo estimates, so re-measuring is the honest
@@ -59,19 +64,41 @@ validate_knapp_hartung:
 validate_stan:
 	@python validation/stan/simulate.py --check
 
-# What the "Check robumeta alignment" workflow runs. Needs Docker, because the
-# reference values come from R.
+# What the alignment workflows run. Needs Docker, because the reference values
+# come from R.
+#
+# Each target regenerates its package's reference files in place and then
+# compares them against the pinned copies from git. Numerically, through
+# validation/compare_reference.py, rather than with `git diff --exit-code`,
+# which the first two of these used to use: the numbers are written at full
+# double precision and R reaches them through linear algebra whose last bits
+# depend on which BLAS kernel its image picks for the CPU it runs on, so two
+# machines with identical R and package versions produce files that differ in
+# the 16th digit. A byte comparison reads that as drift.
+#
+# Note that these rewrite the working tree, so the comparison is against HEAD
+# rather than against the files on disk.
+COMPARE_REFERENCE = validation/compare_reference.py
+
+define compare_against_head
+	pinned="$$(mktemp)"; git show HEAD:pymare/tests/data/$(1) > "$$pinned"; \
+		python $(COMPARE_REFERENCE) "$$pinned" pymare/tests/data/$(1); \
+		status=$$?; rm -f "$$pinned"; exit $$status
+
+endef
+
 check_robumeta_alignment:
 	@validation/robumeta/regenerate.sh
-	@git diff --exit-code -- pymare/tests/data/robumeta_reference.json \
-		&& echo "The pinned robumeta reference values still match robumeta."
+	@$(call compare_against_head,robumeta_reference.json)
 
-# Regenerates the metafor reference values that pin the Knapp-Hartung adjustment.
-# Needs Docker, for the same reason as the robumeta target.
 check_metafor_alignment:
 	@validation/metafor/regenerate.sh
-	@git diff --exit-code -- pymare/tests/data/metafor_reference.json \
-		&& echo "The pinned metafor reference values still match metafor."
+	@$(foreach reference,metafor_reference.json metafor_escalc_reference.json \
+		metafor_permutest_reference.json,$(call compare_against_head,$(reference)))
+
+check_clubsandwich_alignment:
+	@validation/clubsandwich/regenerate.sh
+	@$(call compare_against_head,clubsandwich_reference.json)
 
 # A smoke test of the benchmark suite, not a measurement: --quick takes one
 # sample per benchmark. The Benchmark workflow is what measures, by timing a

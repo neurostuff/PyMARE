@@ -1,4 +1,9 @@
-# Reference values for PyMARE's Knapp-Hartung adjustment.
+# Reference values for PyMARE's rma.uni-equivalent output.
+#
+# Covers the whole of what rma.uni reports and PyMARE also computes: the
+# fixed-effect inference path under each of metafor's three `test` settings
+# (which is PyMARE's small-sample correction), the tau^2 estimate itself, the
+# heterogeneity statistics, and the Q-profile confidence interval for tau^2.
 #
 # Writes pymare/tests/data/metafor_reference.json, which
 # pymare/tests/test_metafor_alignment.py reads. Run it through the harness in
@@ -59,6 +64,10 @@ lines <- c(
     '    "call": "rma.uni(y, v, mods = <model>, data = <design>, ',
     'method = <method>, test = <test>)",'
   ),
+  paste0(
+    '    "tau2_ci_call": "confint(<fit>, control = list(tol = 1e-12, ',
+    'maxiter = 1000))$random, row tau^2",'
+  ),
   sprintf('    "metafor_version": "%s",', as.character(packageVersion("metafor"))),
   sprintf('    "r_version": "%s"', paste(R.version$major, R.version$minor, sep = ".")),
   "  },",
@@ -88,6 +97,29 @@ for (i in seq_len(nrow(cases))) {
     )
   })
 
+  # The Q-profile interval for tau^2, which PyMARE spells
+  # MetaRegressionResults.get_re_stats(method="QP"). It inverts the same Q the
+  # heterogeneity block reports, so it does not depend on `method` or on
+  # `test`; recording it per case rather than per design lets the alignment
+  # test assert that invariance instead of assuming it. confint() rejects a
+  # fixed-effects fit, which has no tau^2 to bound.
+  # Asked for to convergence rather than at confint()'s default tolerance.
+  # That default is uniroot's, .Machine$double.eps^0.25 or about 1.2e-4
+  # relative, which is far coarser than the quantity itself: pinning it would
+  # make the alignment test agree with metafor's *display* precision instead of
+  # with the bound metafor is solving for. PyMARE solves the same root to a few
+  # multiples of machine epsilon, so the reference has to as well.
+  ci <- if (case$method == "FE") {
+    NULL
+  } else {
+    suppressWarnings(try(confint(fit, control = list(tol = 1e-12, maxiter = 1000)), silent = TRUE))
+  }
+  tau2_ci <- if (is.null(ci) || inherits(ci, "try-error")) {
+    c(NA_real_, NA_real_)
+  } else {
+    c(ci$random["tau^2", "ci.lb"], ci$random["tau^2", "ci.ub"])
+  }
+
   lines <- c(
     lines,
     sprintf(
@@ -100,6 +132,18 @@ for (i in seq_len(nrow(cases))) {
     sprintf('     "pval": [%s],', vector_json(fit$pval)),
     sprintf('     "ci_lb": [%s],', vector_json(fit$ci.lb)),
     sprintf('     "ci_ub": [%s],', vector_json(fit$ci.ub)),
+    # Heterogeneity. QE and its p-value are the fixed-effects Q whatever
+    # `method` is, so they too are recorded per case to be checked rather than
+    # assumed. I2 and H2 are *not* method-independent: metafor reports the
+    # Q-based Higgins-Thompson pair only for method="FE" and "DL", and switches
+    # to tau^2 / (tau^2 + vt) for the others. PyMARE always reports the Q-based
+    # pair, so those are the two methods it can be compared on.
+    sprintf('     "QE": %s,', scalar_json(fit$QE)),
+    sprintf('     "QEp": %s,', scalar_json(fit$QEp)),
+    sprintf('     "I2": %s,', scalar_json(fit$I2)),
+    sprintf('     "H2": %s,', scalar_json(fit$H2)),
+    sprintf('     "tau2_ci_lb": %s,', scalar_json(tau2_ci[[1]])),
+    sprintf('     "tau2_ci_ub": %s,', scalar_json(tau2_ci[[2]])),
     sprintf(
       '     "dof": %s}%s',
       scalar_json(fit$ddf),

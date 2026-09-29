@@ -19,7 +19,7 @@ from typing import NamedTuple
 
 import numpy as np
 import scipy.stats as ss
-from scipy.optimize import Bounds, minimize
+from scipy.optimize import brentq
 from scipy.special import gammaln
 
 # At or below this many clusters, robust variance estimation is known to be
@@ -1515,6 +1515,27 @@ def _cr2_scores(X, w, resid, group_members, bread):
     above is the solution for :math:`\Phi = I` in the whitened metric, i.e.
     under the assumption that the weights are correct and the observations
     independent -- the same assumption the sandwich exists to avoid relying on.
+
+    That condition has many solutions, because it constrains :math:`A_j` only
+    through :math:`A_j B_j A_j'`. ``clubSandwich`` selects the symmetric one,
+    :math:`A_j = \Psi_j^{1/2} (\Psi_j^{1/2} B_j \Psi_j^{1/2})^{-1/2}
+    \Psi_j^{1/2}`; the form here is symmetric in the whitened metric instead,
+    and the two agree exactly when :math:`W_j` is a multiple of the identity --
+    that is, when the sampling variances are constant within the group. Both
+    satisfy the condition and both are exactly unbiased under the working model,
+    so the choice is not between a right and a wrong one.
+
+    It is made this way for the reason the next paragraph gives: in the whitened
+    metric :math:`I_j - H_j` is the identity minus a rank-:math:`p` term, so its
+    spectrum collapses to :math:`p` non-unit eigenvalues however large the group
+    is, and :func:`_cr2_low_rank_factors` can take the inverse square root in
+    :math:`p \times p` work. ``clubSandwich``'s matrix is
+    :math:`\Psi_j^2` minus a rank-:math:`p` term, whose diagonal part is not a
+    multiple of the identity, so it has :math:`n_j` distinct eigenvalues and
+    needs the full :math:`n_j \times n_j` eigendecomposition -- a factor of 400
+    more work at :math:`n_j = 200` and 5,900 at :math:`n_j = 800`. The square
+    root not commuting with an asymmetric congruence is at once why the two
+    forms differ and why only one of them factors.
     That is pragmatic rather than circular: simulation shows the correction
     helps substantially even when the working model is wrong
     :footcite:p:`tipton2015small,imbens2016robust`, and its influence fades as
@@ -1945,6 +1966,22 @@ def cluster_robust_cov(
         -   ``"CR2"`` (default) inflates each group's residuals by
             :math:`(I_j - H_j)^{-1/2}` to undo the shrinkage caused by fitting
             :math:`\beta` with that group included :footcite:p:`bell2002bias`.
+
+            .. note::
+
+                This is a CR2 in the defining sense -- it satisfies
+                :math:`A_j B_j A_j' = \Psi_j` exactly, and the resulting
+                sandwich is exactly unbiased for the model-based covariance
+                under the working model -- but it is not bit-for-bit
+                ``clubSandwich``'s ``CR2``. That condition does not pin
+                :math:`A_j` down uniquely: ``clubSandwich`` closes it by taking
+                :math:`A_j` symmetric, and this takes it symmetric in the
+                whitened metric instead. The two coincide exactly when the
+                weights are constant within a group, and differ otherwise --
+                by up to 1e-2 relative on the standard errors of the designs in
+                ``validation/clubsandwich``, which measures it. See
+                :func:`_cr2_scores` for why the whitened form is the one
+                implemented.
         -   ``"CR0"`` uses the raw residuals with the blunt ``m / (m - p)``
             scaling. This is the historical behaviour.
 
@@ -2291,6 +2328,76 @@ def ensure_2d(arr):
     return arr
 
 
+#: Doublings allowed when widening the bracket for a Q-profile bound. Q(tau^2)
+#: falls to zero as tau^2 grows, so a root exists whenever Q(0) exceeds the
+#: critical value and the search terminates long before this; it is a stop for
+#: the degenerate case of a zero critical value, which no root can reach.
+_Q_PROFILE_MAX_DOUBLINGS = 200
+
+#: Relative tolerance asked of the Q-profile root finder. Four times machine
+#: epsilon is the smallest :func:`scipy.optimize.brentq` accepts, which is what
+#: makes the bounds agree with metafor's ``confint.rma.uni`` to the last few
+#: bits rather than to the third decimal.
+_Q_PROFILE_RTOL = 4 * np.finfo(np.float64).eps
+
+
+def _invert_q(excess, crit, scale):
+    """Solve ``Q(tau^2) = crit`` for tau^2 >= 0.
+
+    Parameters
+    ----------
+    excess : callable
+        ``(tau2, crit) -> Q(tau2) - crit``.
+    crit : :obj:`float`
+        The chi-squared quantile being inverted.
+    scale : :obj:`float`
+        A point estimate of tau^2, used to size the first bracket tried.
+
+    Returns
+    -------
+    :obj:`float`
+        The root, ``0.0`` when ``Q(0) <= crit`` so that no positive root
+        exists, or :obj:`numpy.nan` when the bracket could not be widened far
+        enough to contain one.
+
+    Notes
+    -----
+    Solved as a root rather than as the minimum of ``(Q(tau^2) - crit)**2``,
+    which is what this function replaced. Squaring is what makes the difference:
+    it turns a transversal crossing into a tangential minimum, so the gradient
+    the minimizer follows vanishes as ``crit`` is approached and it stops while
+    still far from the root in the flat upper tail, where ``Q`` changes slowly.
+    The upper bound was wrong by up to 4% relative against
+    ``metafor::confint.rma.uni`` on the designs in
+    ``pymare/tests/data/metafor_small_sample.csv`` for that reason; it now
+    agrees to a few multiples of machine epsilon.
+
+    ``Q`` is monotonically decreasing in tau^2, but Brent's method needs only a
+    sign change over the bracket, so nothing here relies on that.
+    """
+    if excess(0.0, crit) <= 0:
+        # Q at tau^2 = 0 is already at or below the critical value, so the
+        # profile never crosses it. metafor reports the boundary here too.
+        return 0.0
+
+    # Q(tau^2) -> 0 as tau^2 -> infinity, since the weights approach a common
+    # 1 / tau^2 that scales the residual sum of squares away. So a root exists
+    # for any positive crit, and doubling finds it. What reaches the fallback
+    # below is a crit that is not a number at all: a saturated design has
+    # K - P = 0 degrees of freedom, `scipy.stats.chi2.ppf` returns NaN there,
+    # and every comparison against NaN is False, so the loop runs out. NaN
+    # bounds are the right answer for a design with no residual to profile.
+    upper = max(abs(scale), 1.0)
+    for _ in range(_Q_PROFILE_MAX_DOUBLINGS):
+        if excess(upper, crit) <= 0:
+            break
+        upper *= 2.0
+    else:
+        return np.nan
+
+    return brentq(excess, 0.0, upper, args=(crit,), rtol=_Q_PROFILE_RTOL, maxiter=200)
+
+
 def q_profile(y, v, X, alpha=0.05, groups=None):
     """Get the CI for tau^2 via the Q-Profile method.
 
@@ -2343,22 +2450,28 @@ def q_profile(y, v, X, alpha=0.05, groups=None):
     l_crit = ss.chi2.ppf(1 - alpha / 2, df)
     u_crit = ss.chi2.ppf(alpha / 2, df)
     args = (ensure_2d(y), ensure_2d(v), X)
-    bds = Bounds([0], [np.inf], keep_feasible=True)
 
-    # Use a point estimate of tau^2 as a starting point; when using a fixed
-    # value, minimize() sometimes fails to stay in bounds. It has to be the
-    # estimator that matches the Q being inverted, or the search can start on
-    # the wrong side of the upper root.
+    def excess(tau2, crit):
+        """Q(tau^2) - crit, the function whose root is a bound."""
+        return float(np.ravel(q_gen(*args, float(tau2), groups))[0]) - crit
+
+    # A scale for the bracket search, not a starting point: the root finder
+    # below needs an interval that contains the root, and the point estimate
+    # says what order of magnitude tau^2 lives at. It has to be the estimator
+    # that matches the Q being inverted, so that the first bracket tried is
+    # usually already wide enough.
     if groups is None:
         from .estimators import DerSimonianLaird
 
-        ub_start = 2 * DerSimonianLaird().fit(y, v, X).params_["tau2"]
+        scale = DerSimonianLaird().fit(y, v, X).params_["tau2"]
     else:
-        ub_start = 2 * correlated_effects_tau2(*args, groups)
+        scale = correlated_effects_tau2(*args, groups)
 
-    lb = minimize(lambda x: (q_gen(*args, x, groups) - l_crit) ** 2, [0], bounds=bds).x[0]
-    ub = minimize(lambda x: (q_gen(*args, x, groups) - u_crit) ** 2, ub_start, bounds=bds).x[0]
-    return {"ci_l": lb, "ci_u": ub}
+    scale = float(np.ravel(scale)[0])
+    return {
+        "ci_l": _invert_q(excess, l_crit, scale),
+        "ci_u": _invert_q(excess, u_crit, scale),
+    }
 
 
 #: Iterations allowed in the continued fraction of :func:`log_chi2_sf`. A safety

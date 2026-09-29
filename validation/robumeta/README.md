@@ -11,8 +11,7 @@ validation/robumeta/regenerate.sh
 ```
 
 That rewrites `pymare/tests/data/robumeta_reference.json` in place, from a Docker
-image with pinned R and robumeta versions. Unchanged numbers produce an
-unchanged file, so the diff is the answer:
+image with pinned R and robumeta versions:
 
 ```bash
 make check_robumeta_alignment
@@ -21,8 +20,23 @@ make check_robumeta_alignment
 robumeta is an R package and cannot be a test dependency, so the numbers are
 pinned rather than recomputed on every test run. What keeps a pinned file from
 becoming a stale one is the `Check robumeta alignment` workflow, which runs the
-script above on every pull request and fails on any difference. Rerun it and
+script above on every pull request and fails if the result moves. Rerun it and
 commit the result when you change the estimator on purpose.
+
+The comparison is numeric rather than a `git diff`, through
+`validation/compare_reference.py` -- shared with `validation/metafor` and
+`validation/clubsandwich`, which is why it lives one directory up. The numbers
+are written at full double precision and R reaches them through linear algebra
+whose last bits depend on which BLAS kernel its image picks for the CPU it runs
+on, so two runners with identical R and robumeta versions produce files that
+differ in the 16th digit.
+
+## What this check does *not* cover
+
+The CR2 residual adjustment in general. robumeta's working model has constant
+within-study weights by construction, and that is exactly the condition under
+which PyMARE's CR2 and `clubSandwich`'s coincide -- so this check cannot tell
+them apart. `validation/clubsandwich` is the one that can, and does not.
 
 ## What agrees
 

@@ -60,8 +60,13 @@ def load_metafor_reference():
     metafor is not a test dependency, so these numbers are pinned rather than
     recomputed on every run, in the same arrangement as
     :func:`load_robumeta_reference`. ``validation/metafor/regenerate.sh`` rewrites
-    the file from the pinned R image, and the ``Check metafor alignment`` workflow
-    runs that script on every pull request and fails if anything moved.
+    this file and the escalc and permutest references beside it from the pinned R
+    image, and the ``Check alignment with R packages`` workflow runs that script
+    on every pull request and fails if anything moved.
+
+    The escalc, permutest and clubSandwich references are read directly by the
+    test modules that use them rather than through a loader here, since none of
+    them is needed by a fixture.
     """
     with open(op.join(get_test_data_path(), "metafor_reference.json")) as fobj:
         return json.load(fobj)

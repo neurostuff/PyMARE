@@ -124,7 +124,12 @@ def test_convert_r_to_itself():
         esc.get_v_r()
     esc = OneSampleEffectSizeConverter(r=r, n=n)
     v_r = esc.get("V_R")
-    assert np.allclose(v_r, (1 - r**2) / (n - 2))
+    # The asymptotic sampling variance of a correlation, which is what
+    # escalc(measure="COR") reports; pinned against it in
+    # test_metafor_escalc.py. Earlier releases used (1 - r**2) / (n - 2), the
+    # squared standard error of r under the null of no correlation, which is a
+    # different quantity -- see that module.
+    assert np.allclose(v_r, (1 - r**2) ** 2 / (n - 1))
     ds = esc.to_dataset(measure="R")
     assert np.allclose(ds.y.ravel(), r)
     assert np.allclose(ds.v.ravel(), v_r)

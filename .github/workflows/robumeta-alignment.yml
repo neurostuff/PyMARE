@@ -1,5 +1,10 @@
 name: "Check robumeta alignment"
 
+# Separate from the "Check alignment with R packages" workflow, which covers
+# metafor and clubSandwich, only so that this job's check name does not change:
+# it predates that workflow and may be a required check on the repository. The
+# steps are the same ones, against the same shared comparator.
+
 on:
   push:
     branches:
@@ -54,11 +59,13 @@ jobs:
       # Compared numerically rather than with git diff: the values are written at
       # full double precision, and which BLAS kernel R's image picks depends on
       # the runner's CPU, so two runners disagree in the last bits with the R and
-      # robumeta versions identical. See the tolerances in compare_reference.py.
+      # robumeta versions identical. See the tolerances in
+      # validation/compare_reference.py, which the metafor and clubSandwich legs
+      # of the "Check alignment with R packages" workflow share.
       - name: "Require the reference values to still match robumeta"
         run: |
           git show HEAD:pymare/tests/data/robumeta_reference.json > "${RUNNER_TEMP}/pinned.json"
-          python validation/robumeta/compare_reference.py \
+          python validation/compare_reference.py \
               "${RUNNER_TEMP}/pinned.json" \
               pymare/tests/data/robumeta_reference.json \
               | tee -a "$GITHUB_STEP_SUMMARY"

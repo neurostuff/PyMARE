@@ -5,10 +5,10 @@
 #
 #     validation/robumeta/regenerate.sh
 #
-# Rewrites pymare/tests/data/robumeta_reference.json in place. If the file
-# changes, either robumeta or PyMARE's reference moved, and the diff says
-# which numbers. The alignment workflow runs this script and fails on a
-# non-empty diff, so CI and a local run cannot drift apart.
+# Rewrites pymare/tests/data/robumeta_reference.json in place. The alignment
+# workflow runs this script and then compares the result numerically against
+# the pinned file with validation/compare_reference.py, so CI and a local run
+# cannot drift apart.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

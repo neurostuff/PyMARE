@@ -150,8 +150,11 @@ def test_mrr_get_re_stats(results_2d):
     assert stats["tau^2"].shape == (1, 3)
     assert stats["ci_u"].shape == (3,)
     assert round(stats["tau^2"][0, 2], 4) == 7.7649
-    assert round(stats["ci_l"][2], 4) == 3.8076
-    assert round(stats["ci_u"][2], 2) == 59.61
+    assert round(stats["ci_l"][2], 8) == 3.80759937
+    # Pinned at eight decimals against metafor's confint.rma.uni, which is the
+    # same inversion; see test_stats.test_q_profile for why this used to be
+    # asserted only to two.
+    assert round(stats["ci_u"][2], 8) == 59.61602529
 
 
 def test_mrr_get_heterogeneity_stats(results_2d):
