@@ -820,9 +820,11 @@ class MetaRegressionResults:
             # estimator just reported, exactly as `fe_se` takes the observed
             # one from `fe_cov` -- including whatever small-sample correction
             # the estimator applies, which the observed statistic carries too.
+            # (P, P, n_perm) on every path this method can drive -- the
+            # closed-form estimators, the two likelihood ones, the sample
+            # size-based one and the cluster-robust branch all report a
+            # covariance per parallel dataset.
             perm_cov = np.asarray(params["inv_cov"])
-            if perm_cov.ndim == 2:
-                perm_cov = perm_cov[:, :, None]
             # A zero standard error divides to +-inf; the comparison below
             # still orders those correctly, and a NaN counts as not extreme.
             with np.errstate(invalid="ignore", divide="ignore"):

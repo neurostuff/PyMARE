@@ -2382,7 +2382,11 @@ def _invert_q(excess, crit, scale):
 
     # Q(tau^2) -> 0 as tau^2 -> infinity, since the weights approach a common
     # 1 / tau^2 that scales the residual sum of squares away. So a root exists
-    # for any positive crit, and doubling finds it.
+    # for any positive crit, and doubling finds it. What reaches the fallback
+    # below is a crit that is not a number at all: a saturated design has
+    # K - P = 0 degrees of freedom, `scipy.stats.chi2.ppf` returns NaN there,
+    # and every comparison against NaN is False, so the loop runs out. NaN
+    # bounds are the right answer for a design with no residual to profile.
     upper = max(abs(scale), 1.0)
     for _ in range(_Q_PROFILE_MAX_DOUBLINGS):
         if excess(upper, crit) <= 0:

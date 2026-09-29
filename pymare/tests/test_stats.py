@@ -215,6 +215,29 @@ def test_q_profile_inverts_q(vars_with_intercept):
         assert np.allclose(stats.q_gen(y, v, X, bounds[key]), crit, rtol=1e-12), key
 
 
+def test_q_profile_is_undefined_without_residual_dof():
+    """A saturated design has no residual to profile, so both bounds are NaN.
+
+    With ``K == P`` the degrees of freedom are zero and
+    :func:`scipy.stats.chi2.ppf` returns NaN for both critical values. Every
+    comparison against NaN is False, so the bracket search runs out and
+    :func:`pymare.stats._invert_q` falls back to NaN -- which is the right
+    answer rather than an accident: there is no dispersion left to bound.
+
+    Pinned because it is the one input that reaches that fallback, and because
+    a saturated design is where several of this module's neighbours have
+    returned ``inf`` from a quotient of rounding residues.
+    """
+    y = np.array([[-1.0, 0.5, 2.0]]).T
+    v = np.array([[1.0, 1.0, 1.5]]).T
+    X = np.array([np.ones(3), [1.0, 2.0, 4.0], [0.5, -1.0, 3.0]]).T
+    assert X.shape[0] == X.shape[1]
+
+    bounds = stats.q_profile(y, v, X, 0.05)
+    assert set(bounds.keys()) == {"ci_l", "ci_u"}
+    assert np.isnan(bounds["ci_l"]) and np.isnan(bounds["ci_u"]), bounds
+
+
 def test_q_profile_returns_zero_when_q_never_crosses():
     """A bound the profile cannot reach is reported as the boundary, not a root.
 
