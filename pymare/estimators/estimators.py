@@ -570,7 +570,9 @@ def _dersimonian_laird_tau2(y, v, X):
     Returns
     -------
     :obj:`numpy.ndarray` of shape (D,)
-        The tau^2 estimate per parallel dataset, floored at zero.
+        The tau^2 estimate per parallel dataset, floored at zero. Zero when the
+        design is saturated (``K <= P``), where there is no residual dispersion
+        to measure.
 
     Notes
     -----
@@ -584,6 +586,15 @@ def _dersimonian_laird_tau2(y, v, X):
 
     # Estimate initial betas with WLS, assuming tau^2=0
     beta_wls, model_cov = weighted_least_squares(y, v, X, return_cov=True)
+
+    if k <= p:
+        # A saturated design fits every observation exactly, so Q and A are both
+        # zero in exact arithmetic and the quotient below is one rounding
+        # residue over another -- 2.5e-31 / -8.9e-16 on one machine, and a
+        # positive numerator over an A that underflowed to zero on the next,
+        # which is +inf. There is no dispersion left to measure either way, so
+        # report none rather than let the residues decide.
+        return np.zeros(np.atleast_2d(y).shape[1])
 
     # Cochran's Q
     w = 1.0 / v
