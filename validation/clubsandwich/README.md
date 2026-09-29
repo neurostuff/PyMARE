@@ -111,18 +111,81 @@ A matrix square root does not commute with an asymmetric congruence, so the two
 are equal if and only if `W_j` is a multiple of the identity -- that is, when the
 weights, and hence the sampling variances, are constant within the cluster.
 
-PyMARE's form is the one Fisher & Tipton (2015, arXiv:1503.02220) give as
+## Why PyMARE keeps its form
+
+Neither implementation is approximating the other, and the difference is not a
+defect in either. Bell and McCaffrey define `A_j` by the condition that the
+adjusted residuals carry the working-model covariance,
+
+```
+A_j B_j A_j' = Psi_j
+```
+
+and **both forms satisfy it exactly** -- measured at 1.7e-15 (clubSandwich) and
+1.3e-15 (PyMARE) on the varying-variance column of this directory's grid.
+Feeding each through to the sandwich, both give `E[V_R] = (X'WX)^-1` to every
+digit under the working model, so both are *exactly unbiased* in the sense CR2
+exists to provide.
+
+The condition does not determine `A_j` uniquely: it constrains it only through
+`A_j B_j A_j'`. clubSandwich closes that freedom by requiring `A_j` symmetric;
+PyMARE's is symmetric in the whitened metric instead. On the same grid,
+`max |A - A'|` is 2.8e-17 for clubSandwich's and 9.1e-2 for PyMARE's. That is
+the entire difference between them.
+
+**What PyMARE's choice buys is an algorithm.** In the whitened metric the matrix
+whose inverse square root is needed is
+
+```
+W_j^(1/2) B_j W_j^(1/2) = I - X~_j M X~_j'
+```
+
+the identity minus a rank-`p` term, so its spectrum collapses to `p` non-unit
+eigenvalues *whatever the group size* and `pymare.stats._cr2_low_rank_factors`
+can take the inverse square root in `p x p` work. clubSandwich's matrix is
+`Psi_j^2` minus a rank-`p` term, and because that diagonal part is not a multiple
+of the identity its spectrum does not collapse -- measured on random designs with
+`p = 2`, PyMARE's matrix has 2 non-repeated eigenvalues at every group size while
+clubSandwich's has `n_j`:
+
+| group size | eigenvalues off the repeated one, PyMARE | clubSandwich |
+| --- | --- | --- |
+| 6 | 2 | 6 |
+| 40 | 2 | 40 |
+| 200 | 2 | 200 |
+
+So the symmetric form needs the full `n_j x n_j` eigendecomposition. Timed
+against the `p x p` one it replaces:
+
+| `n_j` | full `n_j x n_j` | `p x p` | ratio |
+| --- | --- | --- | --- |
+| 40 | 146 us | 7.7 us | 19x |
+| 200 | 3,108 us | 7.5 us | 416x |
+| 800 | 52,293 us | 8.9 us | 5,901x |
+
+The square root not commuting with an asymmetric congruence is at once why the
+two forms differ at all and why only one of them factors.
+
+PyMARE's form is also the one Fisher & Tipton (2015, arXiv:1503.02220) give as
 `A_j^C`, which `pymare.stats._cr2_scores` says in its docstring, and the
 correlated-effects model it belongs to has constant within-study weights by
-construction. So it is not wrong so much as answering a different question. But
-it is not clubSandwich's `CR2` once the variances vary inside a cluster, which is
-worth knowing given that `cluster_robust_cov`'s docstring says the `CRn` naming
-follows clubSandwich, and given that variances varying within a study is the
-common case in practice rather than the corner one.
+construction -- which is why `validation/robumeta` cannot tell the two apart.
 
-Deciding which form `method="CR2"` should mean is a question for PyMARE's
-maintainers, not something these tests settle. What they do is make the choice
-visible and keep it from changing by accident.
+### What is genuinely against it
+
+The published small-sample simulation evidence (Tipton 2015; Imbens & Kolesar
+2016; Pustejovsky & Tipton 2018) is for the symmetric form. Exact unbiasedness
+holds for both *under the working model*; how the two behave when that model is
+wrong is studied for one of them and not the other. A user comparing against
+`clubSandwich` or `metafor::robust(..., clubSandwich = TRUE)` will see different
+standard errors whenever sampling variances vary inside a cluster, which is the
+common case rather than the corner one.
+
+`method="CR2"` is kept, because it is a CR2 by the defining condition and
+because of the complexity argument above. What was missing was saying so: the
+`method` parameter and `_cr2_scores` now both record that this is the
+whitened-metric solution, that it coincides with clubSandwich exactly when
+within-cluster weights are constant, and that it differs otherwise.
 
 ## What is not compared
 

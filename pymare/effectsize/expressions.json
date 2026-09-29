@@ -40,7 +40,7 @@
         "description": "Raw correlation coefficient"
     },
     {
-        "expression": "v_r - (1 - r**2) / (n - 2)",
+        "expression": "v_r - (1 - r**2)**2 / (n - 1)",
         "type": 1,
         "description": "Variance of raw correlation coefficient"
     },

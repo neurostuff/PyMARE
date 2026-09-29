@@ -110,6 +110,58 @@ general. PyMARE now subtracts the trace form and the two agree to 1.9e-15 across
 all twelve design-by-model cells.
 | `ML` on `extreme_k10` with one moderator | 0 vs 0.011 | The two searches land on opposite sides of the tau^2 = 0 boundary, where a profile likelihood is flattest because the weights are most unequal. metafor is the one that stops at zero. A previous version of this README had the direction backwards. |
 
+## Why PyMARE keeps its form
+
+Both remaining divergences are deliberate, and both have an argument behind them
+worth writing down so the next person does not have to rediscover it.
+
+### `I^2` and `H`
+
+Two reasons to stay Q-based.
+
+**It is the definition PyMARE cites.** Higgins & Thompson (2002), the reference
+in `get_heterogeneity_stats`' docstring, define `I^2 = (Q - df)/Q` and
+`H^2 = Q/df`. That is what PyMARE computes. metafor's `tau^2 / (tau^2 + v_t)` is
+a defensible generalization -- it extends to models where Q is not the right
+summary, such as `rma.mv` -- but it is not the cited definition.
+
+**Estimator-independence is a feature.** metafor's form makes `I^2` a function of
+which tau^2 estimator was asked for. On `unequal_k5`, intercept-only, one dataset
+and one Q, metafor reports:
+
+| method | FE | DL | HE | ML | REML |
+| --- | --- | --- | --- | --- | --- |
+| metafor `I^2` | 80.31 | 80.31 | 98.92 | 50.54 | 97.77 |
+| PyMARE `I^2` | 80.31 | 80.31 | 80.31 | 80.31 | 80.31 |
+
+`I^2` between 50% and 99% for the same data, depending on a nuisance-parameter
+estimator. For a descriptive statistic that gets quoted in abstracts and compared
+across papers, invariance to that choice is worth having. It also keeps PyMARE's
+heterogeneity block internally coherent: `Q`, `p(Q)`, `I^2` and `H` all describe
+the same statistic, where mixing a Q-based p-value with a tau^2-based `I^2` would
+not. And the two coincide for `FE` and `DL`, so with the common default most
+users never see a difference.
+
+### The `ML` and `REML` search tolerance
+
+**The gap is negligible against what is being estimated.** 2.7e-5 relative on
+tau^2, when the Q-profile interval for tau^2 on `unequal_k5` runs from 0.37 to
+62.6 -- a factor of 167. Tightening chases the fifth decimal place of a quantity
+known to within two orders of magnitude.
+
+**And it is not free.** `bounded_scalar_min` exists because PyMARE fits many
+datasets at once: it costs "a few dozen vectorized evaluations of `f` no matter
+how many datasets there are, where a per-dataset `scipy.optimize.minimize` costs
+a Python-level optimization each". For the voxelwise workload that is 10^5 to
+10^6 datasets in one call, so extra iterations multiply through the whole
+analysis.
+
+It is also not a disagreement so much as two stopping rules: tightening PyMARE's
+would not produce exact agreement, because metafor has its own tolerance. And it
+would not touch the `extreme_k10` boundary cell, where the likelihood is flat
+near zero and the two answers differ in tau^2 while barely differing in the
+objective.
+
 ## What is compared
 
 180 cases, the full grid of design x model x tau^2 estimator x `test`.
@@ -178,9 +230,9 @@ Exact, to 1e-13:
 | PyMARE | `escalc` measure | Compared |
 | --- | --- | --- |
 | `RM` | `MN` | estimate and variance |
-| `R` | `COR` | estimate |
+| `R` | `COR` | estimate and variance |
 | `ZR` | `ZCOR` | estimate and variance |
-| `RMD` | `MD` | estimate |
+| `RMD` | `MD` | estimate and variance |
 | `sdp` | the pooled SD `escalc` divides by, recovered as `MD$yi / (SMD$yi / c(m))` | value |
 
 ## The same quantity, one side approximated
@@ -192,6 +244,26 @@ actual second order, measured at `0.043 / m**2` over the grid, worst 2.7e-3 at
 `m = 4` and 2.0e-7 at `m = 398`. A first-order error would break that bound.
 This covers the `SM` and `SMD` estimates and the factor itself.
 
+PyMARE keeps the approximation rather than adopting the exact factor, and not
+only because 2.7e-3 at `m = 4` is negligible beside the sampling error of `g`
+itself (`SE(g)` is about 0.5 there, so the correction error is a thousandth of
+it). The converters are a *symbolic* system: `solve_system` inverts the
+expression set for whichever variable the caller did not supply. Substituting
+the exact factor and asking for each direction:
+
+```
+forward  (m, sd, n -> SM):  works, and matches metafor exactly (1.47690327)
+reverse  (sm, d -> n):
+    1 - 3/(4m - 1)  ->  n = 49.958
+    exact c(m)      ->  NotImplementedError: could not solve
+                        -sqrt(2)*gamma(n/2 - 1/2) + _sm*sqrt(n - 1)*gamma(n/2 - 1)/_d
+```
+
+sympy cannot invert a ratio of gamma functions, so the exact factor would buy
+exact agreement on the forward path at the cost of the bidirectional solving the
+module is built around. The approximation is Hedges' own, which is also what
+`hedges2014statistical` -- the reference the estimator cites -- uses.
+
 metafor has no single-group standardized mean, so `SM`'s reference is
 `escalc(measure = "SMCC")` with the second measurement set to zero and
 uncorrelated with the first. SMCC's change-score SD is then `sd1` and its
@@ -201,25 +273,43 @@ approximation. The header of `run_escalc.R` spells this out.
 
 ## Different formulas for the same thing
 
-Two, neither of which can be verified against the other. Each is recorded by a
-test asserting which formula each side uses, so the divergence cannot change
-shape unnoticed:
+One, and it is the one case in this directory where PyMARE's expression is the
+*better* quantity rather than the divergent one.
 
-| Quantity | metafor | PyMARE |
-| --- | --- | --- |
-| raw correlation variance | `(1 - r**2)**2 / (n - 1)`, the asymptotic sampling variance | `(1 - r**2) / (n - 2)`, the squared standard error under the null of no correlation. 51x apart at `r = 0.99` |
-| single-group standardized-mean variances | `1/n + y**2 / (2n)`, the large-sample approximation | the exact noncentral-t expressions, which are the better quantity. 2.5x apart at `n = 5` |
+metafor's single-group standardized-mean variances are the large-sample
+`1/n + y**2 / (2n)`. PyMARE's are the exact noncentral-t expressions, which is
+why they cannot be verified against metafor: the two are 2.5x apart at `n = 5`,
+where the approximation is poor, and converge as `n` grows. So
+`test_standardized_mean_variance_is_the_same_order_as_metafor` bounds by a
+factor of four rather than a tolerance, and
+`test_standardized_mean_variances_are_exact_not_asymptotic` pins metafor's side
+of the statement exactly so the factor is known to be spanning the asymptotic
+formula and not something else a future release might report.
 
-The second is why `test_standardized_mean_variance_is_the_same_order_as_metafor`
-bounds by a factor of four rather than a tolerance.
+The raw correlation variance used to be a second row here, PyMARE reporting
+`(1 - r**2) / (n - 2)` against metafor's `(1 - r**2)**2 / (n - 1)`. That one was
+not a defensible divergence: PyMARE's is the squared standard error of `r` under
+the null hypothesis of *no* correlation, not its sampling variance at the
+observed value. The tempting defence -- that it is conservative, being larger by
+`(n - 1) / ((n - 2)(1 - r**2))` -- does not survive contact with what a
+meta-analysis does with a variance. The inflation factor depends on the data, so
+the expression did not merely widen intervals: it reweighted studies against one
+another, down-weighting those with strong correlations (51x at `r = 0.99`) and
+pulling the pooled estimate toward the weak ones. PyMARE now reports the
+asymptotic sampling variance and matches `escalc(measure = "COR")` exactly.
+
+`ZR` remains the measure to prefer for pooling correlations, and always agreed
+with metafor on both the estimate and the variance.
 
 ## What this check found
 
-Four defects in `pymare/effectsize/expressions.json`, all of the same kind: a
-missing pair of parentheses changing what the expression solves to. One is the
-two-sample Cohen's d that
-[PR #144](https://github.com/neurostuff/PyMARE/pull/144) fixed; the other three
-were found by this check and are fixed here.
+Five defective expressions in `pymare/effectsize/expressions.json`, all now
+fixed. Four are the same kind of mistake -- a missing pair of parentheses
+changing what the expression solves to -- of which one is the two-sample Cohen's
+d that [PR #144](https://github.com/neurostuff/PyMARE/pull/144) fixed and the
+other three were found here. The fifth, the raw correlation variance, was a
+different kind: a correct formula for the wrong quantity, described under
+"Different formulas for the same thing" above.
 
 | Expression | Read | Solved to | Should be | Effect |
 | --- | --- | --- | --- | --- |

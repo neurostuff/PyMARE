@@ -1515,6 +1515,27 @@ def _cr2_scores(X, w, resid, group_members, bread):
     above is the solution for :math:`\Phi = I` in the whitened metric, i.e.
     under the assumption that the weights are correct and the observations
     independent -- the same assumption the sandwich exists to avoid relying on.
+
+    That condition has many solutions, because it constrains :math:`A_j` only
+    through :math:`A_j B_j A_j'`. ``clubSandwich`` selects the symmetric one,
+    :math:`A_j = \Psi_j^{1/2} (\Psi_j^{1/2} B_j \Psi_j^{1/2})^{-1/2}
+    \Psi_j^{1/2}`; the form here is symmetric in the whitened metric instead,
+    and the two agree exactly when :math:`W_j` is a multiple of the identity --
+    that is, when the sampling variances are constant within the group. Both
+    satisfy the condition and both are exactly unbiased under the working model,
+    so the choice is not between a right and a wrong one.
+
+    It is made this way for the reason the next paragraph gives: in the whitened
+    metric :math:`I_j - H_j` is the identity minus a rank-:math:`p` term, so its
+    spectrum collapses to :math:`p` non-unit eigenvalues however large the group
+    is, and :func:`_cr2_low_rank_factors` can take the inverse square root in
+    :math:`p \times p` work. ``clubSandwich``'s matrix is
+    :math:`\Psi_j^2` minus a rank-:math:`p` term, whose diagonal part is not a
+    multiple of the identity, so it has :math:`n_j` distinct eigenvalues and
+    needs the full :math:`n_j \times n_j` eigendecomposition -- a factor of 400
+    more work at :math:`n_j = 200` and 5,900 at :math:`n_j = 800`. The square
+    root not commuting with an asymmetric congruence is at once why the two
+    forms differ and why only one of them factors.
     That is pragmatic rather than circular: simulation shows the correction
     helps substantially even when the working model is wrong
     :footcite:p:`tipton2015small,imbens2016robust`, and its influence fades as
@@ -1945,6 +1966,22 @@ def cluster_robust_cov(
         -   ``"CR2"`` (default) inflates each group's residuals by
             :math:`(I_j - H_j)^{-1/2}` to undo the shrinkage caused by fitting
             :math:`\beta` with that group included :footcite:p:`bell2002bias`.
+
+            .. note::
+
+                This is a CR2 in the defining sense -- it satisfies
+                :math:`A_j B_j A_j' = \Psi_j` exactly, and the resulting
+                sandwich is exactly unbiased for the model-based covariance
+                under the working model -- but it is not bit-for-bit
+                ``clubSandwich``'s ``CR2``. That condition does not pin
+                :math:`A_j` down uniquely: ``clubSandwich`` closes it by taking
+                :math:`A_j` symmetric, and this takes it symmetric in the
+                whitened metric instead. The two coincide exactly when the
+                weights are constant within a group, and differ otherwise --
+                by up to 1e-2 relative on the standard errors of the designs in
+                ``validation/clubsandwich``, which measures it. See
+                :func:`_cr2_scores` for why the whitened form is the one
+                implemented.
         -   ``"CR0"`` uses the raw residuals with the blunt ``m / (m - p)``
             scaling. This is the historical behaviour.
 

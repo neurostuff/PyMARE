@@ -250,6 +250,19 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
     summaries, and are _not_ individual data points. E.g., do not pass in
     a vector of point estimates as `m` and a scalar for the SDs `sd`.
     The lengths of all inputs must match.
+
+    .. versionchanged:: 0.0.13
+
+        The sampling variance of a raw correlation (``'R'``) is now
+        ``(1 - r**2)**2 / (n - 1)``, matching ``metafor::escalc(measure="COR")``.
+        It was ``(1 - r**2) / (n - 2)``, which is the squared standard error of
+        ``r`` under the null hypothesis of *no* correlation rather than its
+        sampling variance at the observed value. The two agree near ``r = 0``
+        and diverge by a factor of ``(n - 1) / ((n - 2)(1 - r**2))`` -- 51x at
+        ``r = 0.99``. Since that factor depends on the data, the old expression
+        did not simply inflate variances: it reweighted studies against one
+        another, pulling a pooled estimate toward those with the weakest
+        correlations. ``'ZR'`` is unaffected and remains the measure to prefer.
     """
 
     _type = 1
@@ -272,7 +285,12 @@ class OneSampleEffectSizeConverter(EffectSizeConverter):
                     a bias correction applied.
                 - 'D': Cohen's d. Note that no bias correction is applied
                     (use 'SM' instead).
-                - 'R': Raw correlation coefficient.
+                - 'R': Raw correlation coefficient. Prefer 'ZR' for
+                    meta-analysis: the sampling variance of a raw correlation
+                    depends strongly on the correlation itself, so studies are
+                    weighted very unequally by how large their correlations
+                    happen to be, which is the problem the Fisher transform
+                    exists to remove.
                 - 'ZR': Fisher z-transformed correlation coefficient.
         **kwargs
             Optional keyword arguments to pass onto the Dataset

@@ -19,13 +19,13 @@ assert the error stays under :data:`BIAS_CORRECTION_BOUND` divided by ``m**2``,
 which is a statement about the approximation and not about either
 implementation's current output.
 
-**Different formulas for the same thing.** metafor takes the sampling variance of
-a correlation to be ``(1 - r**2)**2 / (n - 1)`` and PyMARE takes it to be
-``(1 - r**2) / (n - 2)``; metafor's standardized-mean variances are large-sample
-approximations where PyMARE's are the exact noncentral-t expressions. These
-cannot be verified against each other, so
-:func:`test_raw_correlation_variance_is_a_different_formula` and
-``validation/metafor/README.md`` record what each one is instead.
+**Different formulas for the same thing.** metafor's single-group
+standardized-mean variances are large-sample approximations where PyMARE's are
+the exact noncentral-t expressions, which is the better quantity but not the same
+one. They cannot be verified against each other, so
+:func:`test_standardized_mean_variances_are_exact_not_asymptotic` pins metafor's
+side of the statement and a factor bound spans the two.
+``validation/metafor/README.md`` records the reasoning.
 
 Four of these comparisons were strict xfails when this module was written,
 because measuring them turned up defects rather than divergences: four
@@ -179,14 +179,30 @@ def test_raw_mean_matches_metafor(one_sample):
     assert_exact(v, expected("MN", "vi"), "RM variance")
 
 
-def test_raw_correlation_matches_metafor(correlations):
-    """``R``'s estimate must be ``escalc(measure="COR")``'s.
+def test_raw_correlation_matches_metafor(correlations, escalc_inputs):
+    """``R`` must be ``escalc(measure="COR")``, estimate and variance alike.
 
-    The estimate only. The two variances are different formulas, which
-    :func:`test_raw_correlation_variance_is_a_different_formula` records.
+    The variance is the asymptotic sampling variance of a correlation,
+    ``(1 - r**2)**2 / (n - 1)``, on both sides.
+
+    .. note::
+
+        PyMARE used to report ``(1 - r**2) / (n - 2)`` here, which is the squared
+        standard error of ``r`` under the null hypothesis of *no* correlation
+        rather than its sampling variance at the observed value. The two agree
+        near ``r = 0`` and diverge as ``|r|`` approaches one -- by a factor of
+        ``(n - 1) / ((n - 2)(1 - r**2))``, which is 51x at ``r = 0.99``. Because
+        that factor depends on the data, the old expression did not merely
+        inflate variances but reweighted studies against each other, pulling a
+        pooled estimate toward the ones with the weakest correlations.
     """
-    y, _ = measure(correlations, "R")
+    y, v = measure(correlations, "R")
     assert_exact(y, expected("COR", "yi"), "R estimate")
+    assert_exact(v, expected("COR", "vi"), "R variance")
+
+    r = escalc_inputs["r"].to_numpy()
+    n = escalc_inputs["n"].to_numpy()
+    assert np.allclose(v, (1 - r**2) ** 2 / (n - 1), rtol=RTOL_EXACT)
 
 
 def test_fisher_z_correlation_matches_metafor(correlations):
@@ -293,28 +309,6 @@ def test_standardized_mean_difference_matches_metafor(two_sample, escalc_inputs)
 # -----------------------------------------------------------------------------
 # Different formulas for the same thing, recorded rather than compared.
 # -----------------------------------------------------------------------------
-
-
-def test_raw_correlation_variance_is_a_different_formula(correlations, escalc_inputs):
-    """Record that ``R``'s variance is not metafor's, and which is which.
-
-    metafor uses the asymptotic sampling variance of a correlation,
-    ``(1 - r**2)**2 / (n - 1)``. PyMARE uses ``(1 - r**2) / (n - 2)``, which is
-    the squared standard error of ``r`` under the null hypothesis of no
-    correlation rather than its sampling variance at the observed value. The two
-    diverge without limit as ``|r|`` approaches one -- 51x apart at ``r = 0.99``
-    on this grid -- so no tolerance relates them.
-
-    This asserts that each side is the formula named above and nothing more. It
-    exists so that the divergence cannot quietly change shape: if either
-    expression were replaced, this test would say so rather than a tolerance
-    somewhere else drifting.
-    """
-    _, v = measure(correlations, "R")
-    r = escalc_inputs["r"].to_numpy()
-    n = escalc_inputs["n"].to_numpy()
-    assert np.allclose(v, (1 - r**2) / (n - 2), rtol=RTOL_EXACT)
-    assert np.allclose(expected("COR", "vi"), (1 - r**2) ** 2 / (n - 1), rtol=RTOL_EXACT)
 
 
 def test_standardized_mean_variances_are_exact_not_asymptotic(one_sample, escalc_inputs):
