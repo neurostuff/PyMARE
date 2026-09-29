@@ -709,6 +709,36 @@ def test_weighted_least_squares_defaults_to_no_correction(dataset):
 
 
 @pytest.mark.parametrize("n_estimates", [2, 3], ids=["K<P", "K==P"])
+def test_tau2_is_finite_without_residual_dof(variance_estimator, n_estimates):
+    """A saturated design must give a finite tau^2, not inf or NaN.
+
+    Both are reachable by rounding rather than by arithmetic, which is what
+    makes this worth its own test: with ``K == P`` every leverage is one to
+    within 1e-16, so the residual sum of squares and the term subtracted from it
+    are both zero up to that noise. Dividing by ``K - P`` then lets the sign of
+    the noise decide whether tau^2 comes back ``+inf``, ``-inf`` or ``NaN``, and
+    which of those a given machine produces depends on its BLAS. An earlier
+    version of :class:`~pymare.estimators.Hedges` did exactly that and passed
+    locally while failing on every CI runner.
+
+    Asserting finiteness rather than a particular value keeps this a statement
+    about determinism, which is the property that was missing.
+    """
+    rng = np.random.RandomState(4)
+    y = rng.randn(n_estimates, 1)
+    v = np.abs(rng.randn(n_estimates, 1)) + 0.5
+    X = rng.randn(n_estimates, 2)
+    dataset = Dataset(y=y, v=v, X=X, add_intercept=True)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        tau2 = variance_estimator().fit_dataset(dataset).summary().tau2
+
+    assert np.all(np.isfinite(tau2)), tau2
+    assert np.all(tau2 >= 0), tau2
+
+
+@pytest.mark.parametrize("n_estimates", [2, 3], ids=["K<P", "K==P"])
 def test_estimator_warns_and_falls_back_without_residual_dof(variance_estimator, n_estimates):
     """A design with no residual degrees of freedom cannot be adjusted.
 

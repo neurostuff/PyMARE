@@ -1226,22 +1226,37 @@ class Hedges(BaseEstimator):
         # feeds the variance component only; the coefficients are refitted with
         # inverse-variance weights below.
         tau_beta = weighted_least_squares(tau_y, np.ones_like(tau_y), tau_X)
-        mse = ((tau_y - tau_X.dot(tau_beta)) ** 2).sum(0) / (tau_k - tau_p)
+        residual_ss = ((tau_y - tau_X.dot(tau_beta)) ** 2).sum(0)
 
-        # What that unweighted mean squared error is expected to be when tau^2
-        # is zero, which is what has to be subtracted off. With P the OLS
-        # residual maker I - X (X'X)^-1 X' and V = diag(v), it is
-        # tr(PV) / (K - P) -- and since only P's diagonal is needed, that is
-        # sum_i (1 - h_i) v_i / (K - P) for the OLS leverages h_i.
+        # What that residual sum of squares is expected to be when tau^2 is
+        # zero, which is what has to be subtracted off. With P the OLS residual
+        # maker I - X (X'X)^-1 X' and V = diag(v), it is tr(PV) -- and since
+        # only P's diagonal is needed, that is sum_i (1 - h_i) v_i for the OLS
+        # leverages h_i.
         #
-        # Not the mean sampling variance sum(v) / K, which is the same quantity
-        # only when the intercept is the only predictor: P is then I - J/K, every
-        # h_i is 1/K, and the sum collapses to sum(v) (K - 1) / K / (K - 1). With
-        # a moderator the two part company, and using the intercept-only form
-        # put tau^2 out by up to 0.14 relative against metafor's HE.
+        # Not the mean sampling variance sum(v) / K, which is tr(PV) / (K - P)
+        # only when the intercept is the only predictor: P is then I - J/K,
+        # every h_i is 1/K, and the sum collapses to sum(v) (K - 1) / K. With a
+        # moderator the two part company, and using the intercept-only form put
+        # tau^2 out by up to 0.14 relative against metafor's HE.
         leverage = np.einsum("ij,jk,ik->i", tau_X, np.linalg.pinv(tau_X.T @ tau_X), tau_X)
-        expected_mse = ((1.0 - leverage)[:, None] * tau_v).sum(0) / (tau_k - tau_p)
-        tau_ho = np.maximum(0, mse - expected_mse)
+        expected_ss = ((1.0 - leverage)[:, None] * tau_v).sum(0)
+
+        residual_dof = tau_k - tau_p
+        if residual_dof > 0:
+            # One division rather than two, which is also how metafor writes it.
+            tau_ho = np.maximum(0, (residual_ss - expected_ss) / residual_dof)
+        else:
+            # A saturated design fits every observation exactly, so there is no
+            # residual left to measure dispersion with and both terms above are
+            # zero to rounding. Dividing anyway lets the sign of that rounding
+            # decide the answer: the leverages come back as 1 +- 1e-16, so
+            # expected_ss lands either side of zero and tau^2 comes out +inf on
+            # one machine and NaN on the next, which is how this reached CI.
+            # Report no excess dispersion instead, which is what
+            # DerSimonianLaird and the likelihood estimators already do here,
+            # and what this estimator already did for K < P.
+            tau_ho = np.zeros_like(residual_ss)
 
         # Estimate beta with tau^2 estimate. The covariance has to come from
         # this fit rather than the OLS one above: (X'WX)^-1 is only the
